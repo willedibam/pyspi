@@ -3,7 +3,7 @@ from scipy.stats import zscore
 import warnings
 import pandas as pd
 import os
-import yaml 
+import yaml
 from colorama import Fore, init
 init(autoreset=True)
 
@@ -44,20 +44,31 @@ def strshort(instr,mlength):
         outstr = (instr[:mlength-6] + '...' + instr[-3:]) if len(instr) > mlength else instr
     return outstr
 
-def acf(x,mode='positive'):
-    """Return the autocorrelation function
+def acf(x, mode='positive'):
+    """Return the autocorrelation function using FFT-based computation.
+
+    O(N log N) via FFT, replacing the original O(N^2) np.correlate approach.
     """
     if x.ndim > 1:
         x = np.squeeze(x)
 
-    x = zscore(x)
-    acf = np.correlate(x,x,mode='full')
-    acf = acf / acf[acf.size//2]
+    x = x - x.mean()
+    s = x.std()
+    if s == 0:
+        n = len(x)
+        return np.zeros(n) if mode == 'positive' else np.zeros(2 * n - 1)
+    x = x / s
+
+    n = len(x)
+    fft_size = 2 * n
+    X = np.fft.rfft(x, n=fft_size)
+    acf_full = np.fft.irfft(X * np.conj(X), n=fft_size)[:n]
+    acf_full = acf_full / acf_full[0]  # normalize so acf[0] = 1
 
     if mode == 'positive':
-        return acf[acf.size//2:]
-    else:
-        return acf
+        return acf_full
+    # full symmetric ACF
+    return np.concatenate([acf_full[::-1], acf_full[1:]])
 
 def swap_chars(s, i_1, i_2):
     """Swap to characters in a string.
@@ -139,8 +150,8 @@ def filter_spis(keywords, output_name = None, configfile= None):
 
     Args:
         keywords (list): A list of keywords (as strings) to filter the YAML.
-        output_name (str, optional): The desired name for the output file. Defaults to a random name. 
-        configfile (str, optional): The path to the input YAML file. Defaults to the `config.yaml' in the pyspi dir. 
+        output_name (str, optional): The desired name for the output file. Defaults to a random name.
+        configfile (str, optional): The path to the input YAML file. Defaults to the `config.yaml' in the pyspi dir.
 
     Raises:
         ValueError: If `keywords` is not a list or if no SPIs match the keywords.
@@ -179,7 +190,7 @@ def filter_spis(keywords, output_name = None, configfile= None):
     # new dictionary to be converted to final YAML
     filtered_subset = {}
     spis_found = 0
-    
+
     for module in yf:
         module_spis = {}
         for spi in yf[module]:
@@ -190,21 +201,21 @@ def filter_spis(keywords, output_name = None, configfile= None):
                     spis_found += len(yf[module][spi].get('configs'))
                 else:
                     spis_found += 1
-    
+
         if module_spis:
             filtered_subset[module] = module_spis
-    
+
     # check that > 0 SPIs found
     if spis_found == 0:
         raise ValueError(f"0 SPIs were found with the specific keywords: {keywords}.")
-    
+
     # construct output file path
     if output_name is None:
         # use a unique name
         output_name = "config_" + os.urandom(4).hex()
 
     output_file = os.path.join(os.getcwd(), f"{output_name}.yaml")
-    
+
     # write to YAML
     with open(output_file, "w") as outfile:
         yaml.dump(filtered_subset, outfile, default_flow_style=False, sort_keys=False)
@@ -221,7 +232,7 @@ def filter_spis(keywords, output_name = None, configfile= None):
 
 def inspect_calc_results(calc):
     """
-    Display a summary of the computed SPI results, including counts of successful computations, 
+    Display a summary of the computed SPI results, including counts of successful computations,
     outputs with NaNs, and partially computed results.
     """
     total_num_spis = calc.n_spis
@@ -236,7 +247,7 @@ def inspect_calc_results(calc):
         else:
             # returned numeric values (i.e., not NaN)
             spi_results['Successful'].append(key)
-    
+
     # print summary
     double_line_60 = "="*60
     single_line_60 = "-"*60
@@ -265,4 +276,3 @@ def inspect_calc_results(calc):
         for i, spi in enumerate(spi_results['Partial NaNs']):
             print(f"{i+1}. {spi}")
         print(single_line_60 + "\n")
-    

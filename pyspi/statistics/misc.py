@@ -1,6 +1,6 @@
 import warnings
-import numpy as np
 import inspect
+import numpy as np
 
 from statsmodels.tsa import stattools
 from statsmodels.tsa.vector_ar.vecm import coint_johansen
@@ -111,14 +111,15 @@ class LinearModel(Directed, Unsigned):
     def __init__(self, model):
         self.identifier += f"_{model}"
         self._model = getattr(linear_model, model)
+        # Cache whether model accepts random_state (avoids inspect.signature per pair)
+        self._has_random_state = "random_state" in inspect.signature(self._model).parameters
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
         z = data.to_numpy()
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            model_params = inspect.signature(self._model).parameters
-            if "random_state" in model_params:
+            if self._has_random_state:
                 mdl = self._model(random_state=42).fit(z[i], np.ravel(z[j]))
             else:
                 mdl = self._model().fit(z[i], np.ravel(z[j]))
@@ -195,7 +196,6 @@ class InterDependenceScore(Undirected, Unsigned):
     def multivariate(self, data):
         # reshape for the compute_IDS function which expects shape (obs, proc)
         z = np.squeeze(data.to_numpy(), axis=2).T
-        ids = compute_IDS(z, num_terms=self._num_terms, p_norm=self._p_norm, 
+        ids = compute_IDS(z, num_terms=self._num_terms, p_norm=self._p_norm,
                            bandwidth_term=self._bandwidth_term)
         return ids
-    

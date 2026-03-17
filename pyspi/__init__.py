@@ -1,17 +1,12 @@
-# For some reason the JVM causes a segfault with OpenBLAS (numpy's linalg sovler). Need to halt multithreading before starting JVM:
+# JVM + OpenBLAS segfault prevention:
+# OpenBLAS multi-threading conflicts with JPype's JVM. Set OMP_NUM_THREADS=1
+# to force single-threaded BLAS in the main process. Forked worker processes
+# that don't touch JVM can restore multi-threading via threadpoolctl.
 import os, logging, sys
+import numpy as np
 
 os.environ['OMP_NUM_THREADS'] = '1'
 
-# formatter = logging.Formatter('[%(levelname)s: %(asctime)s]: %(message)s')
-
-# ch = logging.StreamHandler()
-# ch.setFormatter(formatter)
-# ch.setLevel(logging.DEBUG)
-
-# logger = logging.getLogger()
-# logger.addHandler(ch)
-# logger.setLevel(logging.INFO)
-
-# logging.captureWarnings(True)
-# logging.basicConfig(stream=, level=logging.INFO)
+# NumPy 2 removed np.NaN; some legacy code paths still reference it.
+if not hasattr(np, "NaN"):
+    np.NaN = np.nan

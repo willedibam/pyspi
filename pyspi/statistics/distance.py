@@ -1,3 +1,5 @@
+import os
+import warnings
 import numpy as np
 from sklearn.metrics import pairwise_distances
 import tslearn.metrics
@@ -23,6 +25,24 @@ from pyspi.base import (
     parse_bivariate,
     parse_multivariate,
 )
+
+
+# ---------------------------------------------------------------------------
+# DTW Sakoe-Chiba auto-radius configuration (env-var tunable)
+# ---------------------------------------------------------------------------
+_DTW_SAKOE_LINEAR_FRAC = float(os.getenv("PYSPI_DTW_SAKOE_LINEAR_FRAC", "0.10"))
+_DTW_SAKOE_SQRT_COEFF = float(os.getenv("PYSPI_DTW_SAKOE_SQRT_COEFF", "1.5"))
+_DTW_SAKOE_MIN_RADIUS = int(os.getenv("PYSPI_DTW_SAKOE_MIN_RADIUS", "10"))
+
+
+def _auto_sakoe_radius(length):
+    if length <= 1:
+        return 1
+    linear = int(np.ceil(max(0.0, _DTW_SAKOE_LINEAR_FRAC) * length))
+    sqrt_scaled = int(np.ceil(max(0.0, _DTW_SAKOE_SQRT_COEFF) * np.sqrt(length)))
+    radius = min(linear, sqrt_scaled)
+    radius = max(1, _DTW_SAKOE_MIN_RADIUS, radius)
+    return min(radius, length - 1)
 
 
 class PairwiseDistance(Undirected, Unsigned):
@@ -178,13 +198,160 @@ class TimeWarping(Undirected, Unsigned):
 
 
 class DynamicTimeWarping(TimeWarping):
+    """DTW with optional dtaidistance C backend and Sakoe-Chiba band constraint.
+
+    Falls back to tslearn if dtaidistance is not available or for itakura constraint.
+    """
 
     name = "Dynamic time warping"
     identifier = "dtw"
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+    def __init__(
+        self,
+        global_constraint=None,
+        sakoe_chiba_radius=None,
+        sakoe_chiba_ratio=None,
+        **kwargs,
+    ):
+        if sakoe_chiba_radius is not None and sakoe_chiba_ratio is not None:
+            raise ValueError("Set only one of sakoe_chiba_radius or sakoe_chiba_ratio.")
+        if sakoe_chiba_radius is not None:
+            sakoe_chiba_radius = int(sakoe_chiba_radius)
+            if sakoe_chiba_radius < 1:
+                raise ValueError("sakoe_chiba_radius must be >= 1.")
+        if sakoe_chiba_ratio is not None:
+            sakoe_chiba_ratio = float(sakoe_chiba_ratio)
+            if sakoe_chiba_ratio <= 0:
+                raise ValueError("sakoe_chiba_ratio must be > 0.")
+
+        super().__init__(global_constraint=global_constraint, **kwargs)
         self._simfn = tslearn.metrics.dtw
+        self._sakoe_chiba_radius = sakoe_chiba_radius
+        self._sakoe_chiba_ratio = sakoe_chiba_ratio
+        self._warned_itakura_fallback = False
+        self._warned_c_fallback = False
+
+        if global_constraint == "sakoe_chiba":
+            if sakoe_chiba_radius is not None:
+                self.identifier += f"_radius-{sakoe_chiba_radius}"
+            elif sakoe_chiba_ratio is not None:
+                self.identifier += f"_ratio-{sakoe_chiba_ratio:.4g}"
+            else:
+                self.identifier += "_radius-auto"
+
+    def _resolve_radius(self, n):
+        if self._sakoe_chiba_radius is not None:
+            return min(self._sakoe_chiba_radius, max(1, n - 1))
+        if self._sakoe_chiba_ratio is not None:
+            ratio_radius = int(np.ceil(self._sakoe_chiba_ratio * n))
+            return min(max(1, ratio_radius), max(1, n - 1))
+        return _auto_sakoe_radius(n)
+
+    @parse_bivariate
+    def bivariate(self, data, i=None, j=None):
+        z = data.to_numpy(squeeze=True)
+        x = np.ascontiguousarray(z[i], dtype=np.double)
+        y = np.ascontiguousarray(z[j], dtype=np.double)
+        constraint = self._global_constraint
+        n = min(len(x), len(y))
+
+        if constraint == "itakura":
+            if not self._warned_itakura_fallback:
+                warnings.warn(
+                    "DynamicTimeWarping(itakura) falls back to tslearn; "
+                    "dtaidistance C backend does not support itakura.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                self._warned_itakura_fallback = True
+            return tslearn.metrics.dtw(x, y, global_constraint="itakura")
+
+        radius = None
+        window = None
+        if constraint == "sakoe_chiba":
+            radius = self._resolve_radius(n)
+            window = radius + 1
+
+        try:
+            from dtaidistance import dtw as _dtw_c
+            from dtaidistance.exceptions import CythonException
+            kwargs = {"use_c": True}
+            if window is not None:
+                kwargs["window"] = window
+            return _dtw_c.distance(x, y, **kwargs)
+        except ImportError:
+            # dtaidistance not installed — use tslearn
+            if constraint == "sakoe_chiba":
+                return tslearn.metrics.dtw(
+                    x, y, global_constraint="sakoe_chiba", sakoe_chiba_radius=radius,
+                )
+            return tslearn.metrics.dtw(x, y, global_constraint=constraint)
+        except (CythonException, ValueError):
+            if not self._warned_c_fallback:
+                warnings.warn(
+                    "dtaidistance C backend unavailable for DynamicTimeWarping; "
+                    "falling back to tslearn.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                self._warned_c_fallback = True
+            if constraint == "sakoe_chiba":
+                return tslearn.metrics.dtw(
+                    x, y, global_constraint="sakoe_chiba", sakoe_chiba_radius=radius,
+                )
+            return tslearn.metrics.dtw(x, y)
+
+    @parse_multivariate
+    def multivariate(self, data):
+        """Batch DTW via dtaidistance.dtw.distance_matrix when available."""
+        Z = data.to_numpy(squeeze=True)  # (M, T)
+        M = Z.shape[0]
+        series = [np.ascontiguousarray(Z[i], dtype=np.double) for i in range(M)]
+
+        constraint = self._global_constraint
+
+        if constraint == "itakura":
+            # dtaidistance doesn't support itakura; fall back to bivariate loop
+            A = np.full((M, M), np.nan)
+            for i in range(M):
+                for j in range(i + 1, M):
+                    d = tslearn.metrics.dtw(
+                        series[i], series[j], global_constraint="itakura"
+                    )
+                    A[i, j] = d
+                    A[j, i] = d
+            return A
+
+        try:
+            from dtaidistance import dtw as _dtw_c
+
+            kwargs = {"use_c": True, "compact": False}
+            if constraint == "sakoe_chiba":
+                n = min(len(s) for s in series)
+                radius = self._resolve_radius(n)
+                kwargs["window"] = radius + 1
+
+            try:
+                dm = _dtw_c.distance_matrix(series, **kwargs)
+            except Exception:
+                kwargs["use_c"] = False
+                dm = _dtw_c.distance_matrix(series, **kwargs)
+
+            dm = np.array(dm)
+            mask_upper = np.triu(np.ones((M, M), dtype=bool), k=1)
+            dm_sym = np.where(mask_upper, dm, dm.T)
+            np.fill_diagonal(dm_sym, np.nan)
+            return dm_sym
+
+        except ImportError:
+            # Fall back to bivariate loop with tslearn
+            A = np.full((M, M), np.nan)
+            for i in range(M):
+                for j in range(i + 1, M):
+                    d = self.bivariate(data, i=i, j=j)
+                    A[i, j] = d
+                    A[j, i] = d
+            return A
 
 
 class LongestCommonSubsequence(TimeWarping):
@@ -275,11 +442,11 @@ class GromovWasserstainTau(Undirected, Unsigned):
         diffs = np.diff(x, axis=0)
         distances = np.linalg.norm(diffs, axis=1)
         return np.cumsum(distances)
-    
+
     @staticmethod
     def wass_sorted(x1, x2):
         x1 = np.sort(x1)[::-1] # sort in descending order
-        x2 = np.sort(x2)[::-1] 
+        x2 = np.sort(x2)[::-1]
 
         if len(x1) == len(x2):
             res = np.sqrt(np.mean((x1 - x2) ** 2))
@@ -287,20 +454,20 @@ class GromovWasserstainTau(Undirected, Unsigned):
             N, M = len(x1), len(x2)
             i_ratios = np.arange(1, N + 1) / N
             j_ratios = np.arange(1, M + 1) / M
-        
-        
+
+
             min_values = np.minimum.outer(i_ratios, j_ratios)
             max_values = np.maximum.outer(i_ratios - 1/N, j_ratios - 1/M)
-        
+
             lam = np.where(min_values > max_values, min_values - max_values, 0)
-        
+
             diffs_squared = (x1[:, None] - x2) ** 2
             my_sum = np.sum(lam * diffs_squared)
-        
+
             res = np.sqrt(my_sum)
 
         return res
-    
+
     @staticmethod
     def gwtau(xi, xj):
         timei = np.arange(len(xi))
@@ -311,12 +478,74 @@ class GromovWasserstainTau(Undirected, Unsigned):
         vi = GromovWasserstainTau.vec_geo_dist(traji)
         vj = GromovWasserstainTau.vec_geo_dist(trajj)
         gw = GromovWasserstainTau.wass_sorted(vi, vj)
-    
+
         return gw
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
         x, y = data.to_numpy()[[i, j]]
-        # insert compute SPI code here (computes on x and y)
         stat = self.gwtau(x, y)
         return stat
+
+
+# ---------------------------------------------------------------------------
+# CrossPairwiseDistance: lagged Euclidean distance
+# ---------------------------------------------------------------------------
+
+class CrossPairwiseDistance(Undirected):
+    """Cross pairwise distance: Euclidean distance at each lag t in 0..tau,
+    symmetric (min of fwd and bwd directions), report min or mean over t.
+    tau=0 returns identical value to pdist_euclidean (L2 norm).
+    """
+    name = "Cross pairwise distance"
+    labels = ["distance", "nonlinear", "undirected", "temporal"]
+
+    def __init__(self, metric="euclidean", tau=1, statistic="min"):
+        if metric != "euclidean":
+            raise ValueError(f"Unsupported metric: {metric!r}. Only 'euclidean' supported.")
+        if int(tau) < 0:
+            raise ValueError("tau must be >= 0.")
+        stat = str(statistic).lower()
+        if stat not in {"min", "mean"}:
+            raise ValueError(f"statistic must be 'min' or 'mean', got: {statistic!r}")
+        self._metric = metric
+        self._tau = int(tau)
+        self._statistic = stat
+        self.identifier = f"xpdist_{metric}_tau-{self._tau}_{stat}"
+
+    @staticmethod
+    def _dist(a, b):
+        return np.sqrt(np.sum((a - b) ** 2))
+
+    def _cross_dist(self, x, y):
+        tau = self._tau
+        per_lag = np.empty(tau + 1)
+        per_lag[0] = self._dist(x, y)
+        for t in range(1, tau + 1):
+            if t >= len(x):
+                per_lag[t] = np.inf
+                continue
+            fwd = self._dist(x[t:], y[:-t])
+            bwd = self._dist(y[t:], x[:-t])
+            per_lag[t] = min(fwd, bwd)
+        if self._statistic == "min":
+            return float(np.min(per_lag))
+        finite = per_lag[np.isfinite(per_lag)]
+        return float(np.mean(finite)) if finite.size > 0 else np.nan
+
+    @parse_bivariate
+    def bivariate(self, data, i=None, j=None):
+        Z = data.to_numpy(squeeze=True)
+        return self._cross_dist(Z[i], Z[j])
+
+    @parse_multivariate
+    def multivariate(self, data):
+        Z = data.to_numpy(squeeze=True)  # (M, T)
+        M = Z.shape[0]
+        A = np.full((M, M), np.nan)
+        for i in range(M):
+            for j in range(i + 1, M):
+                d = self._cross_dist(Z[i], Z[j])
+                A[i, j] = d
+                A[j, i] = d
+        return A

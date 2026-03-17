@@ -1,7 +1,7 @@
 # Science/maths/computing tools
 import numpy as np
 import pandas as pd
-import copy, yaml, importlib, time, warnings, os
+import copy, yaml, importlib, time, warnings, os, multiprocessing as _mp
 from tqdm import tqdm
 from collections import Counter
 from scipy import stats
@@ -11,6 +11,58 @@ init(autoreset=True)
 # From this package
 from .data import Data
 from .utils import convert_mdf_to_ddf, check_optional_deps, inspect_calc_results
+
+
+# ---------------------------------------------------------------------------
+# LaggedCorrelation config expansion: max_tau -> tau=1..max_tau
+# ---------------------------------------------------------------------------
+
+def _expand_lagged_correlation_configs(configs):
+    expanded = []
+    for params in configs or []:
+        if "max_tau" in params:
+            if "tau" in params:
+                raise ValueError("LaggedCorrelation config cannot set both tau and max_tau.")
+            max_tau = int(params["max_tau"])
+            if max_tau < 1:
+                raise ValueError("max_tau must be >= 1.")
+            base = {key: value for key, value in params.items() if key != "max_tau"}
+            for tau in range(1, max_tau + 1):
+                entry = dict(base)
+                entry["tau"] = tau
+                expanded.append(entry)
+        else:
+            expanded.append(dict(params))
+    return expanded
+
+
+# ---------------------------------------------------------------------------
+# Fork-based parallel compute helpers
+# ---------------------------------------------------------------------------
+
+_PARALLEL_CALC = None  # module-level for fork-based sharing
+
+
+def _restore_blas_threads_in_worker():
+    """Call at start of forked worker to enable multi-threaded BLAS."""
+    try:
+        from threadpoolctl import threadpool_limits
+        threadpool_limits(limits=-1)
+    except ImportError:
+        pass
+
+
+def _fork_compute_spi(spi_key):
+    """Worker function for fork-based parallel SPI computation."""
+    _restore_blas_threads_in_worker()
+    spi = _PARALLEL_CALC._spis[spi_key]
+    data = _PARALLEL_CALC.dataset
+    try:
+        S = spi.multivariate(data)
+        np.fill_diagonal(S, np.nan)
+        return spi_key, S, None
+    except Exception as err:
+        return spi_key, np.nan, str(err)
 
 
 class Calculator:
@@ -236,7 +288,10 @@ class Calculator:
                                 self._excluded_spis.append([f"{fcn}(x,y,{params})", deps])
                             continue
                     try:
-                        for params in yf[module_name][fcn].get('configs'):
+                        configs = yf[module_name][fcn].get('configs')
+                        if fcn == "LaggedCorrelation" and configs is not None:
+                            configs = _expand_lagged_correlation_configs(configs)
+                        for params in configs:
                             print(
                                 f"[{self.n_spis}] Adding SPI {module_name}.{fcn}(x,y,{params})"
                             )
@@ -279,30 +334,97 @@ class Calculator:
         self._table.columns.name = "process"
 
     def compute(self):
-        """Compute the SPIs on the MVTS dataset."""
+        """Compute the SPIs on the MVTS dataset.
+
+        Supports fork-based parallelism via PYSPI_N_JOBS env var (default: 1).
+        JIDT SPIs (kernel/symbolic estimators, auto-embed TE) run sequentially
+        in the main process because JPype's JVM does not survive fork().
+        """
         if not hasattr(self, "_dataset"):
             raise AttributeError(
                 "Dataset not loaded yet. Please initialise with load_dataset."
             )
 
-        pbar = tqdm(self.spis.keys())
-        for spi in pbar:
-            pbar.set_description(f"Processing [{self._name}: {spi}]")
-            start_time = time.time()
-            try:
-                # Get the MPI from the dataset
-                S = self._spis[spi].multivariate(self.dataset)
+        n_jobs = int(os.getenv("PYSPI_N_JOBS", "1"))
 
-                # Ensure the diagonal is NaN (sometimes set within the functions)
-                np.fill_diagonal(S, np.nan)
+        if n_jobs <= 1:
+            # Original sequential path
+            pbar = tqdm(self.spis.keys())
+            for spi in pbar:
+                pbar.set_description(f"Processing [{self._name}: {spi}]")
+                try:
+                    S = self._spis[spi].multivariate(self.dataset)
+                    np.fill_diagonal(S, np.nan)
+                    self._table[spi] = S
+                except Exception as err:
+                    warnings.warn(f'Caught {type(err)} for SPI "{spi}": {err}')
+                    self._table[spi] = np.nan
+            pbar.close()
+            print(Fore.GREEN + f"\nCalculation complete. Time taken: {pbar.format_dict['elapsed']:.4f}s")
+            inspect_calc_results(self)
+            return
 
-                # Save results
-                self._table[spi] = S
-            except Exception as err:
-                warnings.warn(f'Caught {type(err)} for SPI "{spi}": {err}')
-                self._table[spi] = np.nan
-        pbar.close()
-        print(Fore.GREEN + f"\nCalculation complete. Time taken: {pbar.format_dict['elapsed']:.4f}s")
+        # Parallel path
+        from . import statistics as _stats
+        _infotheory = importlib.import_module(".statistics.infotheory", __package__)
+
+        spi_keys = list(self.spis.keys())
+
+        def _needs_jidt(spi):
+            if "infotheory" not in spi.__class__.__module__:
+                return False
+            est = getattr(spi, '_estimator', None)
+            if est not in ('gaussian', 'kraskov', 'kozachenko'):
+                return True
+            if isinstance(spi, _infotheory.TransferEntropy):
+                return getattr(spi, '_auto_embed_method', None) is not None
+            return False
+
+        jidt_keys = [k for k in spi_keys if _needs_jidt(self._spis[k])]
+        fork_keys = [k for k in spi_keys if k not in jidt_keys]
+        n_workers = min(n_jobs, len(fork_keys))
+
+        print(
+            f"[pyspi-parallel] {len(fork_keys)} SPIs via {n_workers} "
+            f"fork workers, {len(jidt_keys)} JIDT SPIs sequential"
+        )
+
+        t0 = time.time()
+
+        global _PARALLEL_CALC
+        _PARALLEL_CALC = self
+
+        ctx = _mp.get_context("fork")
+        with ctx.Pool(n_workers) as pool:
+            pbar = tqdm(
+                pool.imap_unordered(_fork_compute_spi, fork_keys),
+                total=len(fork_keys),
+                desc="SPIs (parallel)",
+            )
+            for spi_key, result, err in pbar:
+                if err is not None:
+                    warnings.warn(f'Caught error for SPI "{spi_key}": {err}')
+                self._table[spi_key] = result
+                pbar.set_description(f"Done: {spi_key}")
+
+        _PARALLEL_CALC = None
+
+        if jidt_keys:
+            pbar = tqdm(jidt_keys, desc="SPIs (JIDT)")
+            for spi_key in pbar:
+                pbar.set_description(f"JIDT: {spi_key}")
+                try:
+                    S = self._spis[spi_key].multivariate(self.dataset)
+                    np.fill_diagonal(S, np.nan)
+                    self._table[spi_key] = S
+                except Exception as err:
+                    warnings.warn(
+                        f'Caught {type(err).__name__} for SPI "{spi_key}": {err}'
+                    )
+                    self._table[spi_key] = np.nan
+
+        elapsed = time.time() - t0
+        print(Fore.GREEN + f"\nCalculation complete. Time taken: {elapsed:.4f}s")
         inspect_calc_results(self)
         
     def _rmmin(self):

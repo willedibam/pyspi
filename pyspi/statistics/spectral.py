@@ -13,6 +13,24 @@ import nitime.analysis as nta
 import nitime.timeseries as ts
 import warnings
 
+try:
+    from spectral_connectivity.transforms import prepare_time_series
+except ImportError:
+    def prepare_time_series(time_series, axis="signals"):
+        if axis != "signals":
+            raise ImportError(
+                "spectral_connectivity is missing prepare_time_series; "
+                "upgrade the package or ensure axis='signals'."
+            )
+        return time_series[:, np.newaxis, :]
+
+
+def _ensure_time_series_3d(z):
+    """Ensure time-series array follows (n_time, n_trials, n_signals)."""
+    if z.ndim == 2:
+        return prepare_time_series(z, axis="signals")
+    return z
+
 
 class NonparametricSpectral(Unsigned):
     """Base class for the nonparametric spectral methods from the Eden-Kramer repo"""
@@ -67,6 +85,7 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
             freq = data.spectral_mv["freq"]
         except (AttributeError, KeyError):
             z = np.transpose(data.to_numpy(squeeze=True))
+            z = _ensure_time_series_3d(z)
             m = sc.Multitaper(z, sampling_frequency=self._fs)
             conn = sc.Connectivity.from_multitaper(m)
             try:
@@ -104,14 +123,29 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
 
 class NonparametricSpectralBivariate(NonparametricSpectral):
     def _get_cache(self, data, i, j):
-        key = (self.measure, i, j)
+        """Cache Connectivity object per (i,j) pair, not per (measure,i,j).
+
+        Multiple directed spectral SPIs (DirectedCoherence, PartialDirectedCoherence,
+        etc.) share the same Multitaper+Connectivity for a given (i,j). The expensive
+        part is building the Multitaper — each measure extraction is cheap.
+        """
+        measure_key = (self.measure, i, j)
         try:
-            res = data.spectral_bv[key]
+            res = data.spectral_bv[measure_key]
             freq = data.spectral_bv["freq"]
         except (KeyError, AttributeError):
-            z = np.transpose(data.to_numpy(squeeze=True)[[i, j]])
-            m = sc.Multitaper(z, sampling_frequency=self._fs)
-            conn = sc.Connectivity.from_multitaper(m)
+            # Check if Connectivity object already cached for this (i,j)
+            conn_key = (i, j)
+            if not hasattr(data, '_spectral_bv_conn'):
+                data._spectral_bv_conn = {}
+            conn = data._spectral_bv_conn.get(conn_key)
+            if conn is None:
+                z = np.transpose(data.to_numpy(squeeze=True)[[i, j]])
+                z = _ensure_time_series_3d(z)
+                m = sc.Multitaper(z, sampling_frequency=self._fs)
+                conn = sc.Connectivity.from_multitaper(m)
+                data._spectral_bv_conn[conn_key] = conn
+
             try:
                 res = getattr(conn, self.measure)()
             except TypeError:
@@ -119,15 +153,13 @@ class NonparametricSpectralBivariate(NonparametricSpectral):
 
             freq = conn.frequencies
             try:
-                data.spectral_bv[key] = res
+                data.spectral_bv[measure_key] = res
             except AttributeError:
-                data.spectral_bv = {"freq": freq, key: res}
-
+                data.spectral_bv = {"freq": freq, measure_key: res}
         return res, freq
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
-        """TODO: cache this result"""
         bv_freq, freq = self._get_cache(data, i, j)
         freq_id = np.where((freq > self._fmin) * (freq < self._fmax))[0]
 

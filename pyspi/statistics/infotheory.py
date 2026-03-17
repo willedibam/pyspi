@@ -1,14 +1,632 @@
-import jpype as jp
 import numpy as np
 from pyspi import utils
 import copy
 import logging
+import warnings
 
-from pyspi.base import Undirected, Directed, Unsigned, parse_univariate, parse_bivariate
+from scipy.spatial import cKDTree
+from scipy.special import digamma, gammaln
+
+from pyspi.base import Undirected, Directed, Unsigned, parse_univariate, parse_bivariate, parse_multivariate
+
+# ---------------------------------------------------------------------------
+# Pure-numpy entropy calculators (drop-in replacements for JIDT)
+# ---------------------------------------------------------------------------
+
+class GaussianEntropyCalculator:
+    """Drop-in for JIDT's EntropyCalculatorMultiVariateGaussian.
+
+    H = 0.5 * d * log(2*pi*e) + 0.5 * log|Sigma|
+    """
+    def __init__(self):
+        self._d = None
+        self._obs = None
+
+    def initialise(self, d):
+        self._d = int(d)
+        self._obs = None
+
+    def setObservations(self, data):
+        self._obs = np.asarray(data, dtype=np.float64)
+        if self._obs.ndim == 1:
+            self._obs = self._obs.reshape(-1, 1)
+
+    def setProperty(self, key, value):
+        pass
+
+    def computeAverageLocalOfObservations(self):
+        X = self._obs
+        N, d = X.shape
+        cov = np.cov(X, rowvar=False, ddof=1)
+        if d == 1:
+            log_det = np.log(max(float(cov), 1e-300))
+        else:
+            sign, log_det = np.linalg.slogdet(cov)
+            if sign <= 0:
+                log_det = -np.inf
+        return float(0.5 * d * np.log(2 * np.pi * np.e) + 0.5 * log_det)
+
+
+class KLEntropyCalculator:
+    """Drop-in for JIDT's EntropyCalculatorMultiVariateKozachenko.
+
+    Uses L2 norm with k=1, matching JIDT.
+    H = psi(N) - psi(1) + log(c_d) + (d/N) * sum(log(eps_i))
+    """
+    def __init__(self):
+        self._d = None
+        self._obs = None
+
+    def initialise(self, d):
+        self._d = int(d)
+        self._obs = None
+
+    def setObservations(self, data):
+        self._obs = np.asarray(data, dtype=np.float64)
+        if self._obs.ndim == 1:
+            self._obs = self._obs.reshape(-1, 1)
+
+    def setProperty(self, key, value):
+        pass
+
+    def computeAverageLocalOfObservations(self):
+        X = self._obs
+        N, d = X.shape
+        tree = cKDTree(X)
+        dists, _ = tree.query(X, k=2, p=2)  # k=1 NN (index 0 = self)
+        eps = dists[:, 1]
+        log_cd = (d / 2.0) * np.log(np.pi) - gammaln(d / 2.0 + 1)
+        return float(
+            digamma(N) - digamma(1) + log_cd + (d / N) * np.sum(np.log(eps))
+        )
+
+
+def _gaussian_entropy_from_data(data_2d):
+    """Compute Gaussian entropy from (N, d) array."""
+    N, d = data_2d.shape
+    cov = np.cov(data_2d, rowvar=False, ddof=1)
+    if d == 1:
+        log_det = np.log(max(float(cov), 1e-300))
+    else:
+        sign, log_det = np.linalg.slogdet(cov)
+        if sign <= 0:
+            log_det = -np.inf
+    return 0.5 * d * np.log(2 * np.pi * np.e) + 0.5 * log_det
+
+
+# ---------------------------------------------------------------------------
+# Box-kernel KDE entropy/MI/TE calculators (replace JIDT kernel estimators)
+# ---------------------------------------------------------------------------
+
+class KernelEntropyCalculator:
+    """Drop-in for JIDT's EntropyCalculatorMultiVariateKernel.
+
+    Box kernel (Heaviside) with L-infinity norm, matching JIDT exactly:
+    H = mean(log2(N) - log2(count_i))  [bits]
+    where count_i = #{j : |x_j - x_i|_inf <= kernel_width} (includes self).
+
+    When NORMALISE=true (JIDT default), data is normalised by std before
+    counting; kernel_width is then in units of std dev.
+    """
+
+    def __init__(self):
+        self._d = None
+        self._obs = None
+        self._kernel_width = 0.25
+        self._normalise = True
+
+    def initialise(self, d):
+        self._d = int(d)
+        self._obs = None
+
+    def setProperty(self, key, value):
+        if key == "KERNEL_WIDTH":
+            self._kernel_width = float(value)
+        elif key == "NORMALISE":
+            self._normalise = str(value).lower() == "true"
+
+    def setObservations(self, data):
+        self._obs = np.asarray(data, dtype=np.float64)
+        if self._obs.ndim == 1:
+            self._obs = self._obs.reshape(-1, 1)
+
+    def computeAverageLocalOfObservations(self):
+        X = self._obs
+        N, d = X.shape
+        w = self._kernel_width
+        if self._normalise:
+            stds = np.std(X, axis=0, ddof=1)
+            stds = np.where(stds > 0, stds, 1.0)
+            X = X / stds[None, :]
+
+        tree = cKDTree(X)
+        # JIDT half-width = kernel_width (not kernel_width/2)
+        counts = tree.query_ball_point(X, r=w, p=np.inf,
+                                        return_length=True)
+        counts = np.asarray(counts, dtype=np.float64)
+        # JIDT formula: H = mean(log2(N) - log2(count)) + d*log2(2*w)  [bits]
+        return float(np.mean(np.log2(N) - np.log2(counts)) + d * np.log2(2.0 * w))
+
+
+class KernelMICalculator:
+    """Drop-in for JIDT's MutualInfoCalculatorMultiVariateKernel.
+
+    MI = mean(log2(n_xy * N / (n_x * n_y)))  [bits]
+    where n_x, n_y, n_xy are counts within L∞ ball of radius kernel_width.
+    Matches JIDT exactly.
+    """
+
+    def __init__(self):
+        self._kernel_width = 0.25
+        self._normalise = True
+        self._d1 = 1
+        self._d2 = 1
+        self._obs1 = None
+        self._obs2 = None
+
+    def initialise(self, d1, d2):
+        self._d1 = int(d1)
+        self._d2 = int(d2)
+
+    def setProperty(self, key, value):
+        if key == "KERNEL_WIDTH":
+            self._kernel_width = float(value)
+        elif key == "NORMALISE":
+            self._normalise = str(value).lower() == "true"
+
+    def setObservations(self, src, targ):
+        self._obs1 = np.asarray(src, dtype=np.float64)
+        self._obs2 = np.asarray(targ, dtype=np.float64)
+        if self._obs1.ndim == 1:
+            self._obs1 = self._obs1.reshape(-1, 1)
+        if self._obs2.ndim == 1:
+            self._obs2 = self._obs2.reshape(-1, 1)
+
+    def computeAverageLocalOfObservations(self):
+        X = self._obs1
+        Y = self._obs2
+        N = X.shape[0]
+        w = self._kernel_width
+
+        if self._normalise:
+            def _norm(data):
+                stds = np.std(data, axis=0, ddof=1)
+                stds = np.where(stds > 0, stds, 1.0)
+                return data / stds[None, :]
+            X = _norm(X)
+            Y = _norm(Y)
+
+        XY = np.column_stack([X, Y])
+        tree_x = cKDTree(X)
+        tree_y = cKDTree(Y)
+        tree_xy = cKDTree(XY)
+
+        # JIDT half-width = kernel_width
+        n_x = np.asarray(tree_x.query_ball_point(X, r=w, p=np.inf,
+                                                   return_length=True), dtype=np.float64)
+        n_y = np.asarray(tree_y.query_ball_point(Y, r=w, p=np.inf,
+                                                   return_length=True), dtype=np.float64)
+        n_xy = np.asarray(tree_xy.query_ball_point(XY, r=w, p=np.inf,
+                                                     return_length=True), dtype=np.float64)
+
+        # MI = mean(log2(n_xy * N / (n_x * n_y)))  [bits]
+        mi = np.mean(np.log2(n_xy) + np.log2(N) - np.log2(n_x) - np.log2(n_y))
+        return float(mi)
+
+
+class KernelTECalculator:
+    """Drop-in for JIDT's TransferEntropyCalculatorKernel.
+
+    TE(X→Y) = mean(log2(n_yn_yp_x * n_yp / (n_yp_x * n_yn_yp)))  [bits]
+    Uses box kernel with L∞ norm, half-width = kernel_width.
+    Matches JIDT exactly.
+    """
+
+    def __init__(self):
+        self._kernel_width = 0.25
+        self._normalise = True
+        self._k_history = 1
+        self._dyn_corr_excl = None
+        self._props = {}
+
+    def initialise(self):
+        pass
+
+    def setProperty(self, key, value):
+        self._props[key] = value
+        if key == "KERNEL_WIDTH":
+            self._kernel_width = float(value)
+        elif key == "NORMALISE":
+            self._normalise = str(value).lower() == "true"
+        elif key == "k_HISTORY":
+            self._k_history = int(value)
+        elif key == "DYN_CORR_EXCL":
+            self._dyn_corr_excl = int(value)
+
+    def setObservations(self, src, targ):
+        self._src = np.asarray(src, dtype=np.float64).ravel()
+        self._targ = np.asarray(targ, dtype=np.float64).ravel()
+
+    def computeAverageLocalOfObservations(self):
+        src = self._src
+        targ = self._targ
+        k = self._k_history
+        T = len(src)
+        w = self._kernel_width
+
+        if T <= k:
+            return np.nan
+
+        # Build vectors
+        n_pts = T - k
+        y_past = np.column_stack([targ[k - 1 - lag: T - 1 - lag] for lag in range(k)])
+        y_next = targ[k:].reshape(-1, 1)
+        x_t = src[k - 1: T - 1].reshape(-1, 1)
+
+        if self._normalise:
+            def _norm(data):
+                stds = np.std(data, axis=0, ddof=1)
+                stds = np.where(stds > 0, stds, 1.0)
+                return data / stds[None, :]
+            y_past = _norm(y_past)
+            y_next = _norm(y_next)
+            x_t = _norm(x_t)
+
+        # Joint spaces
+        yn_yp = np.column_stack([y_next, y_past])
+        yp_x = np.column_stack([y_past, x_t])
+        yn_yp_x = np.column_stack([y_next, y_past, x_t])
+
+        tree_yp = cKDTree(y_past)
+        tree_yn_yp = cKDTree(yn_yp)
+        tree_yp_x = cKDTree(yp_x)
+        tree_yn_yp_x = cKDTree(yn_yp_x)
+
+        # JIDT half-width = kernel_width
+        n_yp = np.asarray(tree_yp.query_ball_point(y_past, r=w, p=np.inf,
+                                                     return_length=True), dtype=np.float64)
+        n_yn_yp = np.asarray(tree_yn_yp.query_ball_point(yn_yp, r=w, p=np.inf,
+                                                           return_length=True), dtype=np.float64)
+        n_yp_x = np.asarray(tree_yp_x.query_ball_point(yp_x, r=w, p=np.inf,
+                                                         return_length=True), dtype=np.float64)
+        n_yn_yp_x = np.asarray(tree_yn_yp_x.query_ball_point(yn_yp_x, r=w, p=np.inf,
+                                                               return_length=True), dtype=np.float64)
+
+        # TE = mean(log2(n_yn_yp_x * n_yp / (n_yp_x * n_yn_yp)))  [bits]
+        te = np.mean(np.log2(n_yn_yp_x) + np.log2(n_yp) - np.log2(n_yp_x) - np.log2(n_yn_yp))
+        return float(te)
+
+
+# ---------------------------------------------------------------------------
+# Symbolic Transfer Entropy (ordinal patterns)
+# ---------------------------------------------------------------------------
+
+def _ordinal_pattern_id(vec):
+    """Convert a vector to its ordinal pattern ID.
+
+    The ordinal pattern is the rank ordering. Maps to an integer in [0, d!).
+    Uses the factorial number system (Lehmer code).
+    """
+    d = len(vec)
+    # Get the rank order (argsort of argsort)
+    order = np.argsort(vec)
+    # Lehmer code
+    code = 0
+    remaining = list(range(d))
+    factorial = 1
+    for i in range(1, d):
+        factorial *= i
+    for i in range(d - 1):
+        pos = remaining.index(order[i])
+        code += pos * factorial
+        remaining.pop(pos)
+        if i < d - 2:
+            factorial //= (d - 1 - i)
+    return code
+
+
+def _series_to_ordinal_symbols(x, k):
+    """Convert a 1D time series to a sequence of ordinal pattern symbols.
+
+    For each t, the embedding vector is [x[t], x[t-1], ..., x[t-k+1]].
+    Returns integer array of symbol IDs, length T-k+1.
+    """
+    x = np.asarray(x).ravel()
+    T = len(x)
+    if T < k:
+        return np.array([], dtype=int)
+
+    n_pts = T - k + 1
+    symbols = np.empty(n_pts, dtype=int)
+
+    # Build embedding matrix
+    embedding = np.column_stack([x[k - 1 - lag: T - lag] for lag in range(k)])
+
+    for t in range(n_pts):
+        symbols[t] = _ordinal_pattern_id(embedding[t])
+
+    return symbols
+
+
+class SymbolicTECalculator:
+    """Drop-in for JIDT's TransferEntropyCalculatorSymbolic.
+
+    Converts source and target to ordinal patterns of length k,
+    then computes TE from joint symbol histograms.
+
+    TE = H(Y_next | Y_past) - H(Y_next | Y_past, X)
+       = H(Y_next, Y_past) - H(Y_past) - H(Y_next, Y_past, X) + H(Y_past, X)
+    where all entropies are discrete (histogram-based).
+    """
+
+    def __init__(self):
+        self._k_history = 1
+        self._props = {}
+
+    def initialise(self):
+        pass
+
+    def setProperty(self, key, value):
+        self._props[key] = value
+        if key == "k_HISTORY":
+            self._k_history = int(value)
+
+    def setObservations(self, src, targ):
+        self._src = np.asarray(src, dtype=np.float64).ravel()
+        self._targ = np.asarray(targ, dtype=np.float64).ravel()
+
+    def computeAverageLocalOfObservations(self):
+        src = self._src
+        targ = self._targ
+        k = self._k_history
+        T = len(src)
+
+        if T <= k:
+            return np.nan
+
+        # Convert to ordinal patterns
+        src_symbols = _series_to_ordinal_symbols(src, k)
+        targ_symbols = _series_to_ordinal_symbols(targ, k)
+
+        # Align: targ_next starts at index 1 of the symbol sequence
+        # targ_past = targ_symbols[:-1], targ_next = targ_symbols[1:]
+        # src_current = src_symbols[:-1] (concurrent with targ_past)
+        n = min(len(src_symbols), len(targ_symbols)) - 1
+        if n <= 0:
+            return np.nan
+
+        targ_next = targ_symbols[1:n + 1]
+        targ_past = targ_symbols[:n]
+        src_curr = src_symbols[:n]
+
+        n_symbols = int(np.math.factorial(k))
+
+        def _discrete_entropy(*arrs):
+            """Joint entropy of integer-valued arrays using histograms."""
+            if len(arrs) == 1:
+                _, counts = np.unique(arrs[0], return_counts=True)
+            else:
+                # Multi-dimensional: combine into single key
+                combined = arrs[0].copy()
+                multiplier = n_symbols
+                for arr in arrs[1:]:
+                    combined = combined * multiplier + arr
+                    multiplier *= n_symbols
+                _, counts = np.unique(combined, return_counts=True)
+            probs = counts / counts.sum()
+            return -np.sum(probs * np.log2(probs))
+
+        # TE = H(yn, yp) - H(yp) - H(yn, yp, x) + H(yp, x)
+        H_yn_yp = _discrete_entropy(targ_next, targ_past)
+        H_yp = _discrete_entropy(targ_past)
+        H_yn_yp_x = _discrete_entropy(targ_next, targ_past, src_curr)
+        H_yp_x = _discrete_entropy(targ_past, src_curr)
+
+        te = H_yn_yp - H_yp - H_yn_yp_x + H_yp_x
+        return float(te)
+
+
+def _numpy_delay_embedding(x, dim):
+    """Numpy equivalent of JIDT's MatrixUtils.makeDelayEmbeddingVector."""
+    x = np.asarray(x).ravel()
+    T = len(x)
+    if dim == 0:
+        return np.empty((T + 1, 0))
+    return np.column_stack([x[dim - 1 - lag: T - lag] for lag in range(dim)])
+
+
+# ---------------------------------------------------------------------------
+# KSG MI estimator
+# ---------------------------------------------------------------------------
+
+def _ksg_mi_pair(x, y, k, w, tree_x, tree_y):
+    """KSG Estimator 1 MI for a single pair."""
+    N = len(x)
+    xy = np.column_stack([x, y])
+    tree_xy = cKDTree(xy)
+
+    if w == 0:
+        dists, _ = tree_xy.query(xy, k=k + 1, p=np.inf)
+        eps = dists[:, k]
+        eps_strict = eps * (1.0 - 1e-10)
+        nx_lists = tree_x.query_ball_point(x.reshape(-1, 1), eps_strict, p=np.inf)
+        ny_lists = tree_y.query_ball_point(y.reshape(-1, 1), eps_strict, p=np.inf)
+        n_x = np.array([len(lst) - 1 for lst in nx_lists], dtype=np.float64)
+        n_y = np.array([len(lst) - 1 for lst in ny_lists], dtype=np.float64)
+    else:
+        n_query = min(k + 2 * w + 2, N)
+        dists_all, idx_all = tree_xy.query(xy, k=n_query, p=np.inf)
+
+        eps = np.empty(N)
+        n_x = np.empty(N)
+        n_y = np.empty(N)
+
+        for i in range(N):
+            valid = np.abs(idx_all[i] - i) > w
+            valid[0] = False
+            d_valid = dists_all[i][valid]
+
+            if len(d_valid) < k:
+                all_dists = np.max(np.abs(xy - xy[i]), axis=1)
+                all_dists[max(0, i - w): i + w + 1] = np.inf
+                all_dists[i] = np.inf
+                d_valid = np.sort(all_dists)
+                d_valid = d_valid[np.isfinite(d_valid)]
+
+            e = d_valid[k - 1] if len(d_valid) >= k else np.inf
+            eps[i] = e
+
+            ix = tree_x.query_ball_point([[x[i]]], e, p=np.inf)[0]
+            iy = tree_y.query_ball_point([[y[i]]], e, p=np.inf)[0]
+            n_x[i] = sum(1 for j in ix if abs(j - i) > w and j != i)
+            n_y[i] = sum(1 for j in iy if abs(j - i) > w and j != i)
+
+    mi = digamma(k) - np.mean(digamma(n_x + 1) + digamma(n_y + 1)) + digamma(N)
+    return float(mi)
+
+
+# ---------------------------------------------------------------------------
+# Transfer Entropy helpers
+# ---------------------------------------------------------------------------
+
+class _DummyTECalculator:
+    """Dummy TE calculator for gaussian/kraskov fixed-embedding."""
+    def __init__(self):
+        self._props = {}
+    def setProperty(self, key, value):
+        self._props[key] = value
+    def initialise(self):
+        pass
+    def setObservations(self, src, targ):
+        pass
+    def computeAverageLocalOfObservations(self):
+        return np.nan
+
+
+def _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau):
+    """Build delay embeddings for transfer entropy computation."""
+    T = len(src)
+    max_lookback = max((k_history - 1) * k_tau, (l_history - 1) * l_tau)
+    start = max_lookback
+    end = T - 1
+
+    if start >= end:
+        return None, None, None
+
+    Y_future = targ[start + 1: end + 1].reshape(-1, 1)
+
+    Y_past_cols = []
+    for lag_idx in range(k_history):
+        lag = lag_idx * k_tau
+        Y_past_cols.append(targ[start - lag: end - lag])
+    Y_past = np.column_stack(Y_past_cols)
+
+    X_past_cols = []
+    for lag_idx in range(l_history):
+        lag = lag_idx * l_tau
+        X_past_cols.append(src[start - lag: end - lag])
+    X_past = np.column_stack(X_past_cols)
+
+    return Y_future, Y_past, X_past
+
+
+def _gaussian_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau):
+    """Gaussian TE via log-determinant ratio."""
+    Y_f, Y_p, X_p = _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau)
+    if Y_f is None:
+        return np.nan
+
+    def _slogdet(data):
+        N, d = data.shape
+        cov = np.cov(data, rowvar=False, ddof=1)
+        if d == 1:
+            return np.log(max(float(cov), 1e-300))
+        sign, ld = np.linalg.slogdet(cov)
+        return ld if sign > 0 else -np.inf
+
+    YfYp = np.concatenate([Y_f, Y_p], axis=1)
+    YfYpXp = np.concatenate([Y_f, Y_p, X_p], axis=1)
+    YpXp = np.concatenate([Y_p, X_p], axis=1)
+
+    te = 0.5 * (_slogdet(YfYp) - _slogdet(Y_p) - _slogdet(YfYpXp) + _slogdet(YpXp))
+    return float(te)
+
+
+def _kraskov_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau, k_nn, w):
+    """Kraskov TE via Frenzel-Pompe CMI estimator."""
+    Y_f, Y_p, X_p = _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau)
+    if Y_f is None:
+        return np.nan
+
+    N = len(Y_f)
+
+    joint = np.concatenate([Y_f, X_p, Y_p], axis=1)
+    tree_joint = cKDTree(joint)
+
+    YfYp = np.concatenate([Y_f, Y_p], axis=1)
+    XpYp = np.concatenate([X_p, Y_p], axis=1)
+
+    tree_YfYp = cKDTree(YfYp)
+    tree_XpYp = cKDTree(XpYp)
+    tree_Yp = cKDTree(Y_p)
+
+    if w == 0:
+        dists, _ = tree_joint.query(joint, k=k_nn + 1, p=np.inf)
+        eps = dists[:, k_nn]
+        eps_strict = eps * (1.0 - 1e-10)
+
+        n_YfYp = np.array([len(lst) - 1 for lst in
+                           tree_YfYp.query_ball_point(YfYp, eps_strict, p=np.inf)],
+                          dtype=np.float64)
+        n_XpYp = np.array([len(lst) - 1 for lst in
+                           tree_XpYp.query_ball_point(XpYp, eps_strict, p=np.inf)],
+                          dtype=np.float64)
+        n_Yp = np.array([len(lst) - 1 for lst in
+                         tree_Yp.query_ball_point(Y_p, eps_strict, p=np.inf)],
+                        dtype=np.float64)
+    else:
+        n_query = min(k_nn + 2 * w + 2, N)
+        dists_all, idx_all = tree_joint.query(joint, k=n_query, p=np.inf)
+
+        n_YfYp = np.empty(N)
+        n_XpYp = np.empty(N)
+        n_Yp = np.empty(N)
+
+        for i in range(N):
+            valid = np.abs(idx_all[i] - i) > w
+            valid[0] = False
+            d_valid = dists_all[i][valid]
+
+            if len(d_valid) < k_nn:
+                all_dists = np.max(np.abs(joint - joint[i]), axis=1)
+                all_dists[max(0, i - w): i + w + 1] = np.inf
+                all_dists[i] = np.inf
+                d_valid = np.sort(all_dists)
+                d_valid = d_valid[np.isfinite(d_valid)]
+
+            e = d_valid[k_nn - 1] if len(d_valid) >= k_nn else np.inf
+            e_strict = e * (1.0 - 1e-10)
+
+            lsts_YfYp = tree_YfYp.query_ball_point(YfYp[i], e_strict, p=np.inf)
+            lsts_XpYp = tree_XpYp.query_ball_point(XpYp[i], e_strict, p=np.inf)
+            lsts_Yp = tree_Yp.query_ball_point(Y_p[i], e_strict, p=np.inf)
+
+            n_YfYp[i] = sum(1 for j in lsts_YfYp if abs(j - i) > w and j != i)
+            n_XpYp[i] = sum(1 for j in lsts_XpYp if abs(j - i) > w and j != i)
+            n_Yp[i] = sum(1 for j in lsts_Yp if abs(j - i) > w and j != i)
+
+    te = float(digamma(k_nn) + np.mean(
+        digamma(n_Yp + 1) - digamma(n_YfYp + 1) - digamma(n_XpYp + 1)
+    ))
+    return te
+
+
+# ---------------------------------------------------------------------------
+# JIDT Base class — with estimator dispatch
+# ---------------------------------------------------------------------------
 
 class JIDTBase(Unsigned):
 
-    # List of (currently) modifiable parameters
     _NNK_PROP_NAME = "k"
     _AUTO_EMBED_METHOD_PROP_NAME = "AUTO_EMBED_METHOD"
     _DYN_CORR_EXCL_PROP_NAME = "DYN_CORR_EXCL"
@@ -23,12 +641,9 @@ class JIDTBase(Unsigned):
     _NORMALISE = "NORMALISE"
     _SEED = "NOISE_SEED"
 
-    _base_class = jp.JPackage("infodynamics.measures.continuous")
-
     def __init__(
         self, estimator="gaussian", kernel_width=0.5, prop_k=4, dyn_corr_excl=None
     ):
-
         self._estimator = estimator
         self._kernel_width = kernel_width
         self._prop_k = prop_k
@@ -59,18 +674,13 @@ class JIDTBase(Unsigned):
 
     def __getstate__(self):
         state = dict(self.__dict__)
-
         unserializable_objects = ["_entropy_calc", "_calc"]
-
         for k in unserializable_objects:
             if k in state.keys():
                 del state[k]
-
         return state
 
     def __setstate__(self, state):
-        """Re-initialise the calculator"""
-        # Re-initialise
         self.__dict__.update(state)
         self._entropy_calc = self._getcalc("entropy")
 
@@ -101,39 +711,42 @@ class JIDTBase(Unsigned):
             return (self._estimator,)
 
     def _getcalc(self, measure):
+        est = self._estimator
+
+        # --- Pure-numpy calculators (no JIDT/JVM needed) ---
+
         if measure == "entropy":
-            if self._estimator == "kernel":
-                calc = self._base_class.kernel.EntropyCalculatorMultiVariateKernel()
-            elif self._estimator == "kozachenko":
-                calc = (
-                    self._base_class.kozachenko.EntropyCalculatorMultiVariateKozachenko()
-                )
-            else:
-                calc = self._base_class.gaussian.EntropyCalculatorMultiVariateGaussian()
-        elif measure == "MutualInfo":
-            if self._estimator == "kernel":
-                calc = self._base_class.kernel.MutualInfoCalculatorMultiVariateKernel()
-            elif self._estimator == "kraskov":
-                calc = (
-                    self._base_class.kraskov.MutualInfoCalculatorMultiVariateKraskov1()
-                )
-            else:
-                calc = (
-                    self._base_class.gaussian.MutualInfoCalculatorMultiVariateGaussian()
-                )
-        elif measure == "TransferEntropy":
-            if self._estimator == "kernel":
-                calc = self._base_class.kernel.TransferEntropyCalculatorKernel()
-            elif self._estimator == "kraskov":
-                calc = self._base_class.kraskov.TransferEntropyCalculatorKraskov()
-            else:
-                calc = self._base_class.gaussian.TransferEntropyCalculatorGaussian()
-        else:
-            raise TypeError(f"Unknown measure: {measure}")
+            if est == 'kozachenko':
+                return KLEntropyCalculator()
+            if est in ('gaussian', 'kraskov'):
+                return GaussianEntropyCalculator()
+            if est == 'kernel':
+                calc = KernelEntropyCalculator()
+                calc.setProperty("KERNEL_WIDTH", str(self._kernel_width))
+                return calc
+            if est == 'symbolic':
+                return None  # symbolic TE doesn't use entropy calculator
 
-        return self._setup(calc)
+        if measure == "MutualInfo":
+            if est in ('gaussian', 'kraskov', 'kozachenko'):
+                return GaussianEntropyCalculator()  # dummy; multivariate bypasses
+            if est == 'kernel':
+                calc = KernelMICalculator()
+                calc.setProperty("KERNEL_WIDTH", str(self._kernel_width))
+                return calc
 
-    # No Theiler window yet (can it be done?)
+        if measure == "TransferEntropy":
+            if est in ('gaussian', 'kraskov', 'kozachenko'):
+                return _DummyTECalculator()
+            if est == 'kernel':
+                calc = KernelTECalculator()
+                calc.setProperty("KERNEL_WIDTH", str(self._kernel_width))
+                return calc
+            if est == 'symbolic':
+                return SymbolicTECalculator()
+
+        raise TypeError(f"Unknown measure/estimator: {measure}/{est}")
+
     @parse_univariate
     def _compute_entropy(self, data, i=None):
         if not hasattr(data, "entropy"):
@@ -145,17 +758,18 @@ class JIDTBase(Unsigned):
 
         if data.entropy[key][i] == -np.inf:
             x = np.squeeze(data.to_numpy()[i])
+            est = self._estimator
 
-            self._entropy_calc.initialise(1)
-            self._entropy_calc.setObservations(jp.JArray(jp.JDouble, 1)(x))
-
-            data.entropy[key][
-                i
-            ] = self._entropy_calc.computeAverageLocalOfObservations()
+            if est in ('gaussian', 'kraskov'):
+                data.entropy[key][i] = _gaussian_entropy_from_data(x.reshape(-1, 1))
+            else:
+                # kozachenko, kernel — all have numpy calculators
+                self._entropy_calc.initialise(1)
+                self._entropy_calc.setObservations(x)
+                data.entropy[key][i] = self._entropy_calc.computeAverageLocalOfObservations()
 
         return data.entropy[key][i]
 
-    # No Theiler window is available in the JIDT estimator
     @parse_bivariate
     def _compute_joint_entropy(self, data, i, j):
         if not hasattr(data, "joint_entropy"):
@@ -167,30 +781,37 @@ class JIDTBase(Unsigned):
 
         if data.joint_entropy[key][i, j] == -np.inf:
             x, y = data.to_numpy()[[i, j]]
+            joint = np.concatenate([x, y], axis=1)
+            est = self._estimator
 
-            self._entropy_calc.initialise(2)
-            self._entropy_calc.setObservations(jp.JArray(jp.JDouble, 2)(np.concatenate([x, y], axis=1)))
+            if est in ('gaussian', 'kraskov'):
+                val = _gaussian_entropy_from_data(joint)
+            else:
+                # kozachenko, kernel — all have numpy calculators
+                self._entropy_calc.initialise(2)
+                self._entropy_calc.setObservations(joint)
+                val = self._entropy_calc.computeAverageLocalOfObservations()
 
-            data.joint_entropy[key][i, j] = self._entropy_calc.computeAverageLocalOfObservations()
-            data.joint_entropy[key][j, i] = data.joint_entropy[key][i, j]
+            data.joint_entropy[key][i, j] = val
+            data.joint_entropy[key][j, i] = val
 
         return data.joint_entropy[key][i, j]
 
-    # No Theiler window is available in the JIDT estimator
     def _compute_conditional_entropy(self, X, Y):
-        XY = np.concatenate([X, Y], axis=1)
-
-        self._entropy_calc.initialise(XY.shape[1])
-        self._entropy_calc.setObservations(jp.JArray(jp.JDouble, XY.ndim)(XY))
-
-        H_XY = self._entropy_calc.computeAverageLocalOfObservations()
-
-        self._entropy_calc.initialise(Y.shape[1])
-        self._entropy_calc.setObservations(jp.JArray(jp.JDouble, Y.ndim)(Y))
-
-        H_Y = self._entropy_calc.computeAverageLocalOfObservations()
-
-        return H_XY - H_Y
+        est = self._estimator
+        if est in ('gaussian', 'kraskov'):
+            XY = np.concatenate([X, Y], axis=1)
+            return _gaussian_entropy_from_data(XY) - _gaussian_entropy_from_data(Y)
+        else:
+            # kozachenko, kernel — all have numpy calculators
+            XY = np.concatenate([X, Y], axis=1)
+            self._entropy_calc.initialise(XY.shape[1])
+            self._entropy_calc.setObservations(XY)
+            H_XY = self._entropy_calc.computeAverageLocalOfObservations()
+            self._entropy_calc.initialise(Y.shape[1])
+            self._entropy_calc.setObservations(Y)
+            H_Y = self._entropy_calc.computeAverageLocalOfObservations()
+            return H_XY - H_Y
 
     def _set_theiler_window(self, data, i, j):
         if self._dyn_corr_excl == "AUTO":
@@ -198,13 +819,10 @@ class JIDTBase(Unsigned):
                 z = data.to_numpy()
                 theiler_window = -np.ones((data.n_processes, data.n_processes))
 
-                # Compute effective sample size for each pair
                 for _i in range(data.n_processes):
                     targ = z[_i]
                     for _j in range(_i + 1, data.n_processes):
                         src = z[_j]
-
-                        # Initialize the Theiler window using Bartlett's formula
                         theiler_window[_i, _j] = 2 * np.dot(
                             utils.acf(src), utils.acf(targ)
                         )
@@ -233,6 +851,23 @@ class JointEntropy(JIDTBase, Undirected):
     def bivariate(self, data, i=None, j=None):
         return self._compute_joint_entropy(data, i=i, j=j)
 
+    @parse_multivariate
+    def multivariate(self, data):
+        if self._estimator == 'gaussian':
+            Z = data.to_numpy(squeeze=True)
+            M = Z.shape[0]
+            R = np.corrcoef(Z)
+            variances = np.var(Z, axis=1, ddof=1)
+            log_var = np.log(np.maximum(variances, 1e-300))
+            r2 = np.clip(R ** 2, 0, 1 - 1e-15)
+            JE = (np.log(2 * np.pi * np.e)
+                  + 0.5 * log_var[:, None]
+                  + 0.5 * log_var[None, :]
+                  + 0.5 * np.log(1 - r2))
+            np.fill_diagonal(JE, np.nan)
+            return JE
+        return super().multivariate(data)
+
 
 class ConditionalEntropy(JIDTBase, Directed):
 
@@ -248,6 +883,25 @@ class ConditionalEntropy(JIDTBase, Directed):
         return self._compute_joint_entropy(data, i=i, j=j) - self._compute_entropy(
             data, i=i
         )
+
+    @parse_multivariate
+    def multivariate(self, data):
+        if self._estimator == 'gaussian':
+            Z = data.to_numpy(squeeze=True)
+            M = Z.shape[0]
+            R = np.corrcoef(Z)
+            variances = np.var(Z, axis=1, ddof=1)
+            log_var = np.log(np.maximum(variances, 1e-300))
+            r2 = np.clip(R ** 2, 0, 1 - 1e-15)
+            H_marginal = 0.5 * np.log(2 * np.pi * np.e * np.maximum(variances, 1e-300))
+            JE = (np.log(2 * np.pi * np.e)
+                  + 0.5 * log_var[:, None]
+                  + 0.5 * log_var[None, :]
+                  + 0.5 * np.log(1 - r2))
+            CE = JE - H_marginal[:, None]
+            np.fill_diagonal(CE, np.nan)
+            return CE
+        return super().multivariate(data)
 
 
 class MutualInfo(JIDTBase, Undirected):
@@ -267,20 +921,57 @@ class MutualInfo(JIDTBase, Undirected):
     @parse_bivariate
     def bivariate(self, data, i=None, j=None, verbose=False):
         """Compute mutual information between Y and X"""
-        self._set_theiler_window(data, i, j)
-        self._calc.initialise(1, 1)
+        if self._estimator in ('gaussian', 'kraskov'):
+            # Handled by multivariate; bivariate fallback
+            z = data.to_numpy(squeeze=True)
+            if self._estimator == 'gaussian':
+                r = np.corrcoef(z[i], z[j])[0, 1]
+                r2 = np.clip(r ** 2, 0, 1 - 1e-15)
+                return -0.5 * np.log(1 - r2)
+            else:
+                # kraskov bivariate
+                tree_x = cKDTree(z[i].reshape(-1, 1))
+                tree_y = cKDTree(z[j].reshape(-1, 1))
+                k = int(self._prop_k)
+                raw_w = getattr(self, '_dyn_corr_excl', None)
+                w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
+                return _ksg_mi_pair(z[i], z[j], k, w, tree_x, tree_y)
 
-        try:
+        # kernel estimator: use numpy KernelMICalculator
+        if self._estimator == 'kernel':
             src, targ = data.to_numpy(squeeze=True)[[i, j]]
-            self._calc.setObservations(
-                jp.JArray(jp.JDouble)(src), jp.JArray(jp.JDouble)(targ)
-            )
+            self._calc.initialise(1, 1)
+            self._calc.setObservations(src, targ)
             return self._calc.computeAverageLocalOfObservations()
-        except:
-            logging.warning(
-                "MI calcs failed. Maybe check input data for Cholesky factorisation?"
-            )
-            return np.nan
+
+        # Fallback should not be reached (all estimators handled above)
+        logging.warning(f"MI bivariate: unhandled estimator '{self._estimator}'")
+        return np.nan
+
+    @parse_multivariate
+    def multivariate(self, data):
+        if self._estimator == 'gaussian':
+            Z = data.to_numpy(squeeze=True)
+            R = np.corrcoef(Z)
+            r2 = np.clip(R ** 2, 0, 1 - 1e-15)
+            MI = -0.5 * np.log(1 - r2)
+            np.fill_diagonal(MI, np.nan)
+            return MI
+        elif self._estimator == 'kraskov':
+            Z = data.to_numpy(squeeze=True)
+            M, N = Z.shape
+            k = int(self._prop_k)
+            raw_w = getattr(self, '_dyn_corr_excl', None)
+            w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
+            marginal_trees = [cKDTree(Z[i].reshape(-1, 1)) for i in range(M)]
+            result = np.full((M, M), np.nan)
+            for i in range(M):
+                for j in range(i + 1, M):
+                    mi = _ksg_mi_pair(Z[i], Z[j], k, w,
+                                      marginal_trees[i], marginal_trees[j])
+                    result[i, j] = result[j, i] = mi
+            return result
+        return super().multivariate(data)
 
 
 class TimeLaggedMutualInfo(JIDTBase, Directed):
@@ -293,28 +984,74 @@ class TimeLaggedMutualInfo(JIDTBase, Directed):
         self._calc = self._getcalc("MutualInfo")
 
     def __setstate__(self, state):
-        """Re-initialise the calculator"""
         super().__setstate__(state)
         self.__dict__.update(state)
         self._calc = self._getcalc("MutualInfo")
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None, verbose=False):
-        self._set_theiler_window(data, i, j)
-        self._calc.initialise(1, 1)
-        try:
+        if self._estimator in ('gaussian', 'kraskov'):
+            z = data.to_numpy(squeeze=True)
+            src = z[i][:-1]
+            tgt = z[j][1:]
+            if self._estimator == 'gaussian':
+                r = np.corrcoef(src, tgt)[0, 1]
+                r2 = np.clip(r ** 2, 0, 1 - 1e-15)
+                return -0.5 * np.log(1 - r2)
+            else:
+                tree_x = cKDTree(src.reshape(-1, 1))
+                tree_y = cKDTree(tgt.reshape(-1, 1))
+                k = int(self._prop_k)
+                raw_w = getattr(self, '_dyn_corr_excl', None)
+                w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
+                return _ksg_mi_pair(src, tgt, k, w, tree_x, tree_y)
+
+        # kernel estimator: use numpy KernelMICalculator
+        if self._estimator == 'kernel':
             src, targ = data.to_numpy(squeeze=True)[[i, j]]
             src = src[:-1]
             targ = targ[1:]
-            self._calc.setObservations(
-                jp.JArray(jp.JDouble, 1)(src), jp.JArray(jp.JDouble, 1)(targ)
-            )
+            self._calc.initialise(1, 1)
+            self._calc.setObservations(src, targ)
             return self._calc.computeAverageLocalOfObservations()
-        except:
-            logging.warning(
-                "Time-lagged MI calcs failed. Maybe check input data for Cholesky factorisation?"
-            )
-            return np.nan
+
+        logging.warning(f"TLMI bivariate: unhandled estimator '{self._estimator}'")
+        return np.nan
+
+    @parse_multivariate
+    def multivariate(self, data):
+        if self._estimator == 'gaussian':
+            Z = data.to_numpy(squeeze=True)
+            M, T = Z.shape
+            Z_src = Z[:, :-1]
+            Z_tgt = Z[:, 1:]
+            stacked = np.vstack([Z_src, Z_tgt])
+            R = np.corrcoef(stacked)
+            r_cross = R[:M, M:]
+            r2 = np.clip(r_cross ** 2, 0, 1 - 1e-15)
+            TLMI = -0.5 * np.log(1 - r2)
+            np.fill_diagonal(TLMI, np.nan)
+            return TLMI
+        elif self._estimator == 'kraskov':
+            Z = data.to_numpy(squeeze=True)
+            M, T = Z.shape
+            k = int(self._prop_k)
+            raw_w = getattr(self, '_dyn_corr_excl', None)
+            w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
+            Z_src = Z[:, :-1]
+            Z_tgt = Z[:, 1:]
+            src_trees = [cKDTree(Z_src[i].reshape(-1, 1)) for i in range(M)]
+            tgt_trees = [cKDTree(Z_tgt[j].reshape(-1, 1)) for j in range(M)]
+            result = np.full((M, M), np.nan)
+            for i in range(M):
+                for j in range(M):
+                    if i == j:
+                        continue
+                    mi = _ksg_mi_pair(Z_src[i], Z_tgt[j], k, w,
+                                      src_trees[i], tgt_trees[j])
+                    result[i, j] = mi
+            return result
+        return super().multivariate(data)
 
 
 class TransferEntropy(JIDTBase, Directed):
@@ -334,11 +1071,17 @@ class TransferEntropy(JIDTBase, Directed):
         l_tau=1,
         **kwargs,
     ):
-
         if "estimator" not in kwargs.keys() or kwargs["estimator"] == "gaussian":
             self.identifier = "gc"
         super().__init__(**kwargs)
         self._calc = self._getcalc("TransferEntropy")
+
+        # Store embedding params for numpy path
+        self._auto_embed_method = auto_embed_method
+        self._k_history = k_history
+        self._k_tau = k_tau
+        self._l_history = l_history
+        self._l_tau = l_tau
 
         # Auto-embedding
         if auto_embed_method is not None:
@@ -353,7 +1096,6 @@ class TransferEntropy(JIDTBase, Directed):
                 )
             else:
                 self.identifier = self.identifier + "_k-max-{}".format(k_search_max)
-            # Set up calculator
         else:
             self._calc.setProperty(self._K_HISTORY_PROP_NAME, str(k_history))
             if self._estimator != "kernel":
@@ -367,28 +1109,59 @@ class TransferEntropy(JIDTBase, Directed):
                 self.identifier = self.identifier + "_k-{}".format(k_history)
 
     def __setstate__(self, state):
-        """Re-initialise the calculator"""
-        # Re-initialise
         super().__setstate__(state)
         self.__dict__.update(state)
         self._calc = self._getcalc("TransferEntropy")
 
+    def _resolve_theiler(self, data, i, j):
+        raw_w = getattr(self, '_dyn_corr_excl', None)
+        if raw_w is None:
+            return 0
+        if raw_w == "AUTO":
+            if not hasattr(data, 'theiler'):
+                z = data.to_numpy()
+                M = data.n_processes
+                theiler = -np.ones((M, M))
+                for _i in range(M):
+                    for _j in range(_i + 1, M):
+                        theiler[_i, _j] = 2 * np.dot(
+                            utils.acf(z[_i]), utils.acf(z[_j])
+                        )
+                        theiler[_j, _i] = theiler[_i, _j]
+                data.theiler = theiler
+            return int(data.theiler[i, j])
+        return int(raw_w)
+
     @parse_bivariate
     def bivariate(self, data, i=None, j=None, verbose=False):
-        """
-        Compute transfer entropy from i->j
-        """
-        self._set_theiler_window(data, i, j)
-        self._calc.initialise()
-        src, targ = data.to_numpy(squeeze=True)[[i, j]]
-        try:
-            self._calc.setObservations(
-                jp.JArray(jp.JDouble, 1)(src), jp.JArray(jp.JDouble, 1)(targ)
-            )
+        est = self._estimator
+        auto = self._auto_embed_method
+
+        # Pure-numpy path for gaussian/kraskov with fixed embedding
+        if est in ('gaussian', 'kraskov') and auto is None:
+            src, targ = data.to_numpy(squeeze=True)[[i, j]]
+            if est == 'gaussian':
+                return _gaussian_te_bivariate(
+                    src, targ, self._k_history, self._k_tau,
+                    self._l_history, self._l_tau
+                )
+            else:
+                k_nn = int(self._prop_k)
+                w = self._resolve_theiler(data, i, j)
+                return _kraskov_te_bivariate(
+                    src, targ, self._k_history, self._k_tau,
+                    self._l_history, self._l_tau, k_nn, w
+                )
+
+        # kernel/symbolic path: numpy calculators
+        if est in ('kernel', 'symbolic'):
+            self._calc.initialise()
+            src, targ = data.to_numpy(squeeze=True)[[i, j]]
+            self._calc.setObservations(src, targ)
             return self._calc.computeAverageLocalOfObservations()
-        except Exception as err:
-            logging.warning(f"TE calcs failed: {err}.")
-            return np.nan
+
+        logging.warning(f"TE bivariate: unhandled estimator '{est}'")
+        return np.nan
 
 
 class CrossmapEntropy(JIDTBase, Directed):
@@ -408,19 +1181,20 @@ class CrossmapEntropy(JIDTBase, Directed):
         k = self._history_length
         targ_future = targ[k:]
         src_past = np.expand_dims(src[k - 1 : -1], axis=1)
-        for i in range(2, k):
+        for idx in range(2, k):
             src_past = np.append(
-                src_past, np.expand_dims(src[k - i : -i], axis=1), axis=1
+                src_past, np.expand_dims(src[k - idx : -idx], axis=1), axis=1
             )
 
         joint = np.concatenate([src_past, np.expand_dims(targ_future, axis=1)], axis=1)
 
+        # All estimators now have numpy entropy calculators
         self._entropy_calc.initialise(joint.shape[1])
-        self._entropy_calc.setObservations(jp.JArray(jp.JDouble, 2)(joint))
+        self._entropy_calc.setObservations(joint)
         H_xy = self._entropy_calc.computeAverageLocalOfObservations()
 
         self._entropy_calc.initialise(src_past.shape[1])
-        self._entropy_calc.setObservations(jp.JArray(jp.JDouble, 2)(src_past))
+        self._entropy_calc.setObservations(src_past)
         H_y = self._entropy_calc.computeAverageLocalOfObservations()
 
         return H_xy - H_y
@@ -437,20 +1211,18 @@ class CausalEntropy(JIDTBase, Directed):
         self._n = n
 
     def _compute_causal_entropy(self, src, targ):
-
         src = np.squeeze(src)
         targ = np.squeeze(targ)
+        est = self._estimator
 
-        m_utils = jp.JPackage("infodynamics.utils").MatrixUtils
-
+        # All estimators now have numpy calculators
         causal_entropy = 0
         for i in range(1, self._n + 1):
-            Yp = m_utils.makeDelayEmbeddingVector(jp.JArray(jp.JDouble, 1)(targ), i - 1)[:-1]
-            Xp = m_utils.makeDelayEmbeddingVector(jp.JArray(jp.JDouble, 1)(src), i)
+            Yp = _numpy_delay_embedding(targ, i - 1)[:-1]
+            Xp = _numpy_delay_embedding(src, i)
             XYp = np.concatenate([Yp, Xp], axis=1)
-
-            Yf = np.expand_dims(targ[i - 1 :], 1)
-            causal_entropy = causal_entropy + self._compute_conditional_entropy(Yf, XYp)
+            Yf = np.expand_dims(targ[i - 1:], 1)
+            causal_entropy += self._compute_conditional_entropy(Yf, XYp)
         return causal_entropy
 
     def _getkey(self):
@@ -485,28 +1257,25 @@ class DirectedInfo(CausalEntropy, Directed):
         self._n = n
 
     def _compute_entropy_rates(self, targ):
-
         targ = np.squeeze(targ)
-        m_utils = jp.JPackage("infodynamics.utils").MatrixUtils
+        est = self._estimator
 
+        # All estimators now have numpy calculators
         entropy_rate_sum = 0
         for i in range(1, self._n + 1):
-            # Compute entropy for an i-dimensional embedding
-            self._entropy_calc.initialise(i)
-
-            Yi = m_utils.makeDelayEmbeddingVector(jp.JArray(jp.JDouble, 1)(targ), i)
-            self._entropy_calc.setObservations(Yi)
-            entropy_rate_sum = entropy_rate_sum + self._entropy_calc.computeAverageLocalOfObservations() / i
-
+            Yi = _numpy_delay_embedding(targ, i)
+            if est == 'gaussian':
+                entropy_rate_sum += _gaussian_entropy_from_data(Yi) / i
+            else:
+                self._entropy_calc.initialise(i)
+                self._entropy_calc.setObservations(Yi)
+                entropy_rate_sum += self._entropy_calc.computeAverageLocalOfObservations() / i
         return entropy_rate_sum
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
-        """Compute directed information from i to j"""
-
         entropy_rates = self._compute_entropy_rates(data.to_numpy(squeeze=True)[j])
         causal_entropy = super().bivariate(data, i=i, j=j)
-
         return entropy_rates - causal_entropy
 
 
@@ -548,17 +1317,12 @@ class IntegratedInformation(Undirected, Unsigned):
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
-        """
-        Compute integrated information using a native Python implementation.
-        """
         try:
             from pyspi.lib.phi_native import phi_comp
 
-            # Prepare partition for bivariate analysis
             P = np.array([1, 2])
             X = data.to_numpy(squeeze=True)[[i, j]]
 
-            # Set up parameters for native implementation
             params = {"tau": self._delay}
             options = {
                 "type_of_phi": self._phitype,
