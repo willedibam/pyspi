@@ -51,13 +51,21 @@ class PairwiseDistance(Undirected, Unsigned):
     identifier = "pdist"
     labels = ["unsigned", "distance", "unordered", "nonlinear", "undirected"]
 
-    def __init__(self, metric="euclidean", **kwargs):
+    def __init__(self, metric="euclidean", normalise=False, **kwargs):
         self._metric = metric
+        self._normalise = normalise
         self.identifier += f"_{metric}"
+        if normalise:
+            self.identifier += "_rmse"
 
     @parse_multivariate
     def multivariate(self, data):
-        return pairwise_distances(data.to_numpy(squeeze=True), metric=self._metric)
+        Z = data.to_numpy(squeeze=True)
+        D = pairwise_distances(Z, metric=self._metric)
+        if self._normalise:
+            T = Z.shape[1]
+            D = D / np.sqrt(T)
+        return D
 
 
 """ TODO: include optional kernels in each method
@@ -211,6 +219,7 @@ class DynamicTimeWarping(TimeWarping):
         global_constraint=None,
         sakoe_chiba_radius=None,
         sakoe_chiba_ratio=None,
+        normalise=False,
         **kwargs,
     ):
         if sakoe_chiba_radius is not None and sakoe_chiba_ratio is not None:
@@ -228,6 +237,7 @@ class DynamicTimeWarping(TimeWarping):
         self._simfn = tslearn.metrics.dtw
         self._sakoe_chiba_radius = sakoe_chiba_radius
         self._sakoe_chiba_ratio = sakoe_chiba_ratio
+        self._normalise = normalise
         self._warned_itakura_fallback = False
         self._warned_c_fallback = False
 
@@ -238,6 +248,8 @@ class DynamicTimeWarping(TimeWarping):
                 self.identifier += f"_ratio-{sakoe_chiba_ratio:.4g}"
             else:
                 self.identifier += "_radius-auto"
+        if normalise:
+            self.identifier += "_rmse"
 
     def _resolve_radius(self, n):
         if self._sakoe_chiba_radius is not None:
@@ -264,7 +276,8 @@ class DynamicTimeWarping(TimeWarping):
                     stacklevel=2,
                 )
                 self._warned_itakura_fallback = True
-            return tslearn.metrics.dtw(x, y, global_constraint="itakura")
+            d = tslearn.metrics.dtw(x, y, global_constraint="itakura")
+            return d / np.sqrt(n) if self._normalise else d
 
         radius = None
         window = None
@@ -278,14 +291,15 @@ class DynamicTimeWarping(TimeWarping):
             kwargs = {"use_c": True}
             if window is not None:
                 kwargs["window"] = window
-            return _dtw_c.distance(x, y, **kwargs)
+            d = _dtw_c.distance(x, y, **kwargs)
         except ImportError:
             # dtaidistance not installed — use tslearn
             if constraint == "sakoe_chiba":
-                return tslearn.metrics.dtw(
+                d = tslearn.metrics.dtw(
                     x, y, global_constraint="sakoe_chiba", sakoe_chiba_radius=radius,
                 )
-            return tslearn.metrics.dtw(x, y, global_constraint=constraint)
+            else:
+                d = tslearn.metrics.dtw(x, y, global_constraint=constraint)
         except (CythonException, ValueError):
             if not self._warned_c_fallback:
                 warnings.warn(
@@ -296,10 +310,12 @@ class DynamicTimeWarping(TimeWarping):
                 )
                 self._warned_c_fallback = True
             if constraint == "sakoe_chiba":
-                return tslearn.metrics.dtw(
+                d = tslearn.metrics.dtw(
                     x, y, global_constraint="sakoe_chiba", sakoe_chiba_radius=radius,
                 )
-            return tslearn.metrics.dtw(x, y)
+            else:
+                d = tslearn.metrics.dtw(x, y)
+        return d / np.sqrt(n) if self._normalise else d
 
     @parse_multivariate
     def multivariate(self, data):
@@ -341,6 +357,9 @@ class DynamicTimeWarping(TimeWarping):
             mask_upper = np.triu(np.ones((M, M), dtype=bool), k=1)
             dm_sym = np.where(mask_upper, dm, dm.T)
             np.fill_diagonal(dm_sym, np.nan)
+            if self._normalise:
+                T = Z.shape[1]
+                dm_sym = dm_sym / np.sqrt(T)
             return dm_sym
 
         except ImportError:
@@ -515,7 +534,7 @@ class CrossPairwiseDistance(Undirected):
 
     @staticmethod
     def _dist(a, b):
-        return np.sqrt(np.sum((a - b) ** 2))
+        return np.sqrt(np.mean((a - b) ** 2))  # RMSE: normalised by sqrt(N)
 
     def _cross_dist(self, x, y):
         tau = self._tau
