@@ -121,24 +121,14 @@ def convert_mdf_to_ddf(df):
     return ddf
 
 def is_jpype_jvm_available():
-    """Check whether a JVM is accessible via Jpype"""
-    try:
-        import jpype as jp
-        if not jp.isJVMStarted():
-            jarloc = (os.path.dirname(os.path.abspath(__file__)) + "/lib/jidt/infodynamics.jar")
-            # if JVM not started, start a session
-            print(f"Starting JVM with java class {jarloc}.")
-            jp.startJVM(jp.getDefaultJVMPath(), "-ea", "-Djava.class.path=" + jarloc)
-        return True
-    except Exception as e:
-        print(f"Jpype JVM not available: {e}")
-        return False
+    """JIDT/Java has been replaced with pure-numpy equivalents; always False."""
+    return False
 
 def check_optional_deps():
     """Bundle all of the optional
     dependency checks together."""
     isAvailable = {}
-    isAvailable['java'] = is_jpype_jvm_available()
+    isAvailable['java'] = False
 
     return isAvailable
 

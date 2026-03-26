@@ -530,6 +530,41 @@ def _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau):
     return Y_future, Y_past, X_past
 
 
+def _gaussian_ais(targ, k, tau):
+    """Gaussian AIS: MI(Y_future; Y_past_embedding(k, tau)).
+
+    Used for AIS-criterion auto-embedding: select (k, tau) = argmax AIS.
+    """
+    T = len(targ)
+    start = (k - 1) * tau
+    end = T - 1
+    if start >= end:
+        return -np.inf
+    Y_f = targ[start + 1: end + 1].reshape(-1, 1)
+    Y_p = np.column_stack([targ[start - i * tau: end - i * tau] for i in range(k)])
+    YfYp = np.concatenate([Y_f, Y_p], axis=1)
+
+    def _slogdet(arr):
+        cov = np.cov(arr, rowvar=False, ddof=1)
+        if arr.shape[1] == 1:
+            return np.log(max(float(cov), 1e-300))
+        sign, ld = np.linalg.slogdet(cov)
+        return ld if sign > 0 else -np.inf
+
+    return 0.5 * (_slogdet(Y_f) + _slogdet(Y_p) - _slogdet(YfYp))
+
+
+def _auto_embed_gaussian_te(src, targ, k_max, tau_max):
+    """Gaussian TE with Ragwitz-style AIS auto-embedding on target."""
+    best_k, best_tau, best_ais = 1, 1, -np.inf
+    for k in range(1, k_max + 1):
+        for tau in range(1, tau_max + 1):
+            ais = _gaussian_ais(targ, k, tau)
+            if ais > best_ais:
+                best_ais, best_k, best_tau = ais, k, tau
+    return _gaussian_te_bivariate(src, targ, best_k, best_tau, 1, 1)
+
+
 def _gaussian_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau):
     """Gaussian TE via log-determinant ratio."""
     Y_f, Y_p, X_p = _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau)
@@ -1078,6 +1113,8 @@ class TransferEntropy(JIDTBase, Directed):
 
         # Store embedding params for numpy path
         self._auto_embed_method = auto_embed_method
+        self._k_search_max = k_search_max if k_search_max is not None else 10
+        self._tau_search_max = tau_search_max if tau_search_max is not None else 4
         self._k_history = k_history
         self._k_tau = k_tau
         self._l_history = l_history
@@ -1137,9 +1174,10 @@ class TransferEntropy(JIDTBase, Directed):
         est = self._estimator
         auto = self._auto_embed_method
 
+        src, targ = data.to_numpy(squeeze=True)[[i, j]]
+
         # Pure-numpy path for gaussian/kraskov with fixed embedding
         if est in ('gaussian', 'kraskov') and auto is None:
-            src, targ = data.to_numpy(squeeze=True)[[i, j]]
             if est == 'gaussian':
                 return _gaussian_te_bivariate(
                     src, targ, self._k_history, self._k_tau,
@@ -1153,10 +1191,27 @@ class TransferEntropy(JIDTBase, Directed):
                     self._l_history, self._l_tau, k_nn, w
                 )
 
+        # Auto-embedding via AIS criterion (Ragwitz-style)
+        if est in ('gaussian', 'kraskov') and auto is not None:
+            k_max = self._k_search_max
+            tau_max = self._tau_search_max
+            if est == 'gaussian':
+                return _auto_embed_gaussian_te(src, targ, k_max, tau_max)
+            else:
+                # Use gaussian AIS for embedding selection, then kraskov TE
+                best_k, best_tau, best_ais = 1, 1, -np.inf
+                for k in range(1, k_max + 1):
+                    for tau in range(1, tau_max + 1):
+                        ais = _gaussian_ais(targ, k, tau)
+                        if ais > best_ais:
+                            best_ais, best_k, best_tau = ais, k, tau
+                k_nn = int(self._prop_k)
+                w = self._resolve_theiler(data, i, j)
+                return _kraskov_te_bivariate(src, targ, best_k, best_tau, 1, 1, k_nn, w)
+
         # kernel/symbolic path: numpy calculators
         if est in ('kernel', 'symbolic'):
             self._calc.initialise()
-            src, targ = data.to_numpy(squeeze=True)[[i, j]]
             self._calc.setObservations(src, targ)
             return self._calc.computeAverageLocalOfObservations()
 

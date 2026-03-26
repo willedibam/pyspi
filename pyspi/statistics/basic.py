@@ -148,9 +148,9 @@ class SpearmanR(Undirected, Signed):
         if squared:
             self.issigned = lambda: False
             self.identifier = self.identifier + "-sq"
-            self.labels += ["unsigned"]
+            self.labels = self.labels + ["unsigned"]
         else:
-            self.labels += ["signed"]
+            self.labels = self.labels + ["signed"]
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
@@ -184,9 +184,9 @@ class KendallTau(Undirected, Signed):
         if squared:
             self.issigned = lambda: False
             self.identifier = self.identifier + "-sq"
-            self.labels += ["unsigned"]
+            self.labels = self.labels + ["unsigned"]
         else:
-            self.labels += ["signed"]
+            self.labels = self.labels + ["signed"]
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):

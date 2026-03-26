@@ -57,12 +57,15 @@ def _fork_compute_spi(spi_key):
     _restore_blas_threads_in_worker()
     spi = _PARALLEL_CALC._spis[spi_key]
     data = _PARALLEL_CALC.dataset
+    t0 = time.perf_counter()
     try:
         S = spi.multivariate(data)
         np.fill_diagonal(S, np.nan)
-        return spi_key, S, None
+        elapsed = time.perf_counter() - t0
+        return spi_key, S, None, elapsed
     except Exception as err:
-        return spi_key, np.nan, str(err)
+        elapsed = time.perf_counter() - t0
+        return spi_key, np.nan, str(err), elapsed
 
 
 class Calculator:
@@ -103,6 +106,7 @@ class Calculator:
         self._excluded_spis = list()
         self._normalise = normalise
         self._detrend = detrend
+        self._timings = {}
 
         # Define configfile by subset if it was not specified
         if configfile is None:
@@ -226,6 +230,11 @@ class Calculator:
     @labels.setter
     def labels(self, ls):
         self._labels = ls
+
+    @property
+    def timings(self):
+        """Per-SPI wall-clock times (seconds) from the last compute() call."""
+        return dict(self._timings)
 
     @property
     def table(self):
@@ -352,6 +361,7 @@ class Calculator:
             pbar = tqdm(self.spis.keys())
             for spi in pbar:
                 pbar.set_description(f"Processing [{self._name}: {spi}]")
+                t0 = time.perf_counter()
                 try:
                     S = self._spis[spi].multivariate(self.dataset)
                     np.fill_diagonal(S, np.nan)
@@ -359,6 +369,7 @@ class Calculator:
                 except Exception as err:
                     warnings.warn(f'Caught {type(err)} for SPI "{spi}": {err}')
                     self._table[spi] = np.nan
+                self._timings[spi] = time.perf_counter() - t0
             pbar.close()
             print(Fore.GREEN + f"\nCalculation complete. Time taken: {pbar.format_dict['elapsed']:.4f}s")
             inspect_calc_results(self)
@@ -401,10 +412,11 @@ class Calculator:
                 total=len(fork_keys),
                 desc="SPIs (parallel)",
             )
-            for spi_key, result, err in pbar:
+            for spi_key, result, err, elapsed_spi in pbar:
                 if err is not None:
                     warnings.warn(f'Caught error for SPI "{spi_key}": {err}')
                 self._table[spi_key] = result
+                self._timings[spi_key] = elapsed_spi
                 pbar.set_description(f"Done: {spi_key}")
 
         _PARALLEL_CALC = None
@@ -413,6 +425,7 @@ class Calculator:
             pbar = tqdm(jidt_keys, desc="SPIs (JIDT)")
             for spi_key in pbar:
                 pbar.set_description(f"JIDT: {spi_key}")
+                t1 = time.perf_counter()
                 try:
                     S = self._spis[spi_key].multivariate(self.dataset)
                     np.fill_diagonal(S, np.nan)
@@ -422,6 +435,7 @@ class Calculator:
                         f'Caught {type(err).__name__} for SPI "{spi_key}": {err}'
                     )
                     self._table[spi_key] = np.nan
+                self._timings[spi_key] = time.perf_counter() - t1
 
         elapsed = time.time() - t0
         print(Fore.GREEN + f"\nCalculation complete. Time taken: {elapsed:.4f}s")
