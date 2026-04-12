@@ -530,7 +530,9 @@ class CrossPairwiseDistance(Undirected):
         self._metric = metric
         self._tau = int(tau)
         self._statistic = stat
-        self.identifier = f"xpdist_{metric}_tau-{self._tau}_{stat}"
+        # _dist is RMSE-by-construction, so the identifier carries _rmse for
+        # consistency with PairwiseDistance / DynamicTimeWarping when normalise=True.
+        self.identifier = f"xpdist_{metric}_tau-{self._tau}_{stat}_rmse"
 
     @staticmethod
     def _dist(a, b):
