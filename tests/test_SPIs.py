@@ -33,17 +33,37 @@ def compute_new_tables():
     return table_dict
 
 def generate_SPI_test_params():
-    """Function to generate combinations of benchmark table, 
-    new table for each MPI"""
+    """Pair each current SPI with its frozen-upstream baseline.
+
+    SPIs added or renamed in this fork won't appear in the baseline pickle;
+    pickle entries removed in this fork won't appear in the current calc.
+    Both cases are skipped (with a session-end summary) rather than raising.
+    """
     benchmark_tables = load_benchmark_tables()
     new_tables = compute_new_tables()
     params = []
     calc = Calculator()
-    spis = list(calc.spis.keys())
-    spi_ob = list(calc.spis.values())
-    for spi_est, spi_ob in zip(spis, spi_ob):
-        params.append((spi_est, spi_ob, benchmark_tables[spi_est], new_tables[spi_est].to_numpy()))
-    
+    current = dict(calc.spis)
+
+    baseline_keys = set(benchmark_tables)
+    current_keys = set(current)
+    only_current = sorted(current_keys - baseline_keys)
+    only_baseline = sorted(baseline_keys - current_keys)
+    shared = sorted(current_keys & baseline_keys)
+
+    if only_current:
+        print(f"\n[test_SPIs] {len(only_current)} new/renamed SPIs (no baseline, skipped):")
+        for k in only_current:
+            print(f"  + {k}")
+    if only_baseline:
+        print(f"\n[test_SPIs] {len(only_baseline)} baseline SPIs missing from current calc (skipped):")
+        for k in only_baseline:
+            print(f"  - {k}")
+
+    for spi_est in shared:
+        params.append(
+            (spi_est, current[spi_est], benchmark_tables[spi_est], new_tables[spi_est].to_numpy())
+        )
     return params
 
 params = generate_SPI_test_params()

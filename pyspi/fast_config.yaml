@@ -235,8 +235,6 @@
       - unsigned
       - bivariate
       - contemporaneous
-    dependencies: 
-      - java
     configs:
       - estimator: gaussian
       - estimator: kozachenko
@@ -249,8 +247,6 @@
       - unsigned
       - bivariate
       - contemporaneous
-    dependencies: 
-      - java
     configs:
     - estimator: gaussian
     - estimator: kernel
@@ -261,8 +257,6 @@
       - directed
       - time-dependent
       - bivariate
-    dependencies: 
-      - java
     configs:
       - estimator: gaussian
         history_length: 1
@@ -289,8 +283,6 @@
       - unsigned
       - bivariate
       - time-dependent
-    dependencies: 
-      - java
     configs:
       - estimator: gaussian
       - estimator: kozachenko
@@ -304,8 +296,6 @@
       - unsigned
       - bivariate
       - contemporaneous
-    dependencies: 
-      - java
     configs:
       - estimator: gaussian
 
@@ -327,8 +317,6 @@
       - unsigned
       - bivariate
       - time-dependent
-    dependencies: 
-      - java
     configs:
       - estimator: gaussian
 
@@ -351,8 +339,6 @@
       - unsigned
       - bivariate
       - time-dependent
-    dependencies: 
-      - java
     configs:
       - estimator: kraskov
         prop_k: 4

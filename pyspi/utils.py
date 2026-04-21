@@ -120,17 +120,11 @@ def convert_mdf_to_ddf(df):
     ddf = pd.pivot_table(data=df.stack(dropna=False).reset_index(),index='Dataset',columns=['SPI-1', 'SPI-2'],dropna=False).T.droplevel(0)
     return ddf
 
-def is_jpype_jvm_available():
-    """JIDT/Java has been replaced with pure-numpy equivalents; always False."""
-    return False
-
 def check_optional_deps():
-    """Bundle all of the optional
-    dependency checks together."""
-    isAvailable = {}
-    isAvailable['java'] = False
-
-    return isAvailable
+    """Return an empty dict. No optional runtime deps are gated any more
+    (JIDT/Java, Octave/oct2py all removed in favour of pure-numpy/Python
+    replacements). Kept as an extension point."""
+    return {}
 
 def filter_spis(keywords, output_name = None, configfile= None):
     """

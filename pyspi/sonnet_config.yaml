@@ -59,8 +59,6 @@
       - unsigned
       - bivariate
       - time-dependent
-    dependencies:
-      - java
     configs:
       - estimator: gaussian
 
@@ -72,8 +70,6 @@
       - unsigned
       - bivariate
       - time-dependent
-    dependencies:
-      - java
     configs:
       - estimator: kraskov
         prop_k: 4

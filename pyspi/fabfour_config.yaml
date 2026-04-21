@@ -33,8 +33,6 @@
       - unsigned
       - bivariate
       - time-dependent
-    dependencies:
-      - java
     configs:
       - estimator: gaussian
 

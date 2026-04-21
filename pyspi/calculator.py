@@ -130,10 +130,7 @@ class Calculator:
             else:
                 configfile = os.path.dirname(os.path.abspath(__file__)) + "/config.yaml"
 
-        # add dependency checks here if the calculator is being instantiated for the first time
         if not Calculator._optional_dependencies:
-            # check if optional dependencies exist
-            print("Checking if optional dependencies exist...")
             Calculator._optional_dependencies = check_optional_deps()
 
         self._load_yaml(configfile)
@@ -346,8 +343,6 @@ class Calculator:
         """Compute the SPIs on the MVTS dataset.
 
         Supports fork-based parallelism via PYSPI_N_JOBS env var (default: 1).
-        JIDT SPIs (kernel/symbolic estimators, auto-embed TE) run sequentially
-        in the main process because JPype's JVM does not survive fork().
         """
         if not hasattr(self, "_dataset"):
             raise AttributeError(
@@ -357,7 +352,6 @@ class Calculator:
         n_jobs = int(os.getenv("PYSPI_N_JOBS", "1"))
 
         if n_jobs <= 1:
-            # Original sequential path
             pbar = tqdm(self.spis.keys())
             for spi in pbar:
                 pbar.set_description(f"Processing [{self._name}: {spi}]")
@@ -375,30 +369,9 @@ class Calculator:
             inspect_calc_results(self)
             return
 
-        # Parallel path
-        from . import statistics as _stats
-        _infotheory = importlib.import_module(".statistics.infotheory", __package__)
-
         spi_keys = list(self.spis.keys())
-
-        def _needs_jidt(spi):
-            if "infotheory" not in spi.__class__.__module__:
-                return False
-            est = getattr(spi, '_estimator', None)
-            if est not in ('gaussian', 'kraskov', 'kozachenko'):
-                return True
-            if isinstance(spi, _infotheory.TransferEntropy):
-                return getattr(spi, '_auto_embed_method', None) is not None
-            return False
-
-        jidt_keys = [k for k in spi_keys if _needs_jidt(self._spis[k])]
-        fork_keys = [k for k in spi_keys if k not in jidt_keys]
-        n_workers = min(n_jobs, len(fork_keys))
-
-        print(
-            f"[pyspi-parallel] {len(fork_keys)} SPIs via {n_workers} "
-            f"fork workers, {len(jidt_keys)} JIDT SPIs sequential"
-        )
+        n_workers = min(n_jobs, len(spi_keys))
+        print(f"[pyspi-parallel] {len(spi_keys)} SPIs via {n_workers} fork workers")
 
         t0 = time.time()
 
@@ -408,8 +381,8 @@ class Calculator:
         ctx = _mp.get_context("fork")
         with ctx.Pool(n_workers) as pool:
             pbar = tqdm(
-                pool.imap_unordered(_fork_compute_spi, fork_keys),
-                total=len(fork_keys),
+                pool.imap_unordered(_fork_compute_spi, spi_keys),
+                total=len(spi_keys),
                 desc="SPIs (parallel)",
             )
             for spi_key, result, err, elapsed_spi in pbar:
@@ -420,22 +393,6 @@ class Calculator:
                 pbar.set_description(f"Done: {spi_key}")
 
         _PARALLEL_CALC = None
-
-        if jidt_keys:
-            pbar = tqdm(jidt_keys, desc="SPIs (JIDT)")
-            for spi_key in pbar:
-                pbar.set_description(f"JIDT: {spi_key}")
-                t1 = time.perf_counter()
-                try:
-                    S = self._spis[spi_key].multivariate(self.dataset)
-                    np.fill_diagonal(S, np.nan)
-                    self._table[spi_key] = S
-                except Exception as err:
-                    warnings.warn(
-                        f'Caught {type(err).__name__} for SPI "{spi_key}": {err}'
-                    )
-                    self._table[spi_key] = np.nan
-                self._timings[spi_key] = time.perf_counter() - t1
 
         elapsed = time.time() - t0
         print(Fore.GREEN + f"\nCalculation complete. Time taken: {elapsed:.4f}s")
