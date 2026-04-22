@@ -29,6 +29,11 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
 dependencies = [
+    # Python 3.12 venvs no longer bundle setuptools by default (PEP 632), but
+    # pyEDM/LoadData.py still does `import pkg_resources`, which lives inside
+    # setuptools. Upper bound <80 because setuptools>=80 removed pkg_resources
+    # from the default install.
+    "setuptools>=68,<80",
     "numpy>=2.0",
     "scipy>=1.11",
     "pandas>=2.0",
