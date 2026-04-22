@@ -216,15 +216,15 @@
     configs:
 
   # Information-geometric conditional independence
-  InformationGeometricConditionalIndependence:
-    labels:
-      - directed
-      - nonlinear
-      - unsigned
-      - bivariate
-      - contemporaneous
-    dependencies:
-    configs:
+  # InformationGeometricConditionalIndependence:
+  #   labels:
+  #     - directed
+  #     - nonlinear
+  #     - unsigned
+  #     - bivariate
+  #     - contemporaneous
+  #   dependencies:
+  #   configs:
 
 # Information-theoretic statistics
 .statistics.infotheory:

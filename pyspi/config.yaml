@@ -96,6 +96,71 @@
       - squared: True
       - squared: False
 
+  # Lagged correlation coefficient (fork-added; class in pyspi/statistics/basic.py)
+  LaggedCorrelation:
+    labels:
+      - undirected
+      - linear
+      - signed/unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+    configs:
+      - estimator: pearson
+        max_tau: 5
+        squared: False
+      - estimator: pearson
+        max_tau: 5
+        squared: True
+      - estimator: pearson
+        tau: 10
+        squared: False
+      - estimator: pearson
+        tau: 10
+        squared: True
+      - estimator: pearson
+        tau: 20
+        squared: False
+      - estimator: pearson
+        tau: 20
+        squared: True
+      - estimator: spearman
+        max_tau: 5
+        squared: False
+      - estimator: spearman
+        max_tau: 5
+        squared: True
+      - estimator: spearman
+        tau: 10
+        squared: False
+      - estimator: spearman
+        tau: 10
+        squared: True
+      - estimator: spearman
+        tau: 20
+        squared: False
+      - estimator: spearman
+        tau: 20
+        squared: True
+      - estimator: kendall
+        max_tau: 5
+        squared: False
+      - estimator: kendall
+        max_tau: 5
+        squared: True
+      - estimator: kendall
+        tau: 10
+        squared: False
+      - estimator: kendall
+        tau: 10
+        squared: True
+      - estimator: kendall
+        tau: 20
+        squared: False
+      - estimator: kendall
+        tau: 20
+        squared: True
+
   # statistics based on cross-correlation (squared means we square the xcorr, not the output)
   CrossCorrelation:
     labels:
@@ -225,6 +290,24 @@
       - global_constraint: null
       - global_constraint: itakura
       - global_constraint: sakoe_chiba
+
+  # Cross pairwise distance (fork-added; class in pyspi/statistics/distance.py)
+  # Shifted-path Euclidean upper bound on DTW.
+  CrossPairwiseDistance:
+    labels:
+      - undirected
+      - nonlinear
+      - unsigned
+      - bivariate
+      - time-dependent
+    dependencies:
+    configs:
+      - metric: "euclidean"
+        tau: 1
+        statistic: "min"
+      - metric: "euclidean"
+        tau: 1
+        statistic: "mean"
 
   SoftDynamicTimeWarping:
     labels:
@@ -356,15 +439,15 @@
     configs:
 
   # Information-geometric conditional independence
-  InformationGeometricConditionalIndependence:
-    labels:
-      - directed
-      - nonlinear
-      - unsigned
-      - bivariate
-      - contemporaneous
-    dependencies:
-    configs:
+  # InformationGeometricConditionalIndependence:
+  #   labels:
+  #     - directed
+  #     - nonlinear
+  #     - unsigned
+  #     - bivariate
+  #     - contemporaneous
+  #   dependencies:
+  #   configs:
 
   # Convergent-cross mapping
   ConvergentCrossMapping:
