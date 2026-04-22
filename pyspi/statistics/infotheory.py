@@ -14,6 +14,44 @@ from pyspi.base import Undirected, Directed, Unsigned, parse_univariate, parse_b
 # Pure-numpy entropy calculators (drop-in replacements for JIDT)
 # ---------------------------------------------------------------------------
 
+def _gaussian_log_det(cov, ridge_rel=1e-8):
+    """log|Σ + εI| with ε = ridge_rel * mean(diag(Σ)).
+
+    Returns NaN on degenerate input (non-finite mean, non-positive mean,
+    or still-singular after ridge). Never returns -inf, so that downstream
+    entropy differences (H_xy - H_y) cannot cascade to catastrophic overflow
+    in np.nan_to_num.
+
+    Academic rationale: for rank-deficient Σ the unregularised log|Σ| is
+    mathematically -inf (data lives on a lower-dim subspace). JIDT adds
+    NOISE_LEVEL_TO_ADD=1e-8 gaussian noise to observations for the same
+    reason; ridge-regularising Σ directly is equivalent in expectation
+    (cov of x+η equals Σ + σ²I for iid additive noise η) and numerically
+    stabler than perturbing samples.
+    """
+    if np.ndim(cov) == 0:
+        var = float(cov)
+        if not np.isfinite(var):
+            return np.nan
+        if var <= 0:
+            return np.nan
+        eps = ridge_rel * var
+        return float(np.log(var + eps))
+    cov = np.asarray(cov, dtype=np.float64)
+    d = cov.shape[0]
+    mean_diag = float(np.trace(cov)) / d
+    if not np.isfinite(mean_diag) or mean_diag <= 0:
+        return np.nan
+    eps = ridge_rel * mean_diag
+    try:
+        sign, log_det = np.linalg.slogdet(cov + eps * np.eye(d))
+    except np.linalg.LinAlgError:
+        return np.nan
+    if sign <= 0 or not np.isfinite(log_det):
+        return np.nan
+    return float(log_det)
+
+
 class GaussianEntropyCalculator:
     """Drop-in for JIDT's EntropyCalculatorMultiVariateGaussian.
 
@@ -39,12 +77,9 @@ class GaussianEntropyCalculator:
         X = self._obs
         N, d = X.shape
         cov = np.cov(X, rowvar=False, ddof=1)
-        if d == 1:
-            log_det = np.log(max(float(cov), 1e-300))
-        else:
-            sign, log_det = np.linalg.slogdet(cov)
-            if sign <= 0:
-                log_det = -np.inf
+        log_det = _gaussian_log_det(cov)
+        if not np.isfinite(log_det):
+            return float('nan')
         return float(0.5 * d * np.log(2 * np.pi * np.e) + 0.5 * log_det)
 
 
@@ -83,15 +118,17 @@ class KLEntropyCalculator:
 
 
 def _gaussian_entropy_from_data(data_2d):
-    """Compute Gaussian entropy from (N, d) array."""
+    """Compute Gaussian entropy from (N, d) array.
+
+    Returns NaN (not -inf) on singular covariance after ridge regularisation,
+    so that downstream differences (e.g. H(X,Y)-H(Y)) never cascade to
+    +/-inf and get clipped to float-max by np.nan_to_num.
+    """
     N, d = data_2d.shape
     cov = np.cov(data_2d, rowvar=False, ddof=1)
-    if d == 1:
-        log_det = np.log(max(float(cov), 1e-300))
-    else:
-        sign, log_det = np.linalg.slogdet(cov)
-        if sign <= 0:
-            log_det = -np.inf
+    log_det = _gaussian_log_det(cov)
+    if not np.isfinite(log_det):
+        return float('nan')
     return 0.5 * d * np.log(2 * np.pi * np.e) + 0.5 * log_det
 
 
@@ -284,14 +321,38 @@ class KernelTECalculator:
         tree_yn_yp_x = cKDTree(yn_yp_x)
 
         # JIDT half-width = kernel_width
-        n_yp = np.asarray(tree_yp.query_ball_point(y_past, r=w, p=np.inf,
-                                                     return_length=True), dtype=np.float64)
-        n_yn_yp = np.asarray(tree_yn_yp.query_ball_point(yn_yp, r=w, p=np.inf,
-                                                           return_length=True), dtype=np.float64)
-        n_yp_x = np.asarray(tree_yp_x.query_ball_point(yp_x, r=w, p=np.inf,
+        dce = self._dyn_corr_excl
+        if dce is None or dce <= 0:
+            n_yp = np.asarray(tree_yp.query_ball_point(y_past, r=w, p=np.inf,
                                                          return_length=True), dtype=np.float64)
-        n_yn_yp_x = np.asarray(tree_yn_yp_x.query_ball_point(yn_yp_x, r=w, p=np.inf,
+            n_yn_yp = np.asarray(tree_yn_yp.query_ball_point(yn_yp, r=w, p=np.inf,
                                                                return_length=True), dtype=np.float64)
+            n_yp_x = np.asarray(tree_yp_x.query_ball_point(yp_x, r=w, p=np.inf,
+                                                             return_length=True), dtype=np.float64)
+            n_yn_yp_x = np.asarray(tree_yn_yp_x.query_ball_point(yn_yp_x, r=w, p=np.inf,
+                                                                   return_length=True), dtype=np.float64)
+        else:
+            # Theiler window: exclude neighbours j with |j - i| <= dce, matching
+            # JIDT's DYN_CORR_EXCL convention (excludes 2*dce+1 points centered on i,
+            # including self). We query index lists then filter by temporal separation.
+            def _counts_with_theiler(tree, pts):
+                idx_lists = tree.query_ball_point(pts, r=w, p=np.inf)
+                out = np.empty(len(idx_lists), dtype=np.float64)
+                for i, nbrs in enumerate(idx_lists):
+                    nbrs_arr = np.asarray(nbrs, dtype=np.int64)
+                    out[i] = np.sum(np.abs(nbrs_arr - i) > dce)
+                return out
+            n_yp = _counts_with_theiler(tree_yp, y_past)
+            n_yn_yp = _counts_with_theiler(tree_yn_yp, yn_yp)
+            n_yp_x = _counts_with_theiler(tree_yp_x, yp_x)
+            n_yn_yp_x = _counts_with_theiler(tree_yn_yp_x, yn_yp_x)
+
+        # Drop samples where any bin is empty (log2(0) = -inf; JIDT skips these).
+        valid = (n_yp > 0) & (n_yn_yp > 0) & (n_yp_x > 0) & (n_yn_yp_x > 0)
+        if not np.any(valid):
+            return float('nan')
+        n_yp, n_yn_yp = n_yp[valid], n_yn_yp[valid]
+        n_yp_x, n_yn_yp_x = n_yp_x[valid], n_yn_yp_x[valid]
 
         # TE = mean(log2(n_yn_yp_x * n_yp / (n_yp_x * n_yn_yp)))  [bits]
         te = np.mean(np.log2(n_yn_yp_x) + np.log2(n_yp) - np.log2(n_yp_x) - np.log2(n_yn_yp))
