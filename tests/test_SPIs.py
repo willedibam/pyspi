@@ -1,122 +1,156 @@
-from pyspi.calculator import Calculator
-import pytest
+"""SPI correctness / drift regression test.
+
+For each (dataset, SPI) pair that appears in both the frozen-upstream
+baseline pickle and the current Calculator, compare element-wise against
+the baseline mean. A pair is "close enough" if at least one of:
+
+  abs_diff(new, ref) <= ATOL                 (protects near-zero refs)
+  abs_diff(new, ref) <= RTOL * |ref|         (protects large values)
+
+Exceedances do not fail the test — they are logged to a session-end
+summary table via the ``spi_warning_logger`` fixture so drift is visible
+without blocking CI on version bumps.
+
+The three frozen datasets are CML7 (coupled map lattice, 7 proc),
+VAR1 (linear autoregressive, 7 proc), and Kuramoto (phase oscillators,
+7 proc). Baselines were built with upstream pyspi 2.0.1 using 10 trials
+and numpy seed 42 per trial (see tests/generate_benchmark_datasets.py
+and the build_baselines.py helper in the ephemeral uv project).
+"""
 import dill
-import pyspi
 import numpy as np
 
-############# Fixtures and helper functions #########
+from pyspi.calculator import Calculator
 
-def load_benchmark_tables():
-    """Function to load the mean and standard deviation tables for each MPI."""
-    table_fname = 'CML7_benchmark_tables.pkl'
-    with open(f"tests/{table_fname}", "rb") as f:
-        loaded_tables = dill.load(f)
-    
-    return loaded_tables
 
-def load_benchmark_dataset():
-    dataset_fname = 'cml7.npy'
-    dataset = np.load(f"pyspi/data/{dataset_fname}").T
-    return dataset
+DATASETS = {
+    "CML7": "pyspi/data/cml7.npy",
+    "VAR1": "pyspi/data/var1_7.npy",
+    "Kuramoto": "pyspi/data/kuramoto_7.npy",
+}
+BASELINES = {
+    "CML7": "tests/CML7_benchmark_tables.pkl",
+    "VAR1": "tests/VAR1_benchmark_tables.pkl",
+    "Kuramoto": "tests/Kuramoto_benchmark_tables.pkl",
+}
 
-def compute_new_tables():
-    """Compute new tables using the same benchmark dataset(s)."""
-    benchmark_dataset = load_benchmark_dataset()
-    # Compute new tables on the benchmark dataset
+# Drift thresholds. ATOL catches tiny absolute changes near zero; RTOL
+# catches proportional drift on larger values. A value is OK if EITHER
+# test passes. Tuned to surface ~1% or larger drift while ignoring the
+# BLAS / RNG / library-version noise floor.
+ATOL = 1e-6
+RTOL = 1e-2
+
+
+def _load_dataset(name):
+    return np.load(DATASETS[name]).T
+
+
+def _load_baseline(name):
+    with open(BASELINES[name], "rb") as f:
+        return dill.load(f)
+
+
+_tables_cache = {}
+
+
+def _compute_current(name):
+    """Compute the fork's current SPI tables on the named dataset. Cached."""
+    if name in _tables_cache:
+        return _tables_cache[name]
     np.random.seed(42)
-    calc = Calculator(dataset=benchmark_dataset)
+    calc = Calculator(dataset=_load_dataset(name))
     calc.compute()
-    table_dict = dict()
-    for spi in calc.spis:
-        table_dict[spi] = calc.table[spi]
+    out = {spi: calc.table[spi].to_numpy() for spi in calc.spis}
+    _tables_cache[name] = out
+    return out
 
-    return table_dict
 
-def generate_SPI_test_params():
-    """Pair each current SPI with its frozen-upstream baseline.
+def _build_params():
+    """Cross-product of (dataset, SPI) restricted to SPIs in both sides.
 
-    SPIs added or renamed in this fork won't appear in the baseline pickle;
-    pickle entries removed in this fork won't appear in the current calc.
-    Both cases are skipped (with a session-end summary) rather than raising.
+    SPIs added or renamed in the fork (no baseline entry) and baseline
+    entries removed from the fork (no current SPI) are skipped with a
+    summary line per dataset.
     """
-    benchmark_tables = load_benchmark_tables()
-    new_tables = compute_new_tables()
-    params = []
     calc = Calculator()
-    current = dict(calc.spis)
+    current_spis = dict(calc.spis)
+    current_keys = set(current_spis)
 
-    baseline_keys = set(benchmark_tables)
-    current_keys = set(current)
-    only_current = sorted(current_keys - baseline_keys)
-    only_baseline = sorted(baseline_keys - current_keys)
-    shared = sorted(current_keys & baseline_keys)
-
-    if only_current:
-        print(f"\n[test_SPIs] {len(only_current)} new/renamed SPIs (no baseline, skipped):")
-        for k in only_current:
-            print(f"  + {k}")
-    if only_baseline:
-        print(f"\n[test_SPIs] {len(only_baseline)} baseline SPIs missing from current calc (skipped):")
-        for k in only_baseline:
-            print(f"  - {k}")
-
-    for spi_est in shared:
-        params.append(
-            (spi_est, current[spi_est], benchmark_tables[spi_est], new_tables[spi_est].to_numpy())
-        )
+    params = []
+    for ds in DATASETS:
+        baseline = _load_baseline(ds)
+        baseline_keys = set(baseline)
+        only_current = sorted(current_keys - baseline_keys)
+        only_baseline = sorted(baseline_keys - current_keys)
+        shared = sorted(current_keys & baseline_keys)
+        if only_current:
+            preview = ", ".join(only_current[:3])
+            more = f" (+{len(only_current) - 3} more)" if len(only_current) > 3 else ""
+            print(f"[{ds}] skipped {len(only_current)} new/renamed SPIs: {preview}{more}")
+        if only_baseline:
+            preview = ", ".join(only_baseline[:3])
+            more = f" (+{len(only_baseline) - 3} more)" if len(only_baseline) > 3 else ""
+            print(f"[{ds}] skipped {len(only_baseline)} baseline-only SPIs: {preview}{more}")
+        for spi_key in shared:
+            params.append((ds, spi_key, current_spis[spi_key], baseline[spi_key]))
     return params
 
-params = generate_SPI_test_params()
+
+params = _build_params()
+
+
 def pytest_generate_tests(metafunc):
-    """Create a hook to generate parameter combinations for parameterised test"""
-    if "est" in metafunc.fixturenames:
-        metafunc.parametrize("est, est_ob, mpi_benchmark,mpi_new", params)
-        
+    if "spi_key" in metafunc.fixturenames:
+        metafunc.parametrize(
+            "dataset_name, spi_key, spi_ob, baseline_entry",
+            params,
+            ids=[f"{p[0]}:{p[1]}" for p in params],
+        )
 
-def test_mpi(est, est_ob, mpi_benchmark, mpi_new, spi_warning_logger):
-    """Run the benchmarking tests."""
-    zscore_threshold = 1 # 2 sigma
-    
-    # separate the the mean and std. dev tables for the benchmark
-    mean_table = mpi_benchmark['mean']
-    std_table = mpi_benchmark['std']
 
-    # check std table for zeros and impute with smallest non-zero value
-    std_table = np.where(std_table == 0, 1e-10, std_table)
-    
-    # check that the shapes are equal
-    assert mean_table.shape == mpi_new.shape, f"SPI: {est}| Different table shapes. "
+def test_spi_tolerance(dataset_name, spi_key, spi_ob, baseline_entry, spi_warning_logger):
+    """Compare current SPI table to frozen baseline mean; log drift."""
+    ref_mean = baseline_entry["mean"]
+    mpi_new = _compute_current(dataset_name)[spi_key]
 
-    # convert NaNs to zeros before proeceeding - this will take care of diagonal and any null outputs
-    mpi_new = np.nan_to_num(mpi_new)
-    mpi_mean = np.nan_to_num(mean_table)
+    assert ref_mean.shape == mpi_new.shape, (
+        f"[{dataset_name}] {spi_key}: shape mismatch "
+        f"baseline={ref_mean.shape} new={mpi_new.shape}"
+    )
 
-    # check if matrix is symmetric (undirected SPI) for num exceed correction
-    isSymmetric = "undirected" in est_ob.labels 
+    # Diagonal and any failure-NaNs are treated as 0 on both sides.
+    ref = np.nan_to_num(ref_mean, copy=True)
+    new = np.nan_to_num(mpi_new, copy=True)
 
-    # get the module name for easy reference
-    module_name = est_ob.__module__.split(".")[-1]
+    abs_diff = np.abs(new - ref)
+    within_abs = abs_diff <= ATOL
+    within_rel = abs_diff <= RTOL * np.abs(ref)
+    ok = within_abs | within_rel
 
-    if not np.allclose(mpi_new, mpi_mean):
-        # tables are not equivalent, quantify the difference by z-scoring.
-        diff = abs(mpi_new - mpi_mean)
-        zscores = diff/std_table
+    if np.all(ok):
+        return
 
-        idxs_greater_than_thresh = np.argwhere(zscores > zscore_threshold)
+    bad_idx = np.argwhere(~ok)
+    max_abs = float(abs_diff[~ok].max())
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rel = np.where(np.abs(ref) > 0, abs_diff / np.abs(ref), np.nan)
+    bad_rel = rel[~ok]
+    bad_rel = bad_rel[np.isfinite(bad_rel)]
+    max_rel = float(bad_rel.max()) if bad_rel.size else float("nan")
 
-        if len(idxs_greater_than_thresh) > 0:
-            sigs = zscores[idxs_greater_than_thresh[:, 0], idxs_greater_than_thresh[:, 1]]
-            # get the max
-            max_z = max(sigs)
+    num_interactions = new.size - new.shape[0]
+    num_exceed = bad_idx.shape[0]
+    if "undirected" in spi_ob.labels:
+        num_exceed //= 2
+        num_interactions //= 2
 
-            # number of interactions
-            num_interactions = mpi_new.size - mpi_new.shape[0]
-            # count exceedances
-            num_exceed = len(sigs)
-
-            if isSymmetric:
-                # number of unique exceedences is half
-                num_exceed //= 2
-                num_interactions //= 2
-
-            spi_warning_logger(est, module_name, max_z, int(num_exceed), int(num_interactions))
+    module_name = spi_ob.__module__.split(".")[-1]
+    spi_warning_logger(
+        f"{dataset_name}:{spi_key}",
+        module_name,
+        max_abs,
+        max_rel,
+        int(num_exceed),
+        int(num_interactions),
+    )
