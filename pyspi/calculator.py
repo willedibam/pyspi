@@ -60,6 +60,7 @@ def _fork_compute_spi(spi_key):
     t0 = time.perf_counter()
     try:
         S = spi.multivariate(data)
+        S = np.array(S, dtype=float, copy=True)
         np.fill_diagonal(S, np.nan)
         elapsed = time.perf_counter() - t0
         return spi_key, S, None, elapsed
@@ -358,6 +359,7 @@ class Calculator:
                 t0 = time.perf_counter()
                 try:
                     S = self._spis[spi].multivariate(self.dataset)
+                    S = np.array(S, dtype=float, copy=True)
                     np.fill_diagonal(S, np.nan)
                     self._table[spi] = S
                 except Exception as err:

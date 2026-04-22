@@ -134,11 +134,14 @@ class Data:
             elif ext == ".csv":
                 npdat = np.genfromtxt(data, ",")
             elif ext == ".ts":
-                from sktime.utils.data_io import load_from_tsfile_to_dataframe
-                from sktime.datatypes._panel._convert import from_nested_to_3d_numpy
-
-                tsdat, _ = load_from_tsfile_to_dataframe(data)
-                npdat = from_nested_to_3d_numpy(tsdat)
+                try:
+                    from aeon.datasets import load_from_ts_file
+                except ImportError as e:
+                    raise ImportError(
+                        "Loading .ts files requires aeon. Install with "
+                        "`pip install aeon` or `uv pip install aeon`."
+                    ) from e
+                npdat, _ = load_from_ts_file(data)
             else:
                 raise TypeError(f"Unknown filename extension: {ext}")
         else:

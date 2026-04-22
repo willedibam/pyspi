@@ -101,11 +101,13 @@ class ConvergentCrossMapping(Directed, Signed):
                 # Infer optimal embedding from simplex projection
                 for _i in range(M):
                     pred = str(10) + " " + str(N - 10)
+                    col = df.columns.values[_i + 1]
                     embed_df = pyEDM.EmbedDimension(
                         dataFrame=df,
                         lib=pred,
                         pred=pred,
-                        columns=df.columns.values[_i + 1],
+                        columns=col,
+                        target=col,
                         showPlot=False,
                     )
                     embedding[_i] = embed_df.max()["E"]
@@ -118,7 +120,7 @@ class ConvergentCrossMapping(Directed, Signed):
             for _i in range(M):
                 for _j in range(_i + 1, M):
                     try:
-                        E = int(max(embedding[[_i, _j]]))
+                        E = int(np.max(embedding[[_i, _j]]))
                     except NameError:
                         E = int(self._E)
 

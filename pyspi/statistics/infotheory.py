@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from pyspi import utils
 import copy
@@ -399,7 +400,7 @@ class SymbolicTECalculator:
         targ_past = targ_symbols[:n]
         src_curr = src_symbols[:n]
 
-        n_symbols = int(np.math.factorial(k))
+        n_symbols = int(math.factorial(k))
 
         def _discrete_entropy(*arrs):
             """Joint entropy of integer-valued arrays using histograms."""

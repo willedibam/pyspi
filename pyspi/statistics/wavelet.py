@@ -1,4 +1,4 @@
-import mne.connectivity as mnec
+from mne_connectivity import spectral_connectivity_epochs, phase_slope_index
 from pyspi.base import (
     Directed,
     Undirected,
@@ -52,7 +52,7 @@ class mne(Unsigned):
 
             cwt_freqs = np.linspace(0.2, 0.5, 125)
             cwt_n_cycles = cwt_freqs / 7.0
-            conn, freq, _, _, _ = mnec.spectral_connectivity(
+            con = spectral_connectivity_epochs(
                 data=z,
                 method=self.measure,
                 mode="cwt_morlet",
@@ -62,8 +62,10 @@ class mne(Unsigned):
                 fmax=self._fs / 2,
                 cwt_freqs=cwt_freqs,
                 cwt_n_cycles=cwt_n_cycles,
-                verbose="WARNING",
+                verbose=False,
             )
+            conn = con.get_data(output="dense")
+            freq = np.asarray(con.freqs)
 
             try:
                 data.mne[self.measure] = (conn, freq)
@@ -196,34 +198,43 @@ class PhaseSlopeIndex(mne, Undirected):
         super().__init__(**kwargs)
         self.identifier += f"_{self._statistic}"
 
-    def _get_cache(self, data):
+    def _get_psi(self, data):
+        """Compute PSI over this class's [fmin, fmax] band.
+
+        mne_connectivity's phase_slope_index integrates cwt_freqs that fall
+        inside [fmin, fmax], so each band needs its own call. Cached per band
+        on the dataset to share across PSI variants with the same band.
+        """
+        key = (self._fmin, self._fmax)
         try:
-            psi = data.mne_psi["psi"]
-            freq = data.mne_psi["freq"]
+            return data.mne_psi[key]
+        except (AttributeError, KeyError):
+            pass
+
+        z = np.moveaxis(data.to_numpy(), 2, 0)
+        cwt_freqs = np.linspace(max(self._fmin, 1e-6), self._fmax, 10)
+        psi_obj = phase_slope_index(
+            data=z,
+            mode="cwt_morlet",
+            sfreq=self._fs,
+            mt_adaptive=True,
+            fmin=self._fmin,
+            fmax=self._fmax,
+            cwt_freqs=cwt_freqs,
+            verbose=False,
+        )
+        psi = psi_obj.get_data(output="dense")
+
+        try:
+            data.mne_psi[key] = psi
         except AttributeError:
-            z = np.moveaxis(data.to_numpy(), 2, 0)
-
-            freqs = np.linspace(0.2, 0.5, 10)
-            psi, freq, _, _, _ = mnec.phase_slope_index(
-                data=z,
-                mode="cwt_morlet",
-                sfreq=self._fs,
-                mt_adaptive=True,
-                cwt_freqs=freqs,
-                verbose="WARNING",
-            )
-            freq = freq[0]
-            data.mne_psi = dict(psi=psi, freq=freq)
-
-        # freq = conn.frequencies
-        freq_id = np.where((freq >= self._fmin) * (freq <= self._fmax))[0]
-
-        return psi, freq_id
+            data.mne_psi = {key: psi}
+        return psi
 
     @parse_multivariate
     def multivariate(self, data):
-        adj_freq, freq_id = self._get_cache(data)
-        adj = self._statfn(np.real(adj_freq[..., freq_id]), axis=(2, 3))
+        adj_freq = self._get_psi(data)
+        adj = self._statfn(np.real(adj_freq), axis=(2, 3))
 
         ui = np.triu_indices(data.n_processes, 1)
         adj[ui] = adj.T[ui]

@@ -7,7 +7,7 @@ from statsmodels.tsa.vector_ar.vecm import coint_johansen
 from sklearn.gaussian_process import kernels, GaussianProcessRegressor
 from sklearn.metrics import mean_squared_error
 from sklearn import linear_model
-import mne.connectivity as mnec
+from mne_connectivity import envelope_correlation
 from pyspi.lib.ids.dependence import compute_IDS
 
 from pyspi.base import (
@@ -168,11 +168,10 @@ class PowerEnvelopeCorrelation(Undirected, Unsigned):
     @parse_multivariate
     def multivariate(self, data):
         z = np.moveaxis(data.to_numpy(), 2, 0)
-        adj = np.squeeze(
-            mnec.envelope_correlation(
-                z, orthogonalize=self._orth, log=self._log, absolute=self._absolute
-            )
+        ec = envelope_correlation(
+            z, orthogonalize=self._orth, log=self._log, absolute=self._absolute
         )
+        adj = np.squeeze(ec.get_data(output="dense"))
         np.fill_diagonal(adj, np.nan)
         return adj
 

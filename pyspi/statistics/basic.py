@@ -201,7 +201,7 @@ class KendallTau(Undirected, Signed):
         """Vectorized: pandas .corr(method='kendall') on (T, M) DataFrame."""
         Z = data.to_numpy(squeeze=True)  # (M, T)
         df = pd.DataFrame(Z.T)
-        tau = df.corr(method="kendall").values
+        tau = np.asarray(df.corr(method="kendall").values, dtype=float).copy()
         if self._squared:
             tau = tau ** 2
         np.fill_diagonal(tau, np.nan)
@@ -292,7 +292,9 @@ class LaggedCorrelation(Undirected, Signed):
                 if M == 2:
                     C = np.array([[1.0, C], [C, 1.0]])
             elif self._estimator == "kendall":
-                C = pd.DataFrame(Z.T).corr(method="kendall").values
+                C = np.asarray(
+                    pd.DataFrame(Z.T).corr(method="kendall").values, dtype=float
+                ).copy()
             else:
                 raise ValueError(f"Unknown estimator: {self._estimator}")
             if self._squared:

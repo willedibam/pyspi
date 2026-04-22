@@ -1,36 +1,83 @@
 [build-system]
-requires      = ["setuptools>=61.0.0", "wheel"]
+requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyspi"
 version = "2.0.1"
-authors = [
-    { name ="Oliver M. Cliff", email="oliver.m.cliff@gmail.com"},
-]
-maintainers = [
-    {name = "Joshua B. Moore"},
-    {email = "joshua.moore@sydney.edu.au"},
-]
 description = "Library for pairwise analysis of time series data."
 readme = "README.md"
-license = {text = "GNU General Public License v3 (GPLv3)"}
-requires-python = ">=3.8"
+license = { text = "GNU General Public License v3 (GPLv3)" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Oliver M. Cliff", email = "oliver.m.cliff@gmail.com" },
+]
+maintainers = [
+    { name = "Joshua B. Moore", email = "joshua.moore@sydney.edu.au" },
+]
 classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
-    "Development Status :: 1 - Planning",
+    "Development Status :: 4 - Beta",
     "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
     "Intended Audience :: Science/Research",
     "Environment :: Console",
-    "Environment :: Other Environment",
     "Topic :: Scientific/Engineering :: Physics",
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Scientific/Engineering :: Medical Science Apps.",
 ]
-dynamic = ["dependencies", "optional-dependencies"]
+dependencies = [
+    "numpy>=2.0",
+    "scipy>=1.11",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "statsmodels>=0.14",
+    "mne>=1.6",
+    "mne-connectivity>=0.5",
+    "spectral-connectivity>=1.1",
+    "nitime>=0.10",
+    "hyppo>=0.4",
+    "cdt>=0.6",
+    # cdt internally imports torch.utils.data at module load but doesn't declare
+    # it as a Requires-Dist. Keep torch explicit so pip/uv doesn't miss it.
+    "torch>=2.0",
+    "tslearn>=0.6",
+    "dtaidistance>=2.3",
+    "pyEDM>=1.15",
+    "h5py>=3.8",
+    "pyyaml>=6.0",
+    "tqdm>=4.65",
+    "dill>=0.3",
+    "seaborn>=0.12",
+    "colorama>=0.4",
+]
+
+[project.optional-dependencies]
+testing = [
+    "pytest>=7",
+]
+# Optional: only required for loading the sktime/aeon .ts dataset format.
+tsfile = [
+    "aeon>=1.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/DynamicsAndNeuralSystems/pyspi"
 Documentation = "https://time-series-features.gitbook.io/pyspi/"
+
+[tool.setuptools.packages.find]
+include = ["pyspi*"]
+
+[tool.setuptools.package-data]
+pyspi = [
+    "config.yaml",
+    "sonnet_config.yaml",
+    "fast_config.yaml",
+    "fabfour_config.yaml",
+    "data/cml.npy",
+    "data/forex.npy",
+    "data/standard_normal.npy",
+    "data/cml7.npy",
+]
