@@ -535,19 +535,40 @@ class CrossPairwiseDistance(Undirected):
         self.identifier = f"xpdist_{metric}_tau-{self._tau}_{stat}_rmse"
 
     @staticmethod
-    def _dist(a, b):
-        return np.sqrt(np.mean((a - b) ** 2))  # RMSE: normalised by sqrt(N)
+    def _shifted_dist_rmse(x, y, s):
+        # Realises one specific DTW path: pair x[k+s] with y[k] over the overlap,
+        # then stutter the dropped boundary samples against the corner of the
+        # opposite series. Since the result is the cost of a valid DTW path and
+        # DTW minimises over all paths, the resulting xpdist satisfies
+        # dtw_rmse <= xpdist by construction. Normalise by sqrt(T) to match
+        # DynamicTimeWarping(normalise=True).
+        T = len(x)
+        if s == 0:
+            diff = x - y
+        elif s > 0:
+            left  = x[:s]      - y[0]
+            mid   = x[s:]      - y[: T - s]
+            right = x[T - 1]   - y[T - s :]
+            diff = np.concatenate([left, mid, right])
+        else:
+            sa = -s
+            left  = y[:sa]     - x[0]
+            mid   = y[sa:]     - x[: T - sa]
+            right = y[T - 1]   - x[T - sa :]
+            diff = np.concatenate([left, mid, right])
+        return float(np.sqrt(np.sum(diff ** 2) / T))
 
     def _cross_dist(self, x, y):
         tau = self._tau
+        T = len(x)
         per_lag = np.empty(tau + 1)
-        per_lag[0] = self._dist(x, y)
+        per_lag[0] = self._shifted_dist_rmse(x, y, 0)
         for t in range(1, tau + 1):
-            if t >= len(x):
+            if t >= T:
                 per_lag[t] = np.inf
                 continue
-            fwd = self._dist(x[t:], y[:-t])
-            bwd = self._dist(y[t:], x[:-t])
+            fwd = self._shifted_dist_rmse(x, y, +t)
+            bwd = self._shifted_dist_rmse(x, y, -t)
             per_lag[t] = min(fwd, bwd)
         if self._statistic == "min":
             return float(np.min(per_lag))
