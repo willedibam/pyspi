@@ -399,6 +399,7 @@ class Barycenter(Directed, Signed):
     name = "Barycenter"
     identifier = "bary"
     labels = ["distance", "signed", "undirected", "temporal", "nonlinear"]
+    _cache_namespace = "barycenter"
 
     def __init__(self, mode="euclidean", squared=False, statistic="mean"):
         if mode == "euclidean":

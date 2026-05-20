@@ -24,6 +24,7 @@ class Cointegration(Undirected, Unsigned):
     name = "Cointegration"
     identifier = "coint"
     labels = ["misc", "unsigned", "temporal", "undirected", "nonlinear"]
+    _cache_namespace = "coint"
 
     def __init__(
         self,

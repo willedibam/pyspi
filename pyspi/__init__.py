@@ -1,6 +1,7 @@
-# BLAS threading: default to single-threaded BLAS in the main process so that
-# fork-based parallel workers (see calculator.compute) can opt back into
-# multi-threading via threadpoolctl without nested oversubscription.
+# BLAS threading: default to single-threaded BLAS so that parallel workers
+# (see Calculator.compute) don't oversubscribe (n_jobs workers x full BLAS).
+# Workers pin BLAS to 1 thread in _parallel._worker_init; this line ensures
+# the main process (and any serial run) does the same by default.
 import os
 import numpy as np
 

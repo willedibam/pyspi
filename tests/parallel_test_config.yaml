@@ -1,0 +1,55 @@
+# Small config for tests/test_parallel.py
+# Covers:
+#  - covariance cache namespace (Covariance + Precision, multiple estimators)
+#  - spectral_mv cache namespace (CoherenceMagnitude, multiple freq bands)
+#  - cacheless basic SPIs (SpearmanR, KendallTau)
+#  - cacheless misc SPI (PowerEnvelopeCorrelation)
+# Deterministic; no stochastic estimators.
+.statistics.basic:
+  Covariance:
+    labels: [undirected, linear, signed, multivariate, contemporaneous]
+    dependencies:
+    configs:
+      - estimator: EmpiricalCovariance
+      - estimator: LedoitWolf
+      - estimator: OAS
+
+  Precision:
+    labels: [undirected, linear, signed, multivariate, contemporaneous]
+    dependencies:
+    configs:
+      - estimator: EmpiricalCovariance
+      - estimator: LedoitWolf
+
+  SpearmanR:
+    labels: [undirected, nonlinear, signed, bivariate, contemporaneous]
+    dependencies:
+    configs:
+      - squared: True
+      - squared: False
+
+  KendallTau:
+    labels: [undirected, nonlinear, signed, bivariate, contemporaneous]
+    dependencies:
+    configs:
+      - squared: False
+
+.statistics.spectral:
+  CoherenceMagnitude:
+    labels: [undirected, linear, unsigned, bivariate, frequency-dependent]
+    dependencies:
+    configs:
+      - fs: 1
+      - fmin: 0
+        fmax: 0.25
+      - fmin: 0.25
+        fmax: 0.5
+
+.statistics.misc:
+  PowerEnvelopeCorrelation:
+    labels: [undirected, linear, unsigned, bivariate, time-dependent]
+    dependencies:
+    configs:
+      - orth: False
+        log: False
+        absolute: False

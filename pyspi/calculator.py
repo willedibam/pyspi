@@ -1,7 +1,8 @@
 # Science/maths/computing tools
 import numpy as np
 import pandas as pd
-import copy, yaml, importlib, time, warnings, os, multiprocessing as _mp
+import copy, yaml, importlib, time, warnings, os
+from pathlib import Path
 from tqdm import tqdm
 from collections import Counter
 from scipy import stats
@@ -11,6 +12,7 @@ init(autoreset=True)
 # From this package
 from .data import Data
 from .utils import convert_mdf_to_ddf, check_optional_deps, inspect_calc_results
+from . import _parallel
 
 
 # ---------------------------------------------------------------------------
@@ -34,39 +36,6 @@ def _expand_lagged_correlation_configs(configs):
         else:
             expanded.append(dict(params))
     return expanded
-
-
-# ---------------------------------------------------------------------------
-# Fork-based parallel compute helpers
-# ---------------------------------------------------------------------------
-
-_PARALLEL_CALC = None  # module-level for fork-based sharing
-
-
-def _restore_blas_threads_in_worker():
-    """Call at start of forked worker to enable multi-threaded BLAS."""
-    try:
-        from threadpoolctl import threadpool_limits
-        threadpool_limits(limits=-1)
-    except ImportError:
-        pass
-
-
-def _fork_compute_spi(spi_key):
-    """Worker function for fork-based parallel SPI computation."""
-    _restore_blas_threads_in_worker()
-    spi = _PARALLEL_CALC._spis[spi_key]
-    data = _PARALLEL_CALC.dataset
-    t0 = time.perf_counter()
-    try:
-        S = spi.multivariate(data)
-        S = np.array(S, dtype=float, copy=True)
-        np.fill_diagonal(S, np.nan)
-        elapsed = time.perf_counter() - t0
-        return spi_key, S, None, elapsed
-    except Exception as err:
-        elapsed = time.perf_counter() - t0
-        return spi_key, np.nan, str(err), elapsed
 
 
 class Calculator:
@@ -134,6 +103,8 @@ class Calculator:
         if not Calculator._optional_dependencies:
             Calculator._optional_dependencies = check_optional_deps()
 
+        self._configfile = configfile  # stored so parallel workers can re-instantiate SPIs
+        self._subset = subset
         self._load_yaml(configfile)
 
         duplicates = [
@@ -340,66 +311,108 @@ class Calculator:
         )
         self._table.columns.name = "process"
 
-    def compute(self):
-        """Compute the SPIs on the MVTS dataset.
+    def compute(
+        self,
+        n_jobs=None,
+        checkpoint_dir=None,
+        resume=True,
+        mp_context=None,
+        progress=True,
+    ):
+        """Compute every SPI on the loaded dataset.
 
-        Supports fork-based parallelism via PYSPI_N_JOBS env var (default: 1).
+        Args:
+            n_jobs (int, optional): Number of worker processes. ``None`` (default)
+                falls back to the ``PYSPI_N_JOBS`` environment variable, or 1 if
+                unset. ``1`` runs serially in this process.
+            checkpoint_dir (str | Path, optional): If set, each finished SPI is
+                written to ``<dir>/<identifier>.npy`` atomically. Enables resume.
+            resume (bool): If True (default) and ``checkpoint_dir`` contains
+                results from a prior run, those SPIs are loaded and skipped.
+            mp_context (str, optional): Multiprocessing start method when
+                ``n_jobs>1``. Defaults to ``"spawn"`` (portable, Linux/macOS/Win).
+                Pass ``"fork"`` on Linux for slightly lower startup cost.
+            progress (bool): Show a tqdm progress bar (default True).
         """
         if not hasattr(self, "_dataset"):
             raise AttributeError(
                 "Dataset not loaded yet. Please initialise with load_dataset."
             )
 
-        n_jobs = int(os.getenv("PYSPI_N_JOBS", "1"))
+        if n_jobs is None:
+            n_jobs = int(os.getenv("PYSPI_N_JOBS", "1"))
 
-        if n_jobs <= 1:
-            pbar = tqdm(self.spis.keys())
-            for spi in pbar:
-                pbar.set_description(f"Processing [{self._name}: {spi}]")
-                t0 = time.perf_counter()
-                try:
-                    S = self._spis[spi].multivariate(self.dataset)
-                    S = np.array(S, dtype=float, copy=True)
-                    np.fill_diagonal(S, np.nan)
-                    self._table[spi] = S
-                except Exception as err:
-                    warnings.warn(f'Caught {type(err)} for SPI "{spi}": {err}')
-                    self._table[spi] = np.nan
-                self._timings[spi] = time.perf_counter() - t0
-            pbar.close()
-            print(Fore.GREEN + f"\nCalculation complete. Time taken: {pbar.format_dict['elapsed']:.4f}s")
+        spi_keys = list(self.spis.keys())
+        M = self.dataset.n_processes
+        cp_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
+        if cp_dir is not None:
+            cp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Resume: skip SPIs whose checkpoint exists.
+        if cp_dir is not None and resume:
+            done, spi_keys = _parallel.load_checkpoints(cp_dir, spi_keys, M)
+            for key, (S, err, _t) in done.items():
+                self._table[key] = S
+                self._timings[key] = 0.0
+                if err is not None:
+                    warnings.warn(f'Checkpoint contains prior error for "{key}": {err}')
+            if done:
+                print(f"[pyspi] Resumed {len(done)} SPI(s) from {cp_dir}")
+
+        if not spi_keys:
+            print(Fore.GREEN + "\nAll SPIs already cached; nothing to compute.")
             inspect_calc_results(self)
             return
 
-        spi_keys = list(self.spis.keys())
-        n_workers = min(n_jobs, len(spi_keys))
-        print(f"[pyspi-parallel] {len(spi_keys)} SPIs via {n_workers} fork workers")
+        t_start = time.perf_counter()
 
-        t0 = time.time()
-
-        global _PARALLEL_CALC
-        _PARALLEL_CALC = self
-
-        ctx = _mp.get_context("fork")
-        with ctx.Pool(n_workers) as pool:
-            pbar = tqdm(
-                pool.imap_unordered(_fork_compute_spi, spi_keys),
-                total=len(spi_keys),
-                desc="SPIs (parallel)",
+        if n_jobs <= 1:
+            self._compute_serial(spi_keys, M, cp_dir, progress)
+        else:
+            n_workers = min(int(n_jobs), len(spi_keys))
+            ctx = mp_context or "spawn"
+            print(f"[pyspi-parallel] {len(spi_keys)} SPI(s) via {n_workers} workers (mp={ctx})")
+            results = _parallel.run_parallel(
+                self._spis, self._dataset, spi_keys,
+                n_jobs=n_workers, mp_context=ctx,
+                checkpoint_dir=cp_dir, progress=progress,
+                configfile=self._configfile, subset=self._subset,
             )
-            for spi_key, result, err, elapsed_spi in pbar:
+            for key, (S, err, elapsed) in results.items():
                 if err is not None:
-                    warnings.warn(f'Caught error for SPI "{spi_key}": {err}')
-                self._table[spi_key] = result
-                self._timings[spi_key] = elapsed_spi
-                pbar.set_description(f"Done: {spi_key}")
+                    warnings.warn(f'Caught error for SPI "{key}": {err}')
+                self._table[key] = S
+                self._timings[key] = elapsed
 
-        _PARALLEL_CALC = None
-
-        elapsed = time.time() - t0
+        elapsed = time.perf_counter() - t_start
         print(Fore.GREEN + f"\nCalculation complete. Time taken: {elapsed:.4f}s")
         inspect_calc_results(self)
-        
+
+    def _compute_serial(self, spi_keys, M, cp_dir, progress):
+        iterable = tqdm(spi_keys) if progress else spi_keys
+        for key in iterable:
+            if progress:
+                iterable.set_description(f"Processing [{self._name}: {key}]")
+            t0 = time.perf_counter()
+            err = None
+            try:
+                S = self._spis[key].multivariate(self.dataset)
+                S = np.array(S, dtype=float, copy=True)
+                np.fill_diagonal(S, np.nan)
+            except Exception as e:
+                warnings.warn(f'Caught {type(e).__name__} for SPI "{key}": {e}')
+                S = np.full((M, M), np.nan)
+                err = f"{type(e).__name__}: {e}"
+            self._table[key] = S
+            self._timings[key] = time.perf_counter() - t0
+            if cp_dir is not None:
+                _parallel._atomic_npy_write(cp_dir / f"{key}.npy", S)
+                err_path = cp_dir / f"{key}.error"
+                if err is not None:
+                    err_path.write_text(err)
+                elif err_path.exists():
+                    err_path.unlink()
+
     def _rmmin(self):
         """Iterate through all spis and remove the minimum (fixes absolute value errors when correlating)"""
         for spi in self.spis:

@@ -79,6 +79,8 @@ class NonparametricSpectral(Unsigned):
 
 
 class NonparametricSpectralMultivariate(NonparametricSpectral):
+    _cache_namespace = "spectral_mv"
+
     def _get_cache(self, data):
         try:
             res = data.spectral_mv[self.key]
@@ -122,6 +124,8 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
 
 
 class NonparametricSpectralBivariate(NonparametricSpectral):
+    _cache_namespace = "spectral_bv"
+
     def _get_cache(self, data, i, j):
         """Cache Connectivity object per (i,j) pair, not per (measure,i,j).
 

@@ -15,6 +15,7 @@ class Estimators(Undirected, Signed):
 
     name = "Covariance"
     labels = ["basic", "unordered", "linear", "undirected"]
+    _cache_namespace = "covariance"
 
     def __init__(self, kind, estimator="EmpiricalCovariance", squared=False):
         paramstr = f"_{estimator}"
