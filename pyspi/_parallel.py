@@ -73,6 +73,28 @@ def _attach_data(shm_name, shape, dtype_str, procnames, name):
     return data, shared
 
 
+def _pin_worker_thread_pools():
+    """Pin every nested thread pool to 1 so process workers don't oversubscribe.
+
+    n_jobs workers each running a library that itself spawns cpu_count() threads
+    = quadratic thread blow-up. Pinning BLAS alone is not enough: a few SPIs use
+    libraries with their own pools — notably cdt (causal discovery toolbox,
+    transitive dep) which autosets SETTINGS.NJOBS to cpu_count() at import and
+    drives ConvergentCrossMapping. Left unpinned, CCM under an 8-worker pool ran
+    ~2x slower than serial.
+    """
+    try:
+        from threadpoolctl import threadpool_limits
+        threadpool_limits(limits=1, user_api="blas")
+    except ImportError:
+        pass
+    try:
+        import cdt
+        cdt.SETTINGS.NJOBS = 1
+    except Exception:
+        pass
+
+
 def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, progress_q):
     """ProcessPoolExecutor initializer. Runs once per worker.
 
@@ -80,13 +102,6 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, pro
     ``__init__`` that aren't picklable, so we can't ship instances across the
     process boundary).
     """
-    try:
-        from threadpoolctl import threadpool_limits
-        # Pin BLAS to 1 thread per worker: n_jobs workers * full BLAS = oversubscribe.
-        threadpool_limits(limits=1, user_api="blas")
-    except ImportError:
-        pass
-
     data, shared = _attach_data(shm_name, shape, dtype_str, procnames, ds_name)
 
     # Direct call to the shared loader — no throwaway Calculator instantiation,
@@ -98,6 +113,10 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, pro
     spis, _ = load_spis_from_yaml(
         configfile, optional_dependencies=Calculator._optional_dependencies,
     )
+
+    # Pin nested thread pools AFTER SPI modules import (cdt autosets NJOBS to
+    # cpu_count() on import; we override it back to 1 here).
+    _pin_worker_thread_pools()
 
     _WORKER_STATE["data"] = data
     _WORKER_STATE["shm"] = shared
