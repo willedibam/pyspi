@@ -54,6 +54,8 @@ def main(argv=None) -> int:
                     help="Multiprocessing start method (default: spawn).")
     cp.add_argument("--normalise", action="store_true",
                     help="z-score each time series before computing.")
+    cp.add_argument("--quiet", action="store_true",
+                    help="Suppress INFO logging; show warnings/errors only.")
 
     args = parser.parse_args(argv)
 
@@ -65,6 +67,7 @@ def main(argv=None) -> int:
         dataset=arr,
         configfile=str(args.config) if args.config else None,
         normalise=args.normalise,
+        verbose=not args.quiet,
     )
     calc.compute(
         n_jobs=args.n_jobs,

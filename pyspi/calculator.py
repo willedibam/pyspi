@@ -6,13 +6,14 @@ from pathlib import Path
 from tqdm import tqdm
 from collections import Counter
 from scipy import stats
-from colorama import init, Fore
-init(autoreset=True)
 
 # From this package
 from .data import Data
 from .utils import convert_mdf_to_ddf, check_optional_deps, inspect_calc_results
 from . import _parallel
+from ._logging import get_logger, configure as _configure_logging
+
+logger = get_logger("pyspi.calculator")
 
 
 # ---------------------------------------------------------------------------
@@ -37,7 +38,7 @@ def _resolve_configfile(configfile, subset):
     )
 
 
-def load_spis_from_yaml(configfile, optional_dependencies=None, verbose=True):
+def load_spis_from_yaml(configfile, optional_dependencies=None):
     """Instantiate all SPIs from a configfile.
 
     Returns ``(spis, excluded_spis)`` where ``spis`` is a dict mapping
@@ -46,48 +47,38 @@ def load_spis_from_yaml(configfile, optional_dependencies=None, verbose=True):
 
     Shared between :class:`Calculator` and the parallel worker initializer
     (see :func:`pyspi._parallel._worker_init`) so workers don't need to
-    instantiate a throwaway Calculator just to rebuild ``_spis``.
+    instantiate a throwaway Calculator just to rebuild ``_spis``. Progress is
+    emitted via the ``pyspi.calculator`` logger at INFO level.
     """
     deps = optional_dependencies or {}
     spis = {}
     excluded = []
-    if verbose:
-        print(f"Loading configuration file: {configfile}")
+    logger.info("Loading configuration file: %s", configfile)
     with open(configfile) as f:
         yf = yaml.load(f, Loader=yaml.FullLoader)
     for module_name, module_spis in yf.items():
-        if verbose:
-            print(f"*** Importing module {module_name}")
+        logger.info("Importing module %s", module_name)
         module = importlib.import_module(module_name, __package__)
         for fcn, entry in (module_spis or {}).items():
             required = entry.get("dependencies")
             if required and not all(deps.get(d, False) for d in required):
                 configs = entry.get("configs") or [None]
-                if verbose:
-                    print(f"Optional dependencies: {required} not met. Skipping {len(configs)} SPI(s):")
+                logger.info("Optional dependencies %s not met; skipping %d SPI(s)", required, len(configs))
                 for params in configs:
-                    if verbose:
-                        print(f"*SKIPPING SPI: {module_name}.{fcn}(x,y,{params})...")
                     excluded.append([f"{fcn}(x,y,{params})", required])
                 continue
             configs = entry.get("configs")
             if fcn == "LaggedCorrelation" and configs is not None:
                 configs = _expand_lagged_correlation_configs(configs)
             if configs is None:
-                if verbose:
-                    print(f"[{len(spis)}] Adding SPI {module_name}.{fcn}(x,y)...")
                 spi = getattr(module, fcn)()
                 spis[spi.identifier] = spi
-                if verbose:
-                    print(f'Succesfully initialised SPI with identifier "{spi.identifier}" and labels {spi.labels}')
+                logger.info('[%d] %s.%s(x,y) -> "%s"', len(spis), module_name, fcn, spi.identifier)
                 continue
             for params in configs:
-                if verbose:
-                    print(f"[{len(spis)}] Adding SPI {module_name}.{fcn}(x,y,{params})")
                 spi = getattr(module, fcn)(**params)
                 spis[spi.identifier] = spi
-                if verbose:
-                    print(f'Succesfully initialised SPI with identifier "{spi.identifier}" and labels {spi.labels}')
+                logger.info('[%d] %s.%s(x,y,%s) -> "%s"', len(spis), module_name, fcn, params, spi.identifier)
     return spis, excluded
 
 
@@ -151,6 +142,9 @@ class Calculator:
         self._timings = {}
         self._verbose = verbose
 
+        # verbose maps to a process-global pyspi logger level (INFO vs WARNING).
+        _configure_logging(verbose)
+
         configfile = _resolve_configfile(configfile, subset)
 
         if not Calculator._optional_dependencies:
@@ -159,7 +153,7 @@ class Calculator:
         self._configfile = configfile  # stored so parallel workers can re-instantiate SPIs
         self._subset = subset
         self._spis, self._excluded_spis = load_spis_from_yaml(
-            configfile, optional_dependencies=Calculator._optional_dependencies, verbose=verbose,
+            configfile, optional_dependencies=Calculator._optional_dependencies,
         )
 
         duplicates = [
@@ -173,33 +167,26 @@ class Calculator:
         self._name = name
         self._labels = labels
 
-        if verbose:
-            print(f"="*100)
-            print(Fore.GREEN + f"{len(self.spis)} SPI(s) were successfully initialised.\n")
+        logger.info("%d SPI(s) were successfully initialised.", len(self.spis))
 
         if self._excluded_spis:
-            # Always print dependency warnings — they affect correctness, not noise.
+            # Dependency exclusions are logged at WARNING — visible even when
+            # verbose=False, because they change which SPIs run.
             missing_deps = [dep for dep, is_met in self._optional_dependencies.items() if not is_met]
-            print(Fore.YELLOW + "**** SPI Initialisation Warning ****")
-            print(Fore.YELLOW + "\nSome dependencies were not detected, which has led to the exclusion of certain SPIs:")
-            print("\nMissing Dependencies:")
-            for dep in missing_deps:
-                print(f"- {dep}")
-            print(f"\nAs a result, a total of {len(self._excluded_spis)} SPI(s) have been excluded:\n")
+            lines = [
+                "Some optional dependencies were not detected; certain SPIs are excluded.",
+                f"Missing dependencies: {', '.join(missing_deps)}",
+                f"{len(self._excluded_spis)} SPI(s) excluded:",
+            ]
             dependency_groups = {}
             for spi in self._excluded_spis:
                 for dep in spi[1]:
                     dependency_groups.setdefault(dep, []).append(spi[0])
             for dep, spi_list in dependency_groups.items():
-                print(f"\nDependency - {dep} - affects {len(spi_list)} SPI(s)")
-                print("Excluded SPIs:")
-                for spi in spi_list:
-                    print(f"  - {spi}")
-            print(f"\n" + "="*100)
-            print(Fore.YELLOW + "\nOPTIONS TO PROCEED:\n")
-            print(f"  1) Install the following dependencies to access all SPIs: [{', '.join(missing_deps)}]")
-            print(f"  2) Continue with a reduced set of {self.n_spis} SPIs by calling Calculator.compute(). \n")
-            print(f"="*100 + "\n")
+                lines.append(f"  dependency '{dep}' affects {len(spi_list)} SPI(s): {', '.join(spi_list)}")
+            lines.append(f"Install [{', '.join(missing_deps)}] for the full set, "
+                         f"or continue with the reduced {self.n_spis} SPIs.")
+            logger.warning("\n".join(lines))
 
         if dataset is not None:
             self.load_dataset(dataset)
@@ -306,7 +293,6 @@ class Calculator:
                 Data.convert_to_numpy(dataset),
                 normalise=self._normalise,
                 detrend=self._detrend,
-                verbose=self._verbose,
             )
         else:
             self._dataset = dataset
@@ -370,11 +356,12 @@ class Calculator:
                 if err is not None:
                     warnings.warn(f'Checkpoint contains prior error for "{key}": {err}')
             if done:
-                print(f"[pyspi] Resumed {len(done)} SPI(s) from {cp_dir}")
+                logger.info("Resumed %d SPI(s) from %s", len(done), cp_dir)
 
         if not spi_keys:
-            print(Fore.GREEN + "\nAll SPIs already cached; nothing to compute.")
-            inspect_calc_results(self)
+            logger.info("All SPIs already cached; nothing to compute.")
+            if self._verbose:
+                inspect_calc_results(self)
             return
 
         t_start = time.perf_counter()
@@ -384,8 +371,8 @@ class Calculator:
         else:
             n_workers = min(int(n_jobs), len(spi_keys))
             ctx = mp_context or "spawn"
-            if self._verbose:
-                print(f"[pyspi-parallel] {len(spi_keys)} SPI(s) via {n_workers} workers (mp={ctx})")
+            logger.info("Parallel compute: %d SPI(s) via %d workers (mp=%s)",
+                        len(spi_keys), n_workers, ctx)
             results = _parallel.run_parallel(
                 self._spis, self._dataset, spi_keys,
                 n_jobs=n_workers, mp_context=ctx,
@@ -399,8 +386,8 @@ class Calculator:
                 self._timings[key] = elapsed
 
         elapsed = time.perf_counter() - t_start
+        logger.info("Calculation complete. Time taken: %.4fs", elapsed)
         if self._verbose:
-            print(Fore.GREEN + f"\nCalculation complete. Time taken: {elapsed:.4f}s")
             inspect_calc_results(self)
 
     def _compute_serial(self, spi_keys, M, cp_dir, progress):

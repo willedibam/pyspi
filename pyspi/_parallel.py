@@ -11,6 +11,10 @@ Design:
 - If ``checkpoint_dir`` is set, each finished SPI is atomically written to
   ``<dir>/<identifier>.npy`` (and ``<identifier>.error`` on failure). A
   subsequent run with ``resume=True`` will load these and skip the SPIs.
+- Progress is per-SPI, not per-bucket: workers post a lightweight event to a
+  shared queue after each SPI so the tqdm bar advances one tick per SPI and
+  a stuck SPI is visible (the bar stalls). Results themselves still travel
+  back via the futures, which also surfaces a hard worker crash.
 """
 
 from __future__ import annotations
@@ -19,6 +23,7 @@ import multiprocessing as mp
 import multiprocessing.shared_memory as shm
 import concurrent.futures as cf
 import os
+import queue as _queue
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -54,7 +59,7 @@ def _attach_data(shm_name, shape, dtype_str, procnames, name):
     return data, shared
 
 
-def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile):
+def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, progress_q):
     """ProcessPoolExecutor initializer. Runs once per worker.
 
     Re-instantiates SPIs from the configfile (some SPI classes use closures in
@@ -77,25 +82,26 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile):
         from pyspi.utils import check_optional_deps
         Calculator._optional_dependencies = check_optional_deps()
     spis, _ = load_spis_from_yaml(
-        configfile,
-        optional_dependencies=Calculator._optional_dependencies,
-        verbose=False,
+        configfile, optional_dependencies=Calculator._optional_dependencies,
     )
 
     _WORKER_STATE["data"] = data
     _WORKER_STATE["shm"] = shared
     _WORKER_STATE["spis"] = spis
+    _WORKER_STATE["progress_q"] = progress_q
 
 
 def _run_task(spi_keys, checkpoint_dir):
     """Compute a bucket of SPIs sequentially in this worker.
 
-    Returns a list of (key, matrix, error_str_or_None, elapsed).
+    Posts ``(key, failed)`` to the progress queue after each SPI, and returns
+    the list of ``(key, matrix, error_str_or_None, elapsed)`` tuples.
     """
     import warnings
 
     data = _WORKER_STATE["data"]
     spis = _WORKER_STATE["spis"]
+    progress_q = _WORKER_STATE["progress_q"]
     M = data.n_processes
     out = []
     for key in spi_keys:
@@ -121,6 +127,8 @@ def _run_task(spi_keys, checkpoint_dir):
             elif err_path.exists():
                 err_path.unlink()
         out.append((key, S, err, elapsed))
+        if progress_q is not None:
+            progress_q.put((key, err is not None))
     return out
 
 
@@ -198,16 +206,20 @@ def run_parallel(
     from tqdm import tqdm
 
     arr = np.ascontiguousarray(dataset._data)
+    M = arr.shape[0]
     tasks = build_tasks(spi_keys, spis)
     cp_str = str(checkpoint_dir) if checkpoint_dir is not None else None
 
     shared = shm.SharedMemory(create=True, size=arr.nbytes)
+    manager = mp.Manager()
+    progress_q = manager.Queue()
     try:
         shared_view = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shared.buf)
         shared_view[:] = arr
 
         ctx = mp.get_context(mp_context)
         results: dict = {}
+        pbar = tqdm(total=len(spi_keys), desc="SPIs", disable=not progress)
         with cf.ProcessPoolExecutor(
             max_workers=n_jobs,
             mp_context=ctx,
@@ -215,18 +227,50 @@ def run_parallel(
             initargs=(
                 shared.name, arr.shape, str(arr.dtype),
                 list(dataset.procnames), getattr(dataset, "_name", None),
-                configfile,
+                configfile, progress_q,
             ),
         ) as ex:
-            futures = [ex.submit(_run_task, task, cp_str) for task in tasks]
-            iterator = cf.as_completed(futures)
-            if progress:
-                iterator = tqdm(iterator, total=len(futures), desc="SPI buckets")
-            for fut in iterator:
-                for key, S, err, elapsed in fut.result():
-                    results[key] = (S, err, elapsed)
+            future_to_task = {ex.submit(_run_task, task, cp_str): task for task in tasks}
+            pending = set(future_to_task)
+            while pending:
+                # Per-SPI progress ticks (cosmetic; bar stalls on a stuck SPI).
+                while True:
+                    try:
+                        key, _failed = progress_q.get_nowait()
+                        pbar.update(1)
+                        pbar.set_postfix_str(key[:32])
+                    except _queue.Empty:
+                        break
+                # Harvest finished futures (source of truth for results).
+                done = {f for f in pending if f.done()}
+                for fut in done:
+                    task = future_to_task[fut]
+                    try:
+                        for key, S, err, elapsed in fut.result():
+                            results[key] = (S, err, elapsed)
+                    except Exception as exc:  # worker process died (segfault/OOM)
+                        for key in task:
+                            results.setdefault(
+                                key,
+                                (np.full((M, M), np.nan), f"worker died: {exc}", 0.0),
+                            )
+                pending -= done
+                if pending:
+                    time.sleep(0.05)
+        # Drain any progress events that arrived after the last poll, then
+        # hard-sync the bar (a dead worker can leave it a few ticks short).
+        while True:
+            try:
+                progress_q.get_nowait()
+                pbar.update(1)
+            except _queue.Empty:
+                break
+        pbar.n = len(results)
+        pbar.refresh()
+        pbar.close()
         return results
     finally:
+        manager.shutdown()
         shared.close()
         try:
             shared.unlink()

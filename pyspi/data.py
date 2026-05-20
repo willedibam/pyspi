@@ -7,11 +7,13 @@ import pandas as pd
 from pyspi import utils
 from scipy.stats import zscore
 from scipy.signal import detrend
-from colorama import init, Fore
 import os
 
+from ._logging import get_logger
+
+logger = get_logger("pyspi.data")
+
 VERBOSE = False
-init(autoreset=True) # automatically reset coloured outputs
 
 class Data:
     """Store data for dependency analysis.
@@ -66,11 +68,9 @@ class Data:
         procnames=None,
         n_processes=None,
         n_observations=None,
-        verbose=True,
     ):
         self.normalise = normalise
         self.detrend = detrend
-        self.verbose = verbose
         # Explicit empty state so attribute access is consistent before set_data
         # has run (Data() with no args is a legitimate builder-pattern entry point
         # used by add_process()).
@@ -89,7 +89,6 @@ class Data:
                 name=name,
                 n_processes=n_processes,
                 n_observations=n_observations,
-                verbose=verbose,
             )
             if procnames is not None and len(procnames) != self.n_processes:
                 raise ValueError(
@@ -200,22 +199,19 @@ class Data:
             data = data[:, :n_observations]
 
         if self.detrend:
-            if verbose:
-                print(Fore.GREEN + "[1/2] Detrending time series in the dataset...")
+            logger.info("[1/2] Detrending time series in the dataset...")
             try:
                 data = detrend(data, axis=1)
             except ValueError as err:
-                if verbose:
-                    print(f"Could not detrend data: {err}")
-        elif verbose:
-            print(Fore.RED + "[1/2] Skipping detrending of time series in the dataset...")
+                logger.warning("Could not detrend data: %s", err)
+        else:
+            logger.info("[1/2] Skipping detrending of time series in the dataset.")
 
         if self.normalise:
-            if verbose:
-                print(Fore.GREEN + "[2/2] Normalising (z-scoring) each time series in the dataset...\n")
+            logger.info("[2/2] Normalising (z-scoring) each time series in the dataset...")
             data = zscore(data, axis=1, nan_policy="omit", ddof=1)
-        elif verbose:
-            print(Fore.RED + "[2/2] Skipping normalisation of time series in the dataset...\n")
+        else:
+            logger.info("[2/2] Skipping normalisation of time series in the dataset.")
 
         nans = np.isnan(data)
         if nans.any():
@@ -232,9 +228,9 @@ class Data:
             self._name = name
 
         if verbose:
-            print(
-                f'Dataset "{name}" now has properties: {self.n_processes} processes, {self.n_observations} observations, {self.n_replications} '
-                "replications"
+            logger.info(
+                'Dataset "%s" now has properties: %d processes, %d observations, %d replications',
+                name, self.n_processes, self.n_observations, self.n_replications,
             )
 
     def add_process(self, proc, verbose=False):
