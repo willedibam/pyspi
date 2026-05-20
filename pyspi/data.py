@@ -66,9 +66,21 @@ class Data:
         procnames=None,
         n_processes=None,
         n_observations=None,
+        verbose=True,
     ):
         self.normalise = normalise
         self.detrend = detrend
+        self.verbose = verbose
+        # Explicit empty state so attribute access is consistent before set_data
+        # has run (Data() with no args is a legitimate builder-pattern entry point
+        # used by add_process()).
+        self._data = None
+        self.n_processes = 0
+        self.n_observations = 0
+        self.n_replications = 0
+        # _name and _procnames are only set when data is actually loaded — keeps
+        # the existing contract that name="N/A" until data exists.
+
         if data is not None:
             dat = self.convert_to_numpy(data)
             self.set_data(
@@ -77,10 +89,13 @@ class Data:
                 name=name,
                 n_processes=n_processes,
                 n_observations=n_observations,
+                verbose=verbose,
             )
-
-        if procnames is not None:
-            assert len(procnames) == self.n_processes
+            if procnames is not None and len(procnames) != self.n_processes:
+                raise ValueError(
+                    f"procnames length ({len(procnames)}) does not match "
+                    f"n_processes ({self.n_processes})."
+                )
 
     @property
     def name(self):
@@ -185,18 +200,21 @@ class Data:
             data = data[:, :n_observations]
 
         if self.detrend:
-            print(Fore.GREEN + "[1/2] Detrending time series in the dataset...")
+            if verbose:
+                print(Fore.GREEN + "[1/2] Detrending time series in the dataset...")
             try:
                 data = detrend(data, axis=1)
             except ValueError as err:
-                print(f"Could not detrend data: {err}")
-        else:
+                if verbose:
+                    print(f"Could not detrend data: {err}")
+        elif verbose:
             print(Fore.RED + "[1/2] Skipping detrending of time series in the dataset...")
 
         if self.normalise:
-            print(Fore.GREEN + "[2/2] Normalising (z-scoring) each time series in the dataset...\n")
+            if verbose:
+                print(Fore.GREEN + "[2/2] Normalising (z-scoring) each time series in the dataset...\n")
             data = zscore(data, axis=1, nan_policy="omit", ddof=1)
-        else:
+        elif verbose:
             print(Fore.RED + "[2/2] Skipping normalisation of time series in the dataset...\n")
 
         nans = np.isnan(data)

@@ -19,6 +19,78 @@ from . import _parallel
 # LaggedCorrelation config expansion: max_tau -> tau=1..max_tau
 # ---------------------------------------------------------------------------
 
+def _resolve_configfile(configfile, subset):
+    """Return the path to the active config yaml from (configfile, subset)."""
+    if configfile is not None:
+        return configfile
+    here = os.path.dirname(os.path.abspath(__file__))
+    if subset == "fast":
+        return os.path.join(here, "fast_config.yaml")
+    if subset == "sonnet":
+        return os.path.join(here, "sonnet_config.yaml")
+    if subset == "fabfour":
+        return os.path.join(here, "fabfour_config.yaml")
+    if subset == "all":
+        return os.path.join(here, "config.yaml")
+    raise ValueError(
+        f"Subset '{subset}' does not exist. Try 'all' (default), 'fast', 'sonnet', or 'fabfour'."
+    )
+
+
+def load_spis_from_yaml(configfile, optional_dependencies=None, verbose=True):
+    """Instantiate all SPIs from a configfile.
+
+    Returns ``(spis, excluded_spis)`` where ``spis`` is a dict mapping
+    identifier to SPI instance, and ``excluded_spis`` is a list of
+    ``[label, deps]`` pairs for SPIs whose optional dependencies were missing.
+
+    Shared between :class:`Calculator` and the parallel worker initializer
+    (see :func:`pyspi._parallel._worker_init`) so workers don't need to
+    instantiate a throwaway Calculator just to rebuild ``_spis``.
+    """
+    deps = optional_dependencies or {}
+    spis = {}
+    excluded = []
+    if verbose:
+        print(f"Loading configuration file: {configfile}")
+    with open(configfile) as f:
+        yf = yaml.load(f, Loader=yaml.FullLoader)
+    for module_name, module_spis in yf.items():
+        if verbose:
+            print(f"*** Importing module {module_name}")
+        module = importlib.import_module(module_name, __package__)
+        for fcn, entry in (module_spis or {}).items():
+            required = entry.get("dependencies")
+            if required and not all(deps.get(d, False) for d in required):
+                configs = entry.get("configs") or [None]
+                if verbose:
+                    print(f"Optional dependencies: {required} not met. Skipping {len(configs)} SPI(s):")
+                for params in configs:
+                    if verbose:
+                        print(f"*SKIPPING SPI: {module_name}.{fcn}(x,y,{params})...")
+                    excluded.append([f"{fcn}(x,y,{params})", required])
+                continue
+            configs = entry.get("configs")
+            if fcn == "LaggedCorrelation" and configs is not None:
+                configs = _expand_lagged_correlation_configs(configs)
+            if configs is None:
+                if verbose:
+                    print(f"[{len(spis)}] Adding SPI {module_name}.{fcn}(x,y)...")
+                spi = getattr(module, fcn)()
+                spis[spi.identifier] = spi
+                if verbose:
+                    print(f'Succesfully initialised SPI with identifier "{spi.identifier}" and labels {spi.labels}')
+                continue
+            for params in configs:
+                if verbose:
+                    print(f"[{len(spis)}] Adding SPI {module_name}.{fcn}(x,y,{params})")
+                spi = getattr(module, fcn)(**params)
+                spis[spi.identifier] = spi
+                if verbose:
+                    print(f'Succesfully initialised SPI with identifier "{spi.identifier}" and labels {spi.labels}')
+    return spis, excluded
+
+
 def _expand_lagged_correlation_configs(configs):
     expanded = []
     for params in configs or []:
@@ -70,47 +142,30 @@ class Calculator:
 
     def __init__(
         self, dataset=None, name=None, labels=None, subset="all", configfile=None,
-        detrend=False, normalise=True
+        detrend=False, normalise=True, verbose=True,
     ):
         self._spis = {}
         self._excluded_spis = list()
         self._normalise = normalise
         self._detrend = detrend
         self._timings = {}
+        self._verbose = verbose
 
-        # Define configfile by subset if it was not specified
-        if configfile is None:
-            if subset == "fast":
-                configfile = (
-                    os.path.dirname(os.path.abspath(__file__)) + "/fast_config.yaml"
-                )
-            elif subset == "sonnet":
-                configfile = (
-                    os.path.dirname(os.path.abspath(__file__)) + "/sonnet_config.yaml"
-                )
-            elif subset == "fabfour":
-                configfile = (
-                    os.path.dirname(os.path.abspath(__file__)) + "/fabfour_config.yaml"
-                )
-            # If no configfile was provided but the subset was not one of the above (or the default 'all'), raise an error
-            elif subset != "all":
-                raise ValueError(
-                    f"Subset '{subset}' does not exist. Try 'all' (default), 'fast', 'sonnet', or 'fabfour'."
-                )
-            else:
-                configfile = os.path.dirname(os.path.abspath(__file__)) + "/config.yaml"
+        configfile = _resolve_configfile(configfile, subset)
 
         if not Calculator._optional_dependencies:
             Calculator._optional_dependencies = check_optional_deps()
 
         self._configfile = configfile  # stored so parallel workers can re-instantiate SPIs
         self._subset = subset
-        self._load_yaml(configfile)
+        self._spis, self._excluded_spis = load_spis_from_yaml(
+            configfile, optional_dependencies=Calculator._optional_dependencies, verbose=verbose,
+        )
 
         duplicates = [
-            name for name, count in Counter(self._spis.keys()).items() if count > 1
+            n for n, count in Counter(self._spis.keys()).items() if count > 1
         ]
-        if len(duplicates) > 0:
+        if duplicates:
             raise ValueError(
                 f"Duplicate SPI identifiers: {duplicates}.\n Check the config file for duplicates."
             )
@@ -118,37 +173,32 @@ class Calculator:
         self._name = name
         self._labels = labels
 
-        print(f"="*100)
-        print(Fore.GREEN + f"{len(self.spis)} SPI(s) were successfully initialised.\n")
-        if len(self._excluded_spis) > 0:
+        if verbose:
+            print(f"="*100)
+            print(Fore.GREEN + f"{len(self.spis)} SPI(s) were successfully initialised.\n")
+
+        if self._excluded_spis:
+            # Always print dependency warnings — they affect correctness, not noise.
             missing_deps = [dep for dep, is_met in self._optional_dependencies.items() if not is_met]
             print(Fore.YELLOW + "**** SPI Initialisation Warning ****")
             print(Fore.YELLOW + "\nSome dependencies were not detected, which has led to the exclusion of certain SPIs:")
             print("\nMissing Dependencies:")
-
             for dep in missing_deps:
                 print(f"- {dep}")
-
             print(f"\nAs a result, a total of {len(self._excluded_spis)} SPI(s) have been excluded:\n")
-
             dependency_groups = {}
             for spi in self._excluded_spis:
-                for dep in spi[1]: 
-                    if dep not in dependency_groups:
-                        dependency_groups[dep] = []
-                    dependency_groups[dep].append(spi[0])
-
-            for dep, spis in dependency_groups.items():
-                print(f"\nDependency - {dep} - affects {len(spis)} SPI(s)")
+                for dep in spi[1]:
+                    dependency_groups.setdefault(dep, []).append(spi[0])
+            for dep, spi_list in dependency_groups.items():
+                print(f"\nDependency - {dep} - affects {len(spi_list)} SPI(s)")
                 print("Excluded SPIs:")
-                for spi in spis:
+                for spi in spi_list:
                     print(f"  - {spi}")
-
             print(f"\n" + "="*100)
             print(Fore.YELLOW + "\nOPTIONS TO PROCEED:\n")
             print(f"  1) Install the following dependencies to access all SPIs: [{', '.join(missing_deps)}]")
-            callable_name = "{Calculator/CalculatorFrame}"
-            print(f"  2) Continue with a reduced set of {self.n_spis} SPIs by calling {callable_name}.compute(). \n")
+            print(f"  2) Continue with a reduced set of {self.n_spis} SPIs by calling Calculator.compute(). \n")
             print(f"="*100 + "\n")
 
         if dataset is not None:
@@ -244,48 +294,6 @@ class Calculator:
     def group_name(self, g):
         raise Exception("Do not set this property externally. Use the group() method.")
 
-    def _load_yaml(self, document):
-        print("Loading configuration file: {}".format(document))
-
-        with open(document) as f:
-            yf = yaml.load(f, Loader=yaml.FullLoader)
-
-            # Instantiate the SPIs
-            for module_name in yf:
-                print("*** Importing module {}".format(module_name))
-                module = importlib.import_module(module_name, __package__)
-                for fcn in yf[module_name]:
-                    deps = yf[module_name][fcn].get('dependencies')
-                    if deps is not None:
-                        all_deps_met = all(Calculator._optional_dependencies.get(dep, False) for dep in deps)
-                        if not all_deps_met:
-                            current_base_spi = yf[module_name][fcn]
-                            print(f"Optional dependencies: {deps} not met. Skipping {len(current_base_spi.get('configs'))} SPI(s):")
-                            for params in current_base_spi.get('configs'):
-                                print(f"*SKIPPING SPI: {module_name}.{fcn}(x,y,{params})...")
-                                self._excluded_spis.append([f"{fcn}(x,y,{params})", deps])
-                            continue
-                    try:
-                        configs = yf[module_name][fcn].get('configs')
-                        if fcn == "LaggedCorrelation" and configs is not None:
-                            configs = _expand_lagged_correlation_configs(configs)
-                        for params in configs:
-                            print(
-                                f"[{self.n_spis}] Adding SPI {module_name}.{fcn}(x,y,{params})"
-                            )
-                            spi = getattr(module, fcn)(**params)
-                            self._spis[spi.identifier] = spi
-                            print(
-                                f'Succesfully initialised SPI with identifier "{spi.identifier}" and labels {spi.labels}'
-                            )
-                    except TypeError:
-                        print(f"[{self.n_spis}] Adding SPI {module_name}.{fcn}(x,y)...")
-                        spi = getattr(module, fcn)()
-                        self._spis[spi.identifier] = spi
-                        print(
-                            f'Succesfully initialised SPI with identifier "{spi.identifier}" and labels {spi.labels}'
-                        )
-
     def load_dataset(self, dataset):
         """Load new dataset into existing instance.
 
@@ -294,7 +302,12 @@ class Calculator:
                 New dataset to attach to calculator.
         """
         if not isinstance(dataset, Data):
-            self._dataset = Data(Data.convert_to_numpy(dataset), normalise=self._normalise, detrend=self._detrend)
+            self._dataset = Data(
+                Data.convert_to_numpy(dataset),
+                normalise=self._normalise,
+                detrend=self._detrend,
+                verbose=self._verbose,
+            )
         else:
             self._dataset = dataset
 
@@ -371,12 +384,13 @@ class Calculator:
         else:
             n_workers = min(int(n_jobs), len(spi_keys))
             ctx = mp_context or "spawn"
-            print(f"[pyspi-parallel] {len(spi_keys)} SPI(s) via {n_workers} workers (mp={ctx})")
+            if self._verbose:
+                print(f"[pyspi-parallel] {len(spi_keys)} SPI(s) via {n_workers} workers (mp={ctx})")
             results = _parallel.run_parallel(
                 self._spis, self._dataset, spi_keys,
                 n_jobs=n_workers, mp_context=ctx,
                 checkpoint_dir=cp_dir, progress=progress,
-                configfile=self._configfile, subset=self._subset,
+                configfile=self._configfile,
             )
             for key, (S, err, elapsed) in results.items():
                 if err is not None:
@@ -385,8 +399,9 @@ class Calculator:
                 self._timings[key] = elapsed
 
         elapsed = time.perf_counter() - t_start
-        print(Fore.GREEN + f"\nCalculation complete. Time taken: {elapsed:.4f}s")
-        inspect_calc_results(self)
+        if self._verbose:
+            print(Fore.GREEN + f"\nCalculation complete. Time taken: {elapsed:.4f}s")
+            inspect_calc_results(self)
 
     def _compute_serial(self, spi_keys, M, cp_dir, progress):
         iterable = tqdm(spi_keys) if progress else spi_keys

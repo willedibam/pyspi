@@ -19,8 +19,15 @@ and the build_baselines.py helper in the ephemeral uv project).
 """
 import dill
 import numpy as np
+import pytest
 
 from pyspi.calculator import Calculator
+
+# Whole-file marker: this suite takes ~12 minutes. Skipped by default; run with
+#   pytest -m slow tests/test_regression.py
+# or
+#   pytest -m '' tests/
+pytestmark = pytest.mark.slow
 
 
 DATASETS = {

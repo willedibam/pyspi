@@ -15,8 +15,6 @@ Design:
 
 from __future__ import annotations
 
-import contextlib
-import io
 import multiprocessing as mp
 import multiprocessing.shared_memory as shm
 import concurrent.futures as cf
@@ -56,7 +54,7 @@ def _attach_data(shm_name, shape, dtype_str, procnames, name):
     return data, shared
 
 
-def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, subset):
+def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile):
     """ProcessPoolExecutor initializer. Runs once per worker.
 
     Re-instantiates SPIs from the configfile (some SPI classes use closures in
@@ -72,14 +70,21 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, sub
 
     data, shared = _attach_data(shm_name, shape, dtype_str, procnames, ds_name)
 
-    # Suppress Calculator init banner inside workers — main process already printed it.
-    from pyspi.calculator import Calculator
-    with contextlib.redirect_stdout(io.StringIO()):
-        proto = Calculator(configfile=configfile, subset=subset, normalise=False, detrend=False)
+    # Direct call to the shared loader — no throwaway Calculator instantiation,
+    # no stdout suppression needed.
+    from pyspi.calculator import load_spis_from_yaml, Calculator
+    if Calculator._optional_dependencies is None:
+        from pyspi.utils import check_optional_deps
+        Calculator._optional_dependencies = check_optional_deps()
+    spis, _ = load_spis_from_yaml(
+        configfile,
+        optional_dependencies=Calculator._optional_dependencies,
+        verbose=False,
+    )
 
     _WORKER_STATE["data"] = data
     _WORKER_STATE["shm"] = shared
-    _WORKER_STATE["spis"] = proto._spis
+    _WORKER_STATE["spis"] = spis
 
 
 def _run_task(spi_keys, checkpoint_dir):
@@ -188,7 +193,6 @@ def run_parallel(
     checkpoint_dir: Optional[Path],
     progress: bool,
     configfile: str,
-    subset: str,
 ) -> dict:
     """Execute ``spi_keys`` across ``n_jobs`` workers; return dict[key] -> (S, err, elapsed)."""
     from tqdm import tqdm
@@ -211,7 +215,7 @@ def run_parallel(
             initargs=(
                 shared.name, arr.shape, str(arr.dtype),
                 list(dataset.procnames), getattr(dataset, "_name", None),
-                configfile, subset,
+                configfile,
             ),
         ) as ex:
             futures = [ex.submit(_run_task, task, cp_str) for task in tasks]
