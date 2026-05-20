@@ -333,6 +333,14 @@ class Calculator:
                 inherit imported state via copy-on-write — ~2x faster startup),
                 ``"spawn"`` on macOS/Windows (fork is unsafe/absent there).
             progress (bool): Show a tqdm progress bar (default True).
+
+        Backend threading: when ``n_jobs>1`` each worker pins its nested pools
+        (OpenMP/OpenBLAS/MKL, cdt, torch, pyEDM) to one thread/process so the
+        workers don't oversubscribe the cores. macOS is an exception — its
+        Accelerate BLAS cannot be thread-pinned by threadpoolctl, so on macOS
+        ``n_jobs>1`` can oversubscribe BLAS-heavy SPIs; prefer ``n_jobs=1``
+        there for a single dataset. ``n_jobs=1`` always leaves the backends
+        free to self-parallelise.
         """
         if not hasattr(self, "_dataset"):
             raise AttributeError(

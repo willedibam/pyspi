@@ -2,9 +2,11 @@
 # Covers:
 #  - covariance cache namespace (Covariance + Precision, multiple estimators)
 #  - spectral_mv cache namespace (CoherenceMagnitude, multiple freq bands)
+#  - ccm cache namespace (ConvergentCrossMapping) — also exercises the pyEDM
+#    call-site pinning path (PYSPI_PIN_BACKENDS) under the worker pool
 #  - cacheless basic SPIs (SpearmanR, KendallTau)
 #  - cacheless misc SPI (PowerEnvelopeCorrelation)
-# Deterministic; no stochastic estimators.
+# All SPIs here are deterministic (CCM is seeded) so serial == parallel exactly.
 .statistics.basic:
   Covariance:
     labels: [undirected, linear, signed, multivariate, contemporaneous]
@@ -44,6 +46,16 @@
         fmax: 0.25
       - fmin: 0.25
         fmax: 0.5
+
+.statistics.causal:
+  ConvergentCrossMapping:
+    labels: [causal, directed, nonlinear, temporal, signed]
+    dependencies:
+    configs:
+      - statistic: mean
+        embedding_dimension: 1
+      - statistic: max
+        embedding_dimension: 1
 
 .statistics.misc:
   PowerEnvelopeCorrelation:

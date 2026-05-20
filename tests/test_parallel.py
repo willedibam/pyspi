@@ -3,10 +3,13 @@
 Uses a small handcrafted config (parallel_test_config.yaml) covering:
   - covariance cache namespace (Covariance + Precision, multiple estimators)
   - spectral_mv cache namespace (CoherenceMagnitude, multiple freq bands)
+  - ccm cache namespace (ConvergentCrossMapping) — exercises namespace bucketing
+    and the pyEDM call-site pinning path under the worker pool
   - cacheless SPIs (SpearmanR, KendallTau, PowerEnvelopeCorrelation)
-to exercise both the cache-aware scheduler and the cacheless single-SPI path.
 """
 
+import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +19,9 @@ import pytest
 from pyspi.calculator import Calculator
 
 CONFIG = Path(__file__).parent / "parallel_test_config.yaml"
+
+# fork is the Linux production default; spawn is the only safe method elsewhere.
+MP_CONTEXTS = ["spawn"] + (["fork"] if sys.platform.startswith("linux") else [])
 
 
 @pytest.fixture(scope="module")
@@ -31,22 +37,24 @@ def serial_table(dataset):
     return calc.table.copy()
 
 
+@pytest.mark.parametrize("mp_context", MP_CONTEXTS)
 @pytest.mark.parametrize("n_jobs", [2, 3])
-def test_parallel_matches_serial(dataset, serial_table, n_jobs):
-    """Parallel n_jobs>1 must produce numerically identical tables to serial."""
+def test_parallel_matches_serial(dataset, serial_table, n_jobs, mp_context):
+    """Parallel n_jobs>1 must produce numerically identical tables to serial,
+    for every start method and across all cache namespaces (incl. CCM)."""
     calc = Calculator(dataset=dataset, configfile=str(CONFIG), normalise=False)
-    calc.compute(n_jobs=n_jobs, mp_context="spawn", progress=False)
+    calc.compute(n_jobs=n_jobs, mp_context=mp_context, progress=False)
     parallel_table = calc.table
 
     assert list(parallel_table.columns) == list(serial_table.columns), \
         "Column order/identity diverged between serial and parallel."
 
-    # SPI computations are deterministic given the dataset; tight tolerance.
+    # Every SPI here is deterministic (CCM is seeded); tight tolerance.
     np.testing.assert_allclose(
         parallel_table.to_numpy(),
         serial_table.to_numpy(),
         rtol=1e-10, atol=1e-12, equal_nan=True,
-        err_msg=f"Parallel result with n_jobs={n_jobs} diverged from serial.",
+        err_msg=f"Parallel (n_jobs={n_jobs}, mp={mp_context}) diverged from serial.",
     )
 
 
@@ -81,12 +89,19 @@ def test_checkpoint_resume_matches_full_run(dataset, serial_table, tmp_path):
 
 
 def test_failure_isolation(dataset):
-    """A poisoned SPI must not break siblings: that SPI returns NaN, others OK."""
+    """A poisoned SPI must not break siblings: that SPI returns NaN, others OK.
+
+    Run at n_jobs=1: an instance-level monkeypatch can't survive into a worker
+    (workers re-instantiate SPIs from the config), so the failure must be raised
+    in-process. The per-SPI try/except -> NaN-fill contract is the same in both
+    paths (_compute_serial and _parallel._run_task); test_parallel_matches_serial
+    covers that the parallel path completes the full table.
+    """
     calc = Calculator(dataset=dataset, configfile=str(CONFIG), normalise=False)
 
     # Poison one Covariance instance's multivariate() at the instance level so
     # other Covariance/Precision siblings (which share the class method via the
-    # Estimators base) are unaffected. Tests that one failure inside a cache
+    # Estimators base) are unaffected — tests that one failure inside a cache
     # bucket doesn't poison the rest of the bucket.
     victim_key = next(
         k for k, spi in calc.spis.items()
@@ -99,9 +114,6 @@ def test_failure_isolation(dataset):
     calc.spis[victim_key].multivariate = boom
 
     with pytest.warns(UserWarning):
-        # n_jobs=1 keeps the failure in-process: workers would re-instantiate
-        # SPIs from the config and miss the instance-level monkeypatch. The
-        # isolation logic is identical between serial and parallel paths.
         calc.compute(n_jobs=1, progress=False)
 
     M = calc.dataset.n_processes
@@ -114,6 +126,18 @@ def test_failure_isolation(dataset):
         offdiag = mat[~np.eye(M, dtype=bool)]
         assert np.isfinite(offdiag).all(), \
             f"Sibling SPI '{sibling}' has unexpected NaNs after isolated failure."
+
+
+def test_pin_worker_thread_pools_sets_env():
+    """Worker pinning must export PYSPI_PIN_BACKENDS — the flag statistics/causal.py
+    reads to pass parallel=False to pyEDM."""
+    from pyspi import _parallel
+    os.environ.pop("PYSPI_PIN_BACKENDS", None)
+    try:
+        _parallel._pin_worker_thread_pools()
+        assert os.environ.get("PYSPI_PIN_BACKENDS") == "1"
+    finally:
+        os.environ.pop("PYSPI_PIN_BACKENDS", None)
 
 
 def test_cli_module_importable():

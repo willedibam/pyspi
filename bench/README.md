@@ -45,13 +45,48 @@ d = json.load(open("bench/results/timings_xxx.json"))
 cells = pd.json_normalize(d["results"])              # one row per (M,T,n_jobs)
 ```
 
-## Cluster (PBS / Gadi)
+## Cut a benchmarked config
 
-`run_benchmark.pbs` runs the suite on Gadi. Submit with `-v` overrides:
+`cut_config.py` turns a timing JSON into a `benchmarked<N>_config.yaml` — the
+former notebook step, now self-contained.
 
 ```bash
+# Measure per-SPI walltime, then keep the fastest 90%
+python -m bench.bench_compute --preset amortized --config config.yaml
+python -m bench.cut_config --bench-json bench/results/timings_config_*.json --keep 90
+```
+
+Cost model (`--mode`):
+
+- `amortized` (default) — SPIs sharing a `_cache_namespace` (Covariance/Precision,
+  the multitaper spectral pairs, Cointegration, Barycenter, CCM, ...) split the
+  group's total cost evenly: `cost = sum(group walltimes) / group size`. This is
+  the true per-variant budget impact — the shared computation is built once.
+- `raw` — each SPI's own measured walltime.
+
+Output goes to `pyspi/benchmarked<N>[_amortized]_config.yaml`; dropped SPIs are
+listed as trailing comments for auditability. `--m`/`--t` pick the bench cell
+(default: largest).
+
+## Cluster (PBS)
+
+`run_benchmark.pbs` (Gadi) and `run_benchmark_physics.pbs` (USYD Physics) run
+the suite on the cluster. Submit with `-v` overrides:
+
+```bash
+# config-cutting grid as a PBS array — one (M,T) cell per task, n_jobs=1:
+qsub -J 1-4 -v M=32,64,T=1000,4000,CONFIG=config.yaml bench/run_benchmark.pbs
+
+# a single (M,T) cell:
+qsub -v M=64,T=2000,CONFIG=config.yaml bench/run_benchmark.pbs
+
+# a bundled preset:
 qsub -v PRESET=parallel,CONFIG=benchmarked90_config.yaml bench/run_benchmark.pbs
 ```
+
+Set `M` and `T` (comma-separated) to benchmark your real data sizes — the
+bundled presets only reach M=32. With `-J 1-N` each array task runs one grid
+cell to its own JSON; cut a config from the cell that matches your target size.
 
 ## Notes
 

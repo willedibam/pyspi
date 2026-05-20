@@ -1,46 +1,41 @@
 #!/bin/bash
 #PBS -N pyspi_bench
-#PBS -P ql44
-#PBS -q normal
+#PBS -l select=1:ncpus=12:mem=48gb
 #PBS -l walltime=10:00:00
-#PBS -l ncpus=16
-#PBS -l mem=64GB
-#PBS -l jobfs=10GB
-#PBS -l storage=scratch/ql44+gdata/ql44
-#PBS -l wd
 #PBS -j oe
 #PBS -m bea
 #PBS -M wedi0306@uni.sydney.edu.au
 
-# Benchmark pyspi Calculator.compute() on Gadi.
+# Benchmark pyspi Calculator.compute() on the USYD Physics cluster.
 #
-# Runs bench/bench_compute.py from the pyspi-fork repo. The sister-repo venv
-# (pyspi installed editable) is activated; runs from the pyspi-fork repo root
-# so `python -m bench.bench_compute` resolves.
+# Same logic as run_benchmark.pbs (Gadi); differs only in PBS directives
+# (select syntax, no project/queue/storage) and module setup. Submit from the
+# pyspi-fork repo root so $PBS_O_WORKDIR resolves there.
 #
 # Submit with -v overrides, e.g.:
 #   # config-cutting grid as a 4-cell array (one (M,T) cell per task):
-#   qsub -J 1-4 -v M=32,64,T=1000,4000,CONFIG=config.yaml bench/run_benchmark.pbs
+#   qsub -J 1-4 -v M=32,64,T=1000,4000,CONFIG=config.yaml bench/run_benchmark_physics.pbs
 #   # a single (M,T) cell:
-#   qsub -v M=64,T=2000,CONFIG=config.yaml bench/run_benchmark.pbs
-#   # a bundled preset (parallel speedup curve):
-#   qsub -v PRESET=parallel,CONFIG=benchmarked90_config.yaml bench/run_benchmark.pbs
+#   qsub -v M=64,T=2000,CONFIG=config.yaml bench/run_benchmark_physics.pbs
 #
 # Env (-v), with defaults:
 #   M, T      comma-separated grid axes. If BOTH set, they override PRESET.
-#   NJOBS     Calculator.compute n_jobs for an M/T grid (default 1 — the
-#             regime for config-cutting; per-SPI cost is n_jobs-invariant).
+#   NJOBS     Calculator.compute n_jobs for an M/T grid (default 1).
 #   PRESET    bundled grid: headline | scaling | parallel | amortized [amortized]
 #   CONFIG    pyspi config: subset name, bundled filename, or path   [config.yaml]
 #   REPEATS   repeats per cell                                       [2]
-#   PYSPI_DIR pyspi-fork checkout         [/scratch/ql44/<user>/pyspi-fork]
-#   VENV      venv with pyspi editable    [$PYSPI_DIR/../mts-spi-study-cluster/.venv]
+#   VENV      venv with pyspi installed editable  [../mts-spi-study-cluster/.venv]
 #
 # Array jobs: submit with -J 1-N where N = number of grid cells; each task
-# runs one cell via --array-index and writes its own results JSON. n_jobs=1
-# within a task — the parallelism is across cells, not within.
+# runs one cell via --array-index to its own JSON. n_jobs=1 within a task.
+# Size walltime / mem / ncpus to your queue and the largest (M,T) cell.
 
 set -euo pipefail
+
+if [[ -z "${PBS_O_WORKDIR:-}" ]]; then
+  echo "[ERROR] PBS_O_WORKDIR not set — submit via qsub from the pyspi-fork repo root."
+  exit 1
+fi
 
 PRESET="${PRESET:-amortized}"
 CONFIG="${CONFIG:-config.yaml}"
@@ -48,11 +43,11 @@ REPEATS="${REPEATS:-2}"
 M="${M:-}"
 T="${T:-}"
 NJOBS="${NJOBS:-1}"
-PYSPI_DIR="${PYSPI_DIR:-/scratch/ql44/${USER}/pyspi-fork}"
-VENV="${VENV:-${PYSPI_DIR}/../mts-spi-study-cluster/.venv}"
+VENV="${VENV:-../mts-spi-study-cluster/.venv}"
+
+cd "${PBS_O_WORKDIR}"
 
 module purge
-module load python3/3.12.1
 source "${VENV}/bin/activate"
 
 # BLAS single-threaded — matches the production regime (1 dataset / core).
@@ -65,8 +60,6 @@ export KMP_DUPLICATE_LIB_OK=TRUE
 
 # cdt (transitive pyspi import) does ast.literal_eval(os.environ["CUDA_VISIBLE_DEVICES"]).
 unset CUDA_VISIBLE_DEVICES
-
-cd "${PYSPI_DIR}"
 
 # Explicit M/T overrides the preset.
 if [[ -n "$M" && -n "$T" ]]; then
@@ -85,7 +78,7 @@ if [[ -n "${PBS_ARRAY_INDEX:-}" ]]; then
     SUFFIX="_cell${PBS_ARRAY_INDEX}"
 fi
 
-OUT="bench/results/gadi_${LABEL}${SUFFIX}.json"
+OUT="bench/results/physics_${LABEL}${SUFFIX}.json"
 
 echo "[bench] host=$(hostname) start=$(date)"
 echo "[bench] grid=${GRID[*]}  config=${CONFIG}  repeats=${REPEATS}"

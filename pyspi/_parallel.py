@@ -73,24 +73,59 @@ def _attach_data(shm_name, shape, dtype_str, procnames, name):
     return data, shared
 
 
+_BLAS_ENV_VARS = (
+    "OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS", "NUMEXPR_NUM_THREADS", "NUMBA_NUM_THREADS",
+)
+
+
+def _pin_blas_env() -> None:
+    """Force BLAS/threading env vars to 1 in the parent, before workers spawn.
+
+    threadpool_limits (see _pin_worker_thread_pools) pins OpenBLAS/MKL/OpenMP
+    at runtime; these env vars additionally cover numba and — for spawn
+    workers, which import numpy before _worker_init runs — make BLAS start
+    single-threaded from process start. Caveat: macOS Accelerate only partly
+    honours these (its vDSP/FFT path threads independently of any documented
+    env var), so on macOS n_jobs>1 can still oversubscribe FFT-heavy SPIs;
+    Linux (OpenBLAS/MKL) is fully covered.
+    """
+    for var in _BLAS_ENV_VARS:
+        os.environ[var] = "1"
+
+
+_THREADPOOL_LIMITER = None  # module-global so the limiter is never GC'd
+
+
 def _pin_worker_thread_pools():
-    """Pin every nested thread pool to 1 so process workers don't oversubscribe.
+    """Pin every nested thread/process pool to 1 so process workers don't oversubscribe.
 
     n_jobs workers each running a library that itself spawns cpu_count() threads
-    = quadratic thread blow-up. Pinning BLAS alone is not enough: a few SPIs use
-    libraries with their own pools — notably cdt (causal discovery toolbox,
-    transitive dep) which autosets SETTINGS.NJOBS to cpu_count() at import and
-    drives ConvergentCrossMapping. Left unpinned, CCM under an 8-worker pool ran
-    ~2x slower than serial.
+    = quadratic blow-up. Pinning BLAS alone is not enough. The pools:
+      - BLAS + OpenMP (numpy/scipy/sklearn): threadpool_limits, all user APIs.
+      - cdt (causal discovery toolbox, transitive dep): autosets SETTINGS.NJOBS
+        to cpu_count() at import; drives ANM/CDS/RECI/IGCI.
+      - torch (drives InterDependenceScore): intra- and inter-op thread counts.
+    pyEDM (drives ConvergentCrossMapping) is process-based, not thread-based, so
+    it can't be pinned here — instead this function exports PYSPI_PIN_BACKENDS=1
+    and statistics/causal.py reads it to pass parallel=False to pyEDM.
     """
+    global _THREADPOOL_LIMITER
+    os.environ["PYSPI_PIN_BACKENDS"] = "1"
     try:
         from threadpoolctl import threadpool_limits
-        threadpool_limits(limits=1, user_api="blas")
+        _THREADPOOL_LIMITER = threadpool_limits(limits=1)  # blas + openmp
     except ImportError:
         pass
     try:
         import cdt
         cdt.SETTINGS.NJOBS = 1
+    except Exception:
+        pass
+    try:
+        import torch
+        torch.set_num_threads(1)
+        torch.set_num_interop_threads(1)
     except Exception:
         pass
 
@@ -237,6 +272,10 @@ def run_parallel(
 ) -> dict:
     """Execute ``spi_keys`` across ``n_jobs`` workers; return dict[key] -> (S, err, elapsed)."""
     from tqdm import tqdm
+
+    # Pin BLAS env before any worker spawns — workers inherit single-threaded
+    # BLAS from process start (the only lever for macOS Accelerate).
+    _pin_blas_env()
 
     arr = np.ascontiguousarray(dataset._data)
     M = arr.shape[0]

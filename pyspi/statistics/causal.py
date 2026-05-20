@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pandas as pd
 from cdt.causality.pairwise import ANM, CDS, IGCI, RECI
@@ -70,6 +71,9 @@ class ConvergentCrossMapping(Directed, Signed):
     name = "Convergent cross-mapping"
     identifier = "ccm"
     labels = ["causal", "directed", "nonlinear", "temporal", "signed"]
+    # Variants (mean/max/diff x embedding dimension) share data.ccm[self.key],
+    # keyed by embedding dimension — bucket them onto one parallel worker.
+    _cache_namespace = "ccm"
 
     def __init__(self, statistic="mean", embedding_dimension=None):
         self._statistic = statistic
@@ -85,6 +89,11 @@ class ConvergentCrossMapping(Directed, Signed):
         try:
             ccmf = data.ccm[self.key]
         except (AttributeError, KeyError):
+            # pyEDM 2.5 self-parallelises (EmbedDimension over processes, CCM
+            # over samples). Inside a pinned pyspi worker, force single-process
+            # so n_jobs workers don't each fan out to cpu_count(). Set by
+            # _parallel._pin_worker_thread_pools; unset for serial runs.
+            pinned = os.environ.get("PYSPI_PIN_BACKENDS") == "1"
             z = data.to_numpy(squeeze=True)
 
             M = data.n_processes
@@ -109,6 +118,7 @@ class ConvergentCrossMapping(Directed, Signed):
                         columns=col,
                         target=col,
                         showPlot=False,
+                        numProcess=1 if pinned else 4,
                     )
                     embedding[_i] = embed_df.max()["E"]
             else:
@@ -139,6 +149,7 @@ class ConvergentCrossMapping(Directed, Signed):
                         libSizes=lib_sizes,
                         sample=100,
                         seed=42,
+                        parallel=not pinned,
                     )
                     ccmf[_i, _j] = ccm_df.iloc[:, 1].values[: (nlibs + 1)]
                     ccmf[_j, _i] = ccm_df.iloc[:, 2].values[: (nlibs + 1)]
