@@ -1,5 +1,5 @@
 import numpy as np
-import dill
+import pickle
 from pyspi.calculator import Calculator
 
 """"Script to generate benchmarking dataset"""
@@ -37,4 +37,4 @@ mpi_benchmarks = get_benchmark_tables(store_calcs)
 
 # save data 
 with open("tests/CML7_benchmark_tables_new.pkl", "wb") as f:
-    dill.dump(mpi_benchmarks, f)
+    pickle.dump(mpi_benchmarks, f)

@@ -17,7 +17,7 @@ VAR1 (linear autoregressive, 7 proc), and Kuramoto (phase oscillators,
 and numpy seed 42 per trial (see tests/generate_benchmark_datasets.py
 and the build_baselines.py helper in the ephemeral uv project).
 """
-import dill
+import pickle
 import numpy as np
 import pytest
 
@@ -55,7 +55,7 @@ def _load_dataset(name):
 
 def _load_baseline(name):
     with open(BASELINES[name], "rb") as f:
-        return dill.load(f)
+        return pickle.load(f)
 
 
 _tables_cache = {}
