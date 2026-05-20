@@ -1,0 +1,75 @@
+#!/bin/bash
+#PBS -N pyspi_bench
+#PBS -P ql44
+#PBS -q normal
+#PBS -l walltime=02:00:00
+#PBS -l ncpus=16
+#PBS -l mem=64GB
+#PBS -l jobfs=10GB
+#PBS -l storage=scratch/ql44+gdata/ql44
+#PBS -l wd
+#PBS -j oe
+#PBS -m bea
+#PBS -M wedi0306@uni.sydney.edu.au
+
+# Benchmark pyspi Calculator.compute() on Gadi.
+#
+# Runs bench/bench_compute.py from the pyspi-fork repo. The sister-repo venv
+# (which has pyspi-fork installed editable) is activated; the script then runs
+# from the pyspi-fork repo root so `python -m bench.bench_compute` resolves.
+#
+# Submit with -v overrides, e.g.:
+#   qsub -v PRESET=parallel,CONFIG=benchmarked90_config.yaml bench/run_benchmark.pbs
+#   qsub -v PRESET=scaling,CONFIG=config.yaml,REPEATS=3       bench/run_benchmark.pbs
+#
+# Env (-v), with defaults:
+#   PRESET        bench preset: headline | scaling | parallel | amortized   [parallel]
+#   CONFIG        pyspi config: subset name, bundled filename, or path      [benchmarked90_config.yaml]
+#   REPEATS       repeats per cell                                          [2]
+#   PYSPI_DIR     path to the pyspi-fork checkout    [/scratch/ql44/<user>/pyspi-fork]
+#   VENV          path to the venv with pyspi installed editable  [$PYSPI_DIR/../mts-spi-study-cluster/.venv]
+#
+# ncpus=16 covers the 'parallel' preset's max n_jobs sweep (1,2,4,8,16). For
+# the 'scaling' preset (n_jobs=1 throughout) ncpus=4 is plenty — lower it to
+# save SU. Split 'scaling' across a PBS array with --array-index if desired.
+
+set -euo pipefail
+
+PRESET="${PRESET:-parallel}"
+CONFIG="${CONFIG:-benchmarked90_config.yaml}"
+REPEATS="${REPEATS:-2}"
+PYSPI_DIR="${PYSPI_DIR:-/scratch/ql44/${USER}/pyspi-fork}"
+VENV="${VENV:-${PYSPI_DIR}/../mts-spi-study-cluster/.venv}"
+
+module purge
+module load python3/3.12.1
+source "${VENV}/bin/activate"
+
+# BLAS must be single-threaded: bench_compute sweeps n_jobs, and N workers x
+# full BLAS oversubscribes. Workers also pin BLAS to 1 internally, but set it
+# here too so the n_jobs=1 cells are measured under the same BLAS regime.
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export KMP_DUPLICATE_LIB_OK=TRUE
+
+# cdt (transitive pyspi import) does ast.literal_eval(os.environ["CUDA_VISIBLE_DEVICES"]).
+unset CUDA_VISIBLE_DEVICES
+
+cd "${PYSPI_DIR}"
+OUT="bench/results/gadi_${PRESET}_$(date +%Y%m%d_%H%M%S).json"
+
+echo "[bench] host=$(hostname) start=$(date)"
+echo "[bench] preset=${PRESET} config=${CONFIG} repeats=${REPEATS}"
+echo "[bench] pyspi_dir=${PYSPI_DIR}  out=${OUT}"
+
+python -m bench.bench_compute \
+    --preset "${PRESET}" \
+    --config "${CONFIG}" \
+    --repeats "${REPEATS}" \
+    --output "${OUT}" \
+    --resume
+
+echo "[bench] finished at $(date) -> ${OUT}"
