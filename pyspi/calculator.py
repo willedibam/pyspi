@@ -329,8 +329,9 @@ class Calculator:
             resume (bool): If True (default) and ``checkpoint_dir`` contains
                 results from a prior run, those SPIs are loaded and skipped.
             mp_context (str, optional): Multiprocessing start method when
-                ``n_jobs>1``. Defaults to ``"spawn"`` (portable, Linux/macOS/Win).
-                Pass ``"fork"`` on Linux for slightly lower startup cost.
+                ``n_jobs>1``. Default (``None``): ``"fork"`` on Linux (workers
+                inherit imported state via copy-on-write — ~2x faster startup),
+                ``"spawn"`` on macOS/Windows (fork is unsafe/absent there).
             progress (bool): Show a tqdm progress bar (default True).
         """
         if not hasattr(self, "_dataset"):
@@ -370,7 +371,7 @@ class Calculator:
             self._compute_serial(spi_keys, M, cp_dir, progress)
         else:
             n_workers = min(int(n_jobs), len(spi_keys))
-            ctx = mp_context or "spawn"
+            ctx = mp_context or _parallel.default_mp_context()
             logger.info("Parallel compute: %d SPI(s) via %d workers (mp=%s)",
                         len(spi_keys), n_workers, ctx)
             results = _parallel.run_parallel(

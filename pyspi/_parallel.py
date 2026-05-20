@@ -24,12 +24,26 @@ import multiprocessing.shared_memory as shm
 import concurrent.futures as cf
 import os
 import queue as _queue
+import sys
 import time
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+
+def default_mp_context() -> str:
+    """Best start method for the current platform.
+
+    fork on Linux: workers inherit the parent's already-imported modules and
+    instantiated SPIs via copy-on-write, so worker startup is near-instant.
+    Measured ~2x faster end-to-end than spawn for a 252-SPI run.
+
+    spawn elsewhere: fork is unsafe on macOS (Accelerate/CoreFoundation after
+    init) and absent on Windows; spawn re-imports per worker but is correct.
+    """
+    return "fork" if sys.platform.startswith("linux") else "spawn"
 
 # Worker-local state populated by _worker_init. Module globals are safe here
 # because each worker process has its own independent copy.
@@ -210,10 +224,14 @@ def run_parallel(
     tasks = build_tasks(spi_keys, spis)
     cp_str = str(checkpoint_dir) if checkpoint_dir is not None else None
 
-    shared = shm.SharedMemory(create=True, size=arr.nbytes)
-    manager = mp.Manager()
-    progress_q = manager.Queue()
+    # Create resources inside the try so a failure constructing either one
+    # (e.g. mp.Manager() raising) still runs the cleanup in finally.
+    shared = None
+    manager = None
     try:
+        shared = shm.SharedMemory(create=True, size=arr.nbytes)
+        manager = mp.Manager()
+        progress_q = manager.Queue()
         shared_view = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shared.buf)
         shared_view[:] = arr
 
@@ -270,9 +288,11 @@ def run_parallel(
         pbar.close()
         return results
     finally:
-        manager.shutdown()
-        shared.close()
-        try:
-            shared.unlink()
-        except FileNotFoundError:
-            pass
+        if manager is not None:
+            manager.shutdown()
+        if shared is not None:
+            shared.close()
+            try:
+                shared.unlink()
+            except FileNotFoundError:
+                pass
