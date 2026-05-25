@@ -14,31 +14,33 @@
 
 # Benchmark pyspi Calculator.compute() on Gadi.
 #
-# Runs bench/bench_compute.py from the pyspi-fork repo. The sister-repo venv
-# (pyspi installed editable) is activated; runs from the pyspi-fork repo root
-# so `python -m bench.bench_compute` resolves.
+# Output: one JSON per (M,T,n_jobs) cell in bench/results/, named
+#         "<label>_M<M>_T<T>_n<n>.json" (label defaults to gadi_<config-stem>).
+# Logs:   one file per PBS job/task in bench/logs/.
 #
-# Submit with -v overrides, e.g.:
+# Submit examples (qsub -v parses commas as separators — env-pass for
+# comma-containing values):
+#
 #   # config-cutting grid as a 4-cell array (one (M,T) cell per task):
-#   qsub -J 1-4 -v M=32,64,T=1000,4000,CONFIG=config.yaml bench/run_benchmark.pbs
-#   # a single (M,T) cell:
-#   qsub -v M=64,T=2000,CONFIG=config.yaml bench/run_benchmark.pbs
-#   # a bundled preset (parallel speedup curve):
+#   M=32,80 T=500,2000 CONFIG=config.yaml REPEATS=2 \
+#     qsub -J 1-4 -v M,T,CONFIG,REPEATS bench/run_benchmark.pbs
+#
+#   # single (M,T) cell:
+#   M=64 T=2000 CONFIG=config.yaml REPEATS=2 \
+#     qsub -v M,T,CONFIG,REPEATS bench/run_benchmark.pbs
+#
+#   # bundled preset (parallel speedup curve):
 #   qsub -v PRESET=parallel,CONFIG=benchmarked90_config.yaml bench/run_benchmark.pbs
 #
 # Env (-v), with defaults:
 #   M, T      comma-separated grid axes. If BOTH set, they override PRESET.
-#   NJOBS     Calculator.compute n_jobs for an M/T grid (default 1 — the
-#             regime for config-cutting; per-SPI cost is n_jobs-invariant).
+#   NJOBS     Calculator.compute n_jobs (default 1).
 #   PRESET    bundled grid: headline | scaling | parallel | amortized [amortized]
-#   CONFIG    pyspi config: subset name, bundled filename, or path   [config.yaml]
-#   REPEATS   repeats per cell                                       [2]
-#   PYSPI_DIR pyspi-fork checkout         [/scratch/ql44/<user>/pyspi-fork]
-#   VENV      venv with pyspi editable    [$PYSPI_DIR/../mts-spi-study-cluster/.venv]
-#
-# Array jobs: submit with -J 1-N where N = number of grid cells; each task
-# runs one cell via --array-index and writes its own results JSON. n_jobs=1
-# within a task — the parallelism is across cells, not within.
+#   CONFIG    pyspi config: subset name, bundled filename, or path [config.yaml]
+#   REPEATS   repeats per cell                                     [2]
+#   LABEL     filename prefix     [gadi_<config-stem>]
+#   PYSPI_DIR pyspi-fork checkout  [/scratch/ql44/<user>/pyspi-fork]
+#   VENV      venv with pyspi editable [$PYSPI_DIR/../mts-spi-study-cluster/.venv]
 
 set -euo pipefail
 
@@ -50,12 +52,24 @@ T="${T:-}"
 NJOBS="${NJOBS:-1}"
 PYSPI_DIR="${PYSPI_DIR:-/scratch/ql44/${USER}/pyspi-fork}"
 VENV="${VENV:-${PYSPI_DIR}/../mts-spi-study-cluster/.venv}"
+LABEL_DEFAULT="gadi_$(basename "${CONFIG}" .yaml)"
+LABEL="${LABEL:-$LABEL_DEFAULT}"
+
+cd "${PYSPI_DIR}"
+
+# Logs: one file per PBS job (or per array task) under bench/logs/.
+LOG_DIR="${PYSPI_DIR}/bench/logs"
+mkdir -p "$LOG_DIR"
+JOBID="${PBS_JOBID:-local}"
+ARRAY_ID="${PBS_ARRAY_INDEX:-}"
+LOG_TAG="${JOBID%%.*}${ARRAY_ID:+_${ARRAY_ID}}"
+exec >"$LOG_DIR/bench_${LOG_TAG}.log" 2>&1
 
 module purge
 module load python3/3.12.1
 source "${VENV}/bin/activate"
 
-# BLAS single-threaded — matches the production regime (1 dataset / core).
+# BLAS single-threaded — matches production regime (1 dataset / core).
 export OMP_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export MKL_NUM_THREADS=1
@@ -63,39 +77,31 @@ export VECLIB_MAXIMUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export KMP_DUPLICATE_LIB_OK=TRUE
 
-# cdt (transitive pyspi import) does ast.literal_eval(os.environ["CUDA_VISIBLE_DEVICES"]).
 unset CUDA_VISIBLE_DEVICES
-
-cd "${PYSPI_DIR}"
 
 # Explicit M/T overrides the preset.
 if [[ -n "$M" && -n "$T" ]]; then
     GRID=(--m "$M" --t "$T" --n-jobs "$NJOBS")
-    LABEL="m${M//,/-}_t${T//,/-}"
 else
     GRID=(--preset "$PRESET")
-    LABEL="$PRESET"
 fi
 
-# Array job: one grid cell per task, each to its own JSON.
+# Array job: one grid cell per task.
 ARRAY=()
-SUFFIX=""
 if [[ -n "${PBS_ARRAY_INDEX:-}" ]]; then
     ARRAY=(--array-index "$PBS_ARRAY_INDEX")
-    SUFFIX="_cell${PBS_ARRAY_INDEX}"
 fi
 
-OUT="bench/results/gadi_${LABEL}${SUFFIX}.json"
-
 echo "[bench] host=$(hostname) start=$(date)"
-echo "[bench] grid=${GRID[*]}  config=${CONFIG}  repeats=${REPEATS}"
-echo "[bench] out=${OUT}"
+echo "[bench] config=${CONFIG}  grid=${GRID[*]} ${ARRAY[*]}  repeats=${REPEATS}"
+echo "[bench] label=${LABEL}  output_dir=bench/results/"
 
 python -m bench.bench_compute \
     "${GRID[@]}" "${ARRAY[@]}" \
     --config "${CONFIG}" \
     --repeats "${REPEATS}" \
-    --output "${OUT}" \
+    --output-dir bench/results \
+    --label "${LABEL}" \
     --resume
 
-echo "[bench] finished at $(date) -> ${OUT}"
+echo "[bench] finished at $(date)"

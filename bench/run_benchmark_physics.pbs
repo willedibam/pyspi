@@ -8,27 +8,35 @@
 
 # Benchmark pyspi Calculator.compute() on the USYD Physics cluster.
 #
-# Same logic as run_benchmark.pbs (Gadi); differs only in PBS directives
-# (select syntax, no project/queue/storage) and module setup. Submit from the
-# pyspi-fork repo root so $PBS_O_WORKDIR resolves there.
+# Output: one JSON per (M,T,n_jobs) cell in bench/results/, named
+#         "<label>_M<M>_T<T>_n<n>.json" (label defaults to physics_<config-stem>).
+# Logs:   one file per PBS job/task in bench/logs/.
 #
-# Submit with -v overrides, e.g.:
-#   # config-cutting grid as a 4-cell array (one (M,T) cell per task):
-#   qsub -J 1-4 -v M=32,64,T=1000,4000,CONFIG=config.yaml bench/run_benchmark_physics.pbs
-#   # a single (M,T) cell:
-#   qsub -v M=64,T=2000,CONFIG=config.yaml bench/run_benchmark_physics.pbs
+# Submit examples (note: qsub -v parses commas as variable separators, so for
+# comma-containing values use the env-pass form below — set the var in the
+# shell, then list its name in -v):
+#
+#   # Light grid as one sequential job (15 cells -> 15 JSONs):
+#   M=4,8,16 T=200,400,800,1600,3200 CONFIG=config.yaml REPEATS=1 \
+#     qsub -l select=1:ncpus=12:mem=48gb -l walltime=24:00:00 \
+#          -v M,T,CONFIG,REPEATS bench/run_benchmark_physics.pbs
+#
+#   # M=32 grid as a per-cell array (-J 1-5 -> 5 JSONs, in parallel):
+#   M=32 T=200,400,800,1600,3200 CONFIG=config.yaml REPEATS=1 \
+#     qsub -J 1-5 -l select=1:ncpus=16:mem=64gb -l walltime=72:00:00 \
+#          -v M,T,CONFIG,REPEATS bench/run_benchmark_physics.pbs
 #
 # Env (-v), with defaults:
 #   M, T      comma-separated grid axes. If BOTH set, they override PRESET.
-#   NJOBS     Calculator.compute n_jobs for an M/T grid (default 1).
+#   NJOBS     Calculator.compute n_jobs (default 1 — config-cutting regime).
 #   PRESET    bundled grid: headline | scaling | parallel | amortized [amortized]
-#   CONFIG    pyspi config: subset name, bundled filename, or path   [config.yaml]
-#   REPEATS   repeats per cell                                       [2]
+#   CONFIG    pyspi config: subset name, bundled filename, or path [config.yaml]
+#   REPEATS   repeats per cell                                     [2]
+#   LABEL     filename prefix     [physics_<config-stem>]
 #   VENV      venv with pyspi installed editable  [../mts-spi-study-cluster/.venv]
 #
-# Array jobs: submit with -J 1-N where N = number of grid cells; each task
-# runs one cell via --array-index to its own JSON. n_jobs=1 within a task.
-# Size walltime / mem / ncpus to your queue and the largest (M,T) cell.
+# Size walltime / mem / ncpus to your queue and the largest (M,T) cell. Array
+# tasks via -J 1-N: each runs one cell via --array-index, own JSON, own log.
 
 set -euo pipefail
 
@@ -37,6 +45,16 @@ if [[ -z "${PBS_O_WORKDIR:-}" ]]; then
   exit 1
 fi
 
+cd "${PBS_O_WORKDIR}"
+
+# Logs: one file per PBS job (or per array task) under bench/logs/.
+LOG_DIR="${PBS_O_WORKDIR}/bench/logs"
+mkdir -p "$LOG_DIR"
+JOBID="${PBS_JOBID:-local}"
+ARRAY_ID="${PBS_ARRAY_INDEX:-}"
+LOG_TAG="${JOBID%%.*}${ARRAY_ID:+_${ARRAY_ID}}"
+exec >"$LOG_DIR/bench_${LOG_TAG}.log" 2>&1
+
 PRESET="${PRESET:-amortized}"
 CONFIG="${CONFIG:-config.yaml}"
 REPEATS="${REPEATS:-2}"
@@ -44,8 +62,8 @@ M="${M:-}"
 T="${T:-}"
 NJOBS="${NJOBS:-1}"
 VENV="${VENV:-../mts-spi-study-cluster/.venv}"
-
-cd "${PBS_O_WORKDIR}"
+LABEL_DEFAULT="physics_$(basename "${CONFIG}" .yaml)"
+LABEL="${LABEL:-$LABEL_DEFAULT}"
 
 module purge
 source "${VENV}/bin/activate"
@@ -64,31 +82,26 @@ unset CUDA_VISIBLE_DEVICES
 # Explicit M/T overrides the preset.
 if [[ -n "$M" && -n "$T" ]]; then
     GRID=(--m "$M" --t "$T" --n-jobs "$NJOBS")
-    LABEL="m${M//,/-}_t${T//,/-}"
 else
     GRID=(--preset "$PRESET")
-    LABEL="$PRESET"
 fi
 
-# Array job: one grid cell per task, each to its own JSON.
+# Array job: one grid cell per task.
 ARRAY=()
-SUFFIX=""
 if [[ -n "${PBS_ARRAY_INDEX:-}" ]]; then
     ARRAY=(--array-index "$PBS_ARRAY_INDEX")
-    SUFFIX="_cell${PBS_ARRAY_INDEX}"
 fi
 
-OUT="bench/results/physics_${LABEL}${SUFFIX}.json"
-
 echo "[bench] host=$(hostname) start=$(date)"
-echo "[bench] grid=${GRID[*]}  config=${CONFIG}  repeats=${REPEATS}"
-echo "[bench] out=${OUT}"
+echo "[bench] config=${CONFIG}  grid=${GRID[*]} ${ARRAY[*]}  repeats=${REPEATS}"
+echo "[bench] label=${LABEL}  output_dir=bench/results/"
 
 python -m bench.bench_compute \
     "${GRID[@]}" "${ARRAY[@]}" \
     --config "${CONFIG}" \
     --repeats "${REPEATS}" \
-    --output "${OUT}" \
+    --output-dir bench/results \
+    --label "${LABEL}" \
     --resume
 
-echo "[bench] finished at $(date) -> ${OUT}"
+echo "[bench] finished at $(date)"

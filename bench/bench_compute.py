@@ -2,29 +2,23 @@
 """Benchmark Calculator.compute() across an (M, T, n_jobs) grid.
 
 Reproducible, non-notebook timing suite. Each grid cell is run ``--repeats``
-times on freshly generated synthetic data; per-SPI and total wall times are
-reported as mean/std. Environment metadata (pyspi git sha, dependency
-versions + fingerprint, platform) is captured so results pin to an exact
-environment. Output is a single JSON file, written incrementally after each
-cell so the run is interrupt-safe (``--resume`` skips completed cells).
+times on freshly generated synthetic data and written to its **own** JSON
+file named ``<label>_M<M>_T<T>_n<n_jobs>.json`` — one cell per file, with
+M, T, n_jobs recorded at the top level (not just in the filename). Each
+file is self-contained: environment metadata (pyspi git sha, dependency
+versions + fingerprint, platform) lives in every cell file. ``--resume``
+skips cells whose JSON already exists with ``repeats >= --repeats``.
 
 Usage:
-    python -m bench.bench_compute --preset parallel --config benchmarked90_config.yaml
     python -m bench.bench_compute --m 8,16 --t 200,800 --n-jobs 1,4 --config fast
-    python -m bench.bench_compute --preset scaling --resume
+    python -m bench.bench_compute --preset amortized --config config.yaml
     python -m bench.bench_compute --preset parallel --array-index $PBS_ARRAY_INDEX
 
 Presets (each fixes an M/T/n_jobs grid; --config still applies):
-    headline   reference points (M=10,T=500), (M=20,T=1000) at n_jobs=1.
-    scaling    M={4,8,16,32} x T={200,400,800,1600} at n_jobs=1 — feeds the
-               per-SPI amortized-walltime model used to cut benchmarked_*.yaml.
-    parallel   M=16, T=800, n_jobs={1,2,4,8,16} — parallel speedup curve.
-    amortized  M={8,16}, T=800, n_jobs=1 — per-SPI walltime for config cutting.
-
-Note on n_jobs and the amortized configs: per-SPI cost is invariant to n_jobs
-under the cache-aware scheduler (each cache group runs sequentially within one
-worker), so n_jobs=1 is the clean measurement regime for config cutting.
-n_jobs only changes makespan — that is what the 'parallel' preset measures.
+    headline   (M=10,T=500), (M=20,T=1000), n_jobs=1.
+    scaling    M={4,8,16,32} x T={200,400,800,1600}, n_jobs=1.
+    parallel   M=16, T=800, n_jobs={1,2,4,8,16}.
+    amortized  M={8,16}, T=800, n_jobs=1.
 
 Two-axis parallelism: this script benchmarks INNER parallelism
 (Calculator.compute(n_jobs=)). OUTER parallelism (many datasets at once)
@@ -93,17 +87,18 @@ def parse_args(argv=None):
                    help="Multiprocessing start method for n_jobs>1 (default: spawn).")
     p.add_argument("--repeats", type=int, default=2, help="Repeats per cell (default: 2).")
     p.add_argument("--seed", type=int, default=0, help="Base RNG seed (default: 0).")
-    p.add_argument("--output", type=Path, default=None,
-                   help="Output JSON path (default: bench/results/timings_<config>_<ts>.json).")
+    p.add_argument("--output-dir", type=Path, default=None,
+                   help="Directory for per-cell result JSONs (default: bench/results/).")
+    p.add_argument("--label", default=None,
+                   help="Filename prefix; default = stem of --config.")
     p.add_argument("--resume", action="store_true",
-                   help="Reuse an existing --output JSON; skip cells already at >= --repeats.")
+                   help="Skip cells whose JSON already exists with repeats >= --repeats.")
     p.add_argument("--array-index", type=int, default=None,
                    help="Run only the Nth (1-indexed) cell of the resolved grid. For PBS arrays.")
     return p.parse_args(argv)
 
 
 def resolve_config(arg: str) -> str:
-    """Map a subset name / bundled filename / path to a value Calculator accepts."""
     if arg in {"all", "fast", "sonnet", "fabfour"}:
         return arg
     p = Path(arg).expanduser()
@@ -160,7 +155,8 @@ def build_environment() -> dict:
         "dep_versions": versions,
         "dep_fingerprint": "sha256:" + hashlib.sha256(payload.encode()).hexdigest()[:16],
         "env": {k: os.environ.get(k, "") for k in
-                ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "PYSPI_N_JOBS")},
+                ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
+                 "VECLIB_MAXIMUM_THREADS", "PYSPI_N_JOBS")},
     }
 
 
@@ -174,7 +170,6 @@ def summarise(values: list[float]) -> dict:
 
 
 def resolve_grid(args) -> list[tuple[int, int, int]]:
-    """Return the list of (M, T, n_jobs) cells."""
     if args.preset is not None:
         spec = PRESETS[args.preset]
         n_jobs = spec["n_jobs"]
@@ -189,7 +184,7 @@ def resolve_grid(args) -> list[tuple[int, int, int]]:
 
 
 def run_cell(M, T, n_jobs, config, mp_context, repeats, seed) -> dict:
-    """Run one (M, T, n_jobs) cell ``repeats`` times. Returns a result entry dict."""
+    """Run one (M, T, n_jobs) cell ``repeats`` times. Returns a self-contained entry dict."""
     rss_before = peak_rss_mb()
     rng = np.random.default_rng(seed)
     totals: list[float] = []
@@ -230,6 +225,16 @@ def run_cell(M, T, n_jobs, config, mp_context, repeats, seed) -> dict:
     return entry
 
 
+def cell_filename(label: str, M: int, T: int, n_jobs: int) -> str:
+    return f"{label}_M{M}_T{T}_n{n_jobs}.json"
+
+
+def _atomic_write_json(path: Path, payload: dict) -> None:
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=2))
+    os.replace(tmp, path)
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     config = resolve_config(args.config)
@@ -242,38 +247,41 @@ def main(argv=None) -> int:
                 f"--array-index {args.array_index} out of range [1, {len(cells)}].")
         cells = [cells[args.array_index - 1]]
 
-    output = args.output or (
-        DEFAULT_OUTPUT_DIR / f"timings_{Path(cfg_label).stem}_{datetime.now():%Y%m%d_%H%M%S}.json")
-    output.parent.mkdir(parents=True, exist_ok=True)
+    output_dir = (args.output_dir or DEFAULT_OUTPUT_DIR).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    label = args.label or Path(cfg_label).stem
 
-    if args.resume and output.exists():
-        data = json.loads(output.read_text())
-        done = {(r["M"], r["T"], r["n_jobs"])
-                for r in data.get("results", [])
-                if r.get("repeats", 0) >= args.repeats and "error" not in r}
-    else:
-        data = {
-            "config": cfg_label, "mp_context": args.mp_context,
-            "repeats": args.repeats, "seed": args.seed,
-            "environment": build_environment(), "results": [],
-        }
-        done = set()
-
+    env = build_environment()
     print(f"[bench] config={cfg_label}  cells={len(cells)}  repeats={args.repeats}  "
           f"mp={args.mp_context}", file=sys.stderr)
-    print(f"[bench] output={output}", file=sys.stderr)
+    print(f"[bench] output_dir={output_dir}  label={label}", file=sys.stderr)
 
     t_total = time.perf_counter()
     for i, (M, T, n_jobs) in enumerate(cells, 1):
-        if (M, T, n_jobs) in done:
-            print(f"[bench] [{i}/{len(cells)}] M={M} T={T} n_jobs={n_jobs} — skipped (resume)",
-                  file=sys.stderr)
-            continue
-        print(f"[bench] [{i}/{len(cells)}] M={M} T={T} n_jobs={n_jobs} x{args.repeats} ...",
-              file=sys.stderr, flush=True)
+        path = output_dir / cell_filename(label, M, T, n_jobs)
+        if args.resume and path.exists():
+            try:
+                existing = json.loads(path.read_text())
+                if (existing.get("repeats", 0) >= args.repeats
+                        and "error" not in existing):
+                    print(f"[bench] [{i}/{len(cells)}] M={M} T={T} n_jobs={n_jobs}"
+                          f" — skipped (resume: {path.name})", file=sys.stderr)
+                    continue
+            except Exception:
+                pass
+
+        print(f"[bench] [{i}/{len(cells)}] M={M} T={T} n_jobs={n_jobs} x{args.repeats}"
+              f" -> {path.name}", file=sys.stderr, flush=True)
         t0 = time.perf_counter()
-        entry = run_cell(M, T, n_jobs, config, args.mp_context, args.repeats, args.seed + i)
+        entry = run_cell(M, T, n_jobs, config, args.mp_context, args.repeats,
+                         args.seed + i)
         wall = time.perf_counter() - t0
+        # Self-contained per-cell file: include run metadata + environment.
+        entry["config"] = cfg_label
+        entry["mp_context"] = args.mp_context
+        entry["seed"] = args.seed
+        entry["environment"] = env
+
         if "error" in entry:
             print(f"[bench]   ERROR after {wall:.1f}s: {entry['error']}", file=sys.stderr)
         else:
@@ -282,39 +290,11 @@ def main(argv=None) -> int:
                   f"+/- {cw['std']:.2f}s, {entry['n_spis']} SPIs, "
                   f"{entry['n_spis_failed']} failed, {entry['peak_rss_mb']:.0f} MB)",
                   file=sys.stderr)
-        # Replace any prior entry for this cell, then incremental save.
-        data["results"] = [r for r in data["results"]
-                            if (r["M"], r["T"], r["n_jobs"]) != (M, T, n_jobs)]
-        data["results"].append(entry)
-        tmp = output.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps(data, indent=2))
-        os.replace(tmp, output)
+        _atomic_write_json(path, entry)
 
-    print(f"[bench] done in {time.perf_counter() - t_total:.1f}s -> {output}", file=sys.stderr)
-    _print_speedup_summary(data)
+    print(f"[bench] done in {time.perf_counter() - t_total:.1f}s -> {output_dir}",
+          file=sys.stderr)
     return 0
-
-
-def _print_speedup_summary(data: dict) -> None:
-    """If multiple n_jobs were run at the same (M,T), print the speedup curve."""
-    rows = [r for r in data["results"] if "error" not in r and r.get("cell_wall_seconds")]
-    by_mt: dict[tuple[int, int], list] = {}
-    for r in rows:
-        by_mt.setdefault((r["M"], r["T"]), []).append(r)
-    printed = False
-    for (M, T), group in sorted(by_mt.items()):
-        if len(group) < 2:
-            continue
-        group.sort(key=lambda r: r["n_jobs"])
-        base = next((r for r in group if r["n_jobs"] == 1), group[0])
-        base_t = base["cell_wall_seconds"]["mean"]
-        if not printed:
-            print("\nSpeedup vs n_jobs=1:")
-            printed = True
-        print(f"  M={M} T={T}:")
-        for r in group:
-            t = r["cell_wall_seconds"]["mean"]
-            print(f"    n_jobs={r['n_jobs']:>2}  {t:8.2f}s  {base_t / t:5.2f}x")
 
 
 if __name__ == "__main__":

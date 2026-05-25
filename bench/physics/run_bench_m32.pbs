@@ -1,0 +1,40 @@
+#!/bin/bash
+#PBS -N bench_m32
+#PBS -l select=1:ncpus=16:mem=64gb
+#PBS -l walltime=72:00:00
+#PBS -j oe
+#PBS -J 1-5
+#PBS -m bea
+#PBS -M wedi0306@uni.sydney.edu.au
+
+# M=32 bench: M=32 x T={200,400,800,1600,3200} = 5 cells, as a per-cell
+# array (-J 1-5). Each task runs one (M,T) cell via --array-index and
+# writes its own per-cell JSON into bench/results/. n_jobs=1 within a
+# task; parallelism is across cells.
+#
+# Submit from the pyspi-fork repo root:
+#   qsub bench/physics/run_bench_m32.pbs
+
+set -euo pipefail
+[[ -z "${PBS_O_WORKDIR:-}" ]] && { echo "[ERROR] submit via qsub"; exit 1; }
+cd "$PBS_O_WORKDIR"
+
+LOG_DIR="$PBS_O_WORKDIR/bench/logs"
+mkdir -p "$LOG_DIR"
+exec >"$LOG_DIR/bench_${PBS_JOBID%%.*}_${PBS_ARRAY_INDEX}.log" 2>&1
+
+module purge
+source ../mts-spi-study-cluster/.venv/bin/activate
+
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 \
+       VECLIB_MAXIMUM_THREADS=1 NUMEXPR_NUM_THREADS=1 KMP_DUPLICATE_LIB_OK=TRUE
+unset CUDA_VISIBLE_DEVICES
+
+echo "[bench] host=$(hostname) start=$(date)  array=$PBS_ARRAY_INDEX"
+python -m bench.bench_compute \
+    --m 32 --t 200,400,800,1600,3200 --n-jobs 1 \
+    --array-index "$PBS_ARRAY_INDEX" \
+    --config config.yaml --repeats 1 \
+    --output-dir bench/results --label physics_config \
+    --resume
+echo "[bench] finished at $(date)"
