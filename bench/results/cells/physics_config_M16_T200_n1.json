@@ -1,0 +1,6033 @@
+{
+  "M": 16,
+  "T": 200,
+  "n_jobs": 1,
+  "repeats": 1,
+  "cell_wall_seconds": {
+    "mean": 2194.923346,
+    "std": 0.0,
+    "values": [
+      2194.923346
+    ]
+  },
+  "n_spis": 328,
+  "n_spis_failed": 3,
+  "peak_rss_mb": 5057.0,
+  "rss_delta_mb": 0.0,
+  "spi_seconds": {
+    "cov_EmpiricalCovariance": {
+      "mean": 0.00111,
+      "std": 0.0,
+      "values": [
+        0.00111
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov_EllipticEnvelope": {
+      "mean": 0.018367,
+      "std": 0.0,
+      "values": [
+        0.018367
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov_GraphicalLasso": {
+      "mean": 0.001703,
+      "std": 0.0,
+      "values": [
+        0.001703
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov_GraphicalLassoCV": {
+      "mean": 0.09909,
+      "std": 0.0,
+      "values": [
+        0.09909
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov_LedoitWolf": {
+      "mean": 0.000495,
+      "std": 0.0,
+      "values": [
+        0.000495
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov_MinCovDet": {
+      "mean": 0.017654,
+      "std": 0.0,
+      "values": [
+        0.017654
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov_OAS": {
+      "mean": 0.000408,
+      "std": 0.0,
+      "values": [
+        0.000408
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov_ShrunkCovariance": {
+      "mean": 0.000434,
+      "std": 0.0,
+      "values": [
+        0.000434
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_EmpiricalCovariance": {
+      "mean": 7e-05,
+      "std": 0.0,
+      "values": [
+        7e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_EllipticEnvelope": {
+      "mean": 6.4e-05,
+      "std": 0.0,
+      "values": [
+        6.4e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_GraphicalLasso": {
+      "mean": 5.9e-05,
+      "std": 0.0,
+      "values": [
+        5.9e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_GraphicalLassoCV": {
+      "mean": 6.1e-05,
+      "std": 0.0,
+      "values": [
+        6.1e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_LedoitWolf": {
+      "mean": 5.8e-05,
+      "std": 0.0,
+      "values": [
+        5.8e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_MinCovDet": {
+      "mean": 5.8e-05,
+      "std": 0.0,
+      "values": [
+        5.8e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_OAS": {
+      "mean": 5.7e-05,
+      "std": 0.0,
+      "values": [
+        5.7e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cov-sq_ShrunkCovariance": {
+      "mean": 5.4e-05,
+      "std": 0.0,
+      "values": [
+        5.4e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_EmpiricalCovariance": {
+      "mean": 6.1e-05,
+      "std": 0.0,
+      "values": [
+        6.1e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_EllipticEnvelope": {
+      "mean": 5.7e-05,
+      "std": 0.0,
+      "values": [
+        5.7e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_GraphicalLasso": {
+      "mean": 5.6e-05,
+      "std": 0.0,
+      "values": [
+        5.6e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_GraphicalLassoCV": {
+      "mean": 6.3e-05,
+      "std": 0.0,
+      "values": [
+        6.3e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_LedoitWolf": {
+      "mean": 5.9e-05,
+      "std": 0.0,
+      "values": [
+        5.9e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_MinCovDet": {
+      "mean": 5.9e-05,
+      "std": 0.0,
+      "values": [
+        5.9e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_OAS": {
+      "mean": 5.8e-05,
+      "std": 0.0,
+      "values": [
+        5.8e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec_ShrunkCovariance": {
+      "mean": 5.7e-05,
+      "std": 0.0,
+      "values": [
+        5.7e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_EmpiricalCovariance": {
+      "mean": 5.5e-05,
+      "std": 0.0,
+      "values": [
+        5.5e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_EllipticEnvelope": {
+      "mean": 5.7e-05,
+      "std": 0.0,
+      "values": [
+        5.7e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_GraphicalLasso": {
+      "mean": 5.6e-05,
+      "std": 0.0,
+      "values": [
+        5.6e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_GraphicalLassoCV": {
+      "mean": 5.8e-05,
+      "std": 0.0,
+      "values": [
+        5.8e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_LedoitWolf": {
+      "mean": 5.5e-05,
+      "std": 0.0,
+      "values": [
+        5.5e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_MinCovDet": {
+      "mean": 6e-05,
+      "std": 0.0,
+      "values": [
+        6e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_OAS": {
+      "mean": 0.00029,
+      "std": 0.0,
+      "values": [
+        0.00029
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "prec-sq_ShrunkCovariance": {
+      "mean": 7e-05,
+      "std": 0.0,
+      "values": [
+        7e-05
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "linear",
+        "undirected",
+        "unsigned",
+        "signed",
+        "multivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "spearmanr-sq": {
+      "mean": 0.001455,
+      "std": 0.0,
+      "values": [
+        0.001455
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "rank",
+        "linear",
+        "undirected",
+        "unsigned",
+        "nonlinear",
+        "signed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "spearmanr": {
+      "mean": 0.001125,
+      "std": 0.0,
+      "values": [
+        0.001125
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "rank",
+        "linear",
+        "undirected",
+        "signed",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "kendalltau-sq": {
+      "mean": 0.023357,
+      "std": 0.0,
+      "values": [
+        0.023357
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "rank",
+        "linear",
+        "undirected",
+        "unsigned",
+        "nonlinear",
+        "signed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "kendalltau": {
+      "mean": 0.022919,
+      "std": 0.0,
+      "values": [
+        0.022919
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "unordered",
+        "rank",
+        "linear",
+        "undirected",
+        "signed",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "corr_pearson_tau-1": {
+      "mean": 0.000317,
+      "std": 0.0,
+      "values": [
+        0.000317
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-2": {
+      "mean": 0.000166,
+      "std": 0.0,
+      "values": [
+        0.000166
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-3": {
+      "mean": 0.000152,
+      "std": 0.0,
+      "values": [
+        0.000152
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-4": {
+      "mean": 0.000163,
+      "std": 0.0,
+      "values": [
+        0.000163
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-5": {
+      "mean": 0.000145,
+      "std": 0.0,
+      "values": [
+        0.000145
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-1-sq": {
+      "mean": 0.000139,
+      "std": 0.0,
+      "values": [
+        0.000139
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-2-sq": {
+      "mean": 0.00014,
+      "std": 0.0,
+      "values": [
+        0.00014
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-3-sq": {
+      "mean": 0.000134,
+      "std": 0.0,
+      "values": [
+        0.000134
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-4-sq": {
+      "mean": 0.00015,
+      "std": 0.0,
+      "values": [
+        0.00015
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-5-sq": {
+      "mean": 0.000134,
+      "std": 0.0,
+      "values": [
+        0.000134
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-10": {
+      "mean": 0.000134,
+      "std": 0.0,
+      "values": [
+        0.000134
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-10-sq": {
+      "mean": 0.000128,
+      "std": 0.0,
+      "values": [
+        0.000128
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-20": {
+      "mean": 0.000142,
+      "std": 0.0,
+      "values": [
+        0.000142
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_pearson_tau-20-sq": {
+      "mean": 0.000134,
+      "std": 0.0,
+      "values": [
+        0.000134
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-1": {
+      "mean": 0.002368,
+      "std": 0.0,
+      "values": [
+        0.002368
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-2": {
+      "mean": 0.002234,
+      "std": 0.0,
+      "values": [
+        0.002234
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-3": {
+      "mean": 0.00219,
+      "std": 0.0,
+      "values": [
+        0.00219
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-4": {
+      "mean": 0.002283,
+      "std": 0.0,
+      "values": [
+        0.002283
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-5": {
+      "mean": 0.002205,
+      "std": 0.0,
+      "values": [
+        0.002205
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-1-sq": {
+      "mean": 0.002192,
+      "std": 0.0,
+      "values": [
+        0.002192
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-2-sq": {
+      "mean": 0.002304,
+      "std": 0.0,
+      "values": [
+        0.002304
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-3-sq": {
+      "mean": 0.002271,
+      "std": 0.0,
+      "values": [
+        0.002271
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-4-sq": {
+      "mean": 0.002236,
+      "std": 0.0,
+      "values": [
+        0.002236
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-5-sq": {
+      "mean": 0.002259,
+      "std": 0.0,
+      "values": [
+        0.002259
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-10": {
+      "mean": 0.002171,
+      "std": 0.0,
+      "values": [
+        0.002171
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-10-sq": {
+      "mean": 0.002124,
+      "std": 0.0,
+      "values": [
+        0.002124
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-20": {
+      "mean": 0.002089,
+      "std": 0.0,
+      "values": [
+        0.002089
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_spearman_tau-20-sq": {
+      "mean": 0.002162,
+      "std": 0.0,
+      "values": [
+        0.002162
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-1": {
+      "mean": 0.092338,
+      "std": 0.0,
+      "values": [
+        0.092338
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-2": {
+      "mean": 0.092209,
+      "std": 0.0,
+      "values": [
+        0.092209
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-3": {
+      "mean": 0.091766,
+      "std": 0.0,
+      "values": [
+        0.091766
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-4": {
+      "mean": 0.091494,
+      "std": 0.0,
+      "values": [
+        0.091494
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-5": {
+      "mean": 0.091693,
+      "std": 0.0,
+      "values": [
+        0.091693
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-1-sq": {
+      "mean": 0.091258,
+      "std": 0.0,
+      "values": [
+        0.091258
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-2-sq": {
+      "mean": 0.091827,
+      "std": 0.0,
+      "values": [
+        0.091827
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-3-sq": {
+      "mean": 0.09176,
+      "std": 0.0,
+      "values": [
+        0.09176
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-4-sq": {
+      "mean": 0.091272,
+      "std": 0.0,
+      "values": [
+        0.091272
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-5-sq": {
+      "mean": 0.090913,
+      "std": 0.0,
+      "values": [
+        0.090913
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-10": {
+      "mean": 0.091475,
+      "std": 0.0,
+      "values": [
+        0.091475
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-10-sq": {
+      "mean": 0.091248,
+      "std": 0.0,
+      "values": [
+        0.091248
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-20": {
+      "mean": 0.0904,
+      "std": 0.0,
+      "values": [
+        0.0904
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "corr_kendall_tau-20-sq": {
+      "mean": 0.09068,
+      "std": 0.0,
+      "values": [
+        0.09068
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "xcorr_max_sig-True": {
+      "mean": 0.013523,
+      "std": 0.0,
+      "values": [
+        0.013523
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "xcorr-sq_max_sig-True": {
+      "mean": 0.001646,
+      "std": 0.0,
+      "values": [
+        0.001646
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "xcorr_mean_sig-True": {
+      "mean": 0.001703,
+      "std": 0.0,
+      "values": [
+        0.001703
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "xcorr-sq_mean_sig-True": {
+      "mean": 0.001798,
+      "std": 0.0,
+      "values": [
+        0.001798
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "xcorr_mean_sig-False": {
+      "mean": 0.000717,
+      "std": 0.0,
+      "values": [
+        0.000717
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "signed",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "xcorr-sq_mean_sig-False": {
+      "mean": 0.000817,
+      "std": 0.0,
+      "values": [
+        0.000817
+      ],
+      "category": "basic",
+      "labels": [
+        "basic",
+        "linear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "signed/unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "pdist_euclidean": {
+      "mean": 0.000557,
+      "std": 0.0,
+      "values": [
+        0.000557
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "MXX"
+      ]
+    },
+    "pdist_cityblock": {
+      "mean": 0.00028,
+      "std": 0.0,
+      "values": [
+        0.00028
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "MXX"
+      ]
+    },
+    "pdist_cosine": {
+      "mean": 0.000434,
+      "std": 0.0,
+      "values": [
+        0.000434
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "MXX"
+      ]
+    },
+    "pdist_chebyshev": {
+      "mean": 0.00028,
+      "std": 0.0,
+      "values": [
+        0.00028
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "MXX"
+      ]
+    },
+    "pdist_canberra": {
+      "mean": 0.000246,
+      "std": 0.0,
+      "values": [
+        0.000246
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "MXX"
+      ]
+    },
+    "pdist_braycurtis": {
+      "mean": 0.000228,
+      "std": 0.0,
+      "values": [
+        0.000228
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "MXX"
+      ]
+    },
+    "dcorr": {
+      "mean": 0.223476,
+      "std": 0.0,
+      "values": [
+        0.223476
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "dcorr_biased": {
+      "mean": 0.215157,
+      "std": 0.0,
+      "values": [
+        0.215157
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "mgc": {
+      "mean": 1.891677,
+      "std": 0.0,
+      "values": [
+        1.891677
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "unsigned",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "hsic": {
+      "mean": 0.459615,
+      "std": 0.0,
+      "values": [
+        0.459615
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "hsic_biased": {
+      "mean": 0.450162,
+      "std": 0.0,
+      "values": [
+        0.450162
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "hhg": {
+      "mean": 9.284265,
+      "std": 0.0,
+      "values": [
+        9.284265
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "directed",
+        "undirected",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "mgcx_maxlag-1": {
+      "mean": 8.468001,
+      "std": 0.0,
+      "values": [
+        8.468001
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "mgcx_maxlag-10": {
+      "mean": 26.287083,
+      "std": 0.0,
+      "values": [
+        26.287083
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "dcorrx_maxlag-1": {
+      "mean": 0.662296,
+      "std": 0.0,
+      "values": [
+        0.662296
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "unsigned",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "dcorrx_maxlag-10": {
+      "mean": 3.25051,
+      "std": 0.0,
+      "values": [
+        3.25051
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "unsigned",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "dtw": {
+      "mean": 0.021016,
+      "std": 0.0,
+      "values": [
+        0.021016
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "dtw_constraint-itakura": {
+      "mean": 0.082548,
+      "std": 0.0,
+      "values": [
+        0.082548
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "dtw_constraint-sakoe-chiba_radius-auto": {
+      "mean": 0.003019,
+      "std": 0.0,
+      "values": [
+        0.003019
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "xpdist_euclidean_tau-1_min_rmse": {
+      "mean": 0.001998,
+      "std": 0.0,
+      "values": [
+        0.001998
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "nonlinear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "xpdist_euclidean_tau-1_mean_rmse": {
+      "mean": 0.002177,
+      "std": 0.0,
+      "values": [
+        0.002177
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "nonlinear",
+        "undirected",
+        "temporal",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "MXX"
+      ]
+    },
+    "softdtw": {
+      "mean": 0.637781,
+      "std": 0.0,
+      "values": [
+        0.637781
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "softdtw_constraint-itakura": {
+      "mean": 0.638686,
+      "std": 0.0,
+      "values": [
+        0.638686
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "softdtw_constraint-sakoe-chiba": {
+      "mean": 0.639309,
+      "std": 0.0,
+      "values": [
+        0.639309
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "lcss": {
+      "mean": 0.186627,
+      "std": 0.0,
+      "values": [
+        0.186627
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "lcss_constraint-itakura": {
+      "mean": 0.197532,
+      "std": 0.0,
+      "values": [
+        0.197532
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "lcss_constraint-sakoe-chiba": {
+      "mean": 0.187862,
+      "std": 0.0,
+      "values": [
+        0.187862
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M10"
+      ]
+    },
+    "bary_euclidean_mean": {
+      "mean": 0.148452,
+      "std": 0.0,
+      "values": [
+        0.148452
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary_euclidean_max": {
+      "mean": 0.000983,
+      "std": 0.0,
+      "values": [
+        0.000983
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary_dtw_mean": {
+      "mean": 0.335155,
+      "std": 0.0,
+      "values": [
+        0.335155
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M09"
+      ]
+    },
+    "bary_dtw_max": {
+      "mean": 0.000956,
+      "std": 0.0,
+      "values": [
+        0.000956
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary_sgddtw_mean": {
+      "mean": 0.324991,
+      "std": 0.0,
+      "values": [
+        0.324991
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M09"
+      ]
+    },
+    "bary_sgddtw_max": {
+      "mean": 0.000983,
+      "std": 0.0,
+      "values": [
+        0.000983
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary_softdtw_mean": {
+      "mean": 14.788922,
+      "std": 0.0,
+      "values": [
+        14.788922
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M09"
+      ]
+    },
+    "bary_softdtw_max": {
+      "mean": 0.00101,
+      "std": 0.0,
+      "values": [
+        0.00101
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary-sq_euclidean_mean": {
+      "mean": 0.00245,
+      "std": 0.0,
+      "values": [
+        0.00245
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary-sq_euclidean_max": {
+      "mean": 0.001126,
+      "std": 0.0,
+      "values": [
+        0.001126
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary-sq_dtw_mean": {
+      "mean": 0.002425,
+      "std": 0.0,
+      "values": [
+        0.002425
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M09"
+      ]
+    },
+    "bary-sq_dtw_max": {
+      "mean": 0.001036,
+      "std": 0.0,
+      "values": [
+        0.001036
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary-sq_sgddtw_mean": {
+      "mean": 0.002442,
+      "std": 0.0,
+      "values": [
+        0.002442
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M09"
+      ]
+    },
+    "bary-sq_sgddtw_max": {
+      "mean": 0.001155,
+      "std": 0.0,
+      "values": [
+        0.001155
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "bary-sq_softdtw_mean": {
+      "mean": 0.00241,
+      "std": 0.0,
+      "values": [
+        0.00241
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M09"
+      ]
+    },
+    "bary-sq_softdtw_max": {
+      "mean": 0.001027,
+      "std": 0.0,
+      "values": [
+        0.001027
+      ],
+      "category": "distance",
+      "labels": [
+        "distance",
+        "signed",
+        "undirected",
+        "temporal",
+        "nonlinear",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "gwtau": {
+      "mean": 0.007937,
+      "std": 0.0,
+      "values": [
+        0.007937
+      ],
+      "category": "distance",
+      "labels": [
+        "unsigned",
+        "distance",
+        "unordered",
+        "nonlinear",
+        "undirected",
+        "MXX"
+      ]
+    },
+    "anm": {
+      "mean": 0.924576,
+      "std": 0.0,
+      "values": [
+        0.924576
+      ],
+      "category": "causal",
+      "labels": [
+        "unsigned",
+        "causal",
+        "unordered",
+        "linear",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M02"
+      ]
+    },
+    "cds": {
+      "mean": 2.043726,
+      "std": 0.0,
+      "values": [
+        2.043726
+      ],
+      "category": "causal",
+      "labels": [
+        "unsigned",
+        "causal",
+        "unordered",
+        "nonlinear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M02"
+      ]
+    },
+    "reci": {
+      "mean": 0.243548,
+      "std": 0.0,
+      "values": [
+        0.243548
+      ],
+      "category": "causal",
+      "labels": [
+        "unsigned",
+        "causal",
+        "unordered",
+        "nonlinear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "ccm_E-None_mean": {
+      "mean": 670.96422,
+      "std": 0.0,
+      "values": [
+        670.96422
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-None_max": {
+      "mean": 0.000119,
+      "std": 0.0,
+      "values": [
+        0.000119
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-None_diff": {
+      "mean": 0.000159,
+      "std": 0.0,
+      "values": [
+        0.000159
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-1_mean": {
+      "mean": 595.765949,
+      "std": 0.0,
+      "values": [
+        595.765949
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-1_max": {
+      "mean": 0.000109,
+      "std": 0.0,
+      "values": [
+        0.000109
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-1_diff": {
+      "mean": 0.000145,
+      "std": 0.0,
+      "values": [
+        0.000145
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-10_mean": {
+      "mean": 669.246143,
+      "std": 0.0,
+      "values": [
+        669.246143
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-10_max": {
+      "mean": 0.000103,
+      "std": 0.0,
+      "values": [
+        0.000103
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "ccm_E-10_diff": {
+      "mean": 0.000151,
+      "std": 0.0,
+      "values": [
+        0.000151
+      ],
+      "category": "causal",
+      "labels": [
+        "causal",
+        "directed",
+        "nonlinear",
+        "temporal",
+        "signed",
+        "unsigned",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "je_gaussian": {
+      "mean": 0.000311,
+      "std": 0.0,
+      "values": [
+        0.000311
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "undirected",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "je_kozachenko": {
+      "mean": 0.016033,
+      "std": 0.0,
+      "values": [
+        0.016033
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "undirected",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "je_kernel_W-0.5": {
+      "mean": 0.055484,
+      "std": 0.0,
+      "values": [
+        0.055484
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "ce_gaussian": {
+      "mean": 0.000233,
+      "std": 0.0,
+      "values": [
+        0.000233
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "directed",
+        "linear",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "ce_kozachenko": {
+      "mean": 0.002327,
+      "std": 0.0,
+      "values": [
+        0.002327
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "directed",
+        "linear",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "ce_kernel_W-0.5": {
+      "mean": 0.00404,
+      "std": 0.0,
+      "values": [
+        0.00404
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "directed",
+        "nonlinear",
+        "undirected",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "cce_gaussian": {
+      "mean": 0.097108,
+      "std": 0.0,
+      "values": [
+        0.097108
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M03"
+      ]
+    },
+    "cce_kozachenko": {
+      "mean": 0.58839,
+      "std": 0.0,
+      "values": [
+        0.58839
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M03"
+      ]
+    },
+    "cce_kernel_W-0.5": {
+      "mean": 2.048196,
+      "std": 0.0,
+      "values": [
+        2.048196
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M03"
+      ]
+    },
+    "xme_gaussian_k1": {
+      "mean": 0.014831,
+      "std": 0.0,
+      "values": [
+        0.014831
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "time-dependent",
+        "bivariate",
+        "MXX"
+      ]
+    },
+    "xme_kozachenko_k1": {
+      "mean": 0.055836,
+      "std": 0.0,
+      "values": [
+        0.055836
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "time-dependent",
+        "bivariate",
+        "MXX"
+      ]
+    },
+    "xme_kernel_W-0.5_k1": {
+      "mean": 0.165235,
+      "std": 0.0,
+      "values": [
+        0.165235
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "time-dependent",
+        "bivariate",
+        "MXX"
+      ]
+    },
+    "xme_gaussian_k10": {
+      "mean": 0.027106,
+      "std": 0.0,
+      "values": [
+        0.027106
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "time-dependent",
+        "bivariate",
+        "MXX"
+      ]
+    },
+    "xme_kozachenko_k10": {
+      "mean": 0.156592,
+      "std": 0.0,
+      "values": [
+        0.156592
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "time-dependent",
+        "bivariate",
+        "MXX"
+      ]
+    },
+    "xme_kernel_W-0.5_k10": {
+      "mean": 0.607013,
+      "std": 0.0,
+      "values": [
+        0.607013
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "time-dependent",
+        "bivariate",
+        "MXX"
+      ]
+    },
+    "di_gaussian": {
+      "mean": 0.041137,
+      "std": 0.0,
+      "values": [
+        0.041137
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M03"
+      ]
+    },
+    "di_kozachenko": {
+      "mean": 0.173388,
+      "std": 0.0,
+      "values": [
+        0.173388
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M03"
+      ]
+    },
+    "di_kernel_W-0.5": {
+      "mean": 0.655339,
+      "std": 0.0,
+      "values": [
+        0.655339
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M03"
+      ]
+    },
+    "si_gaussian_k-1": {
+      "mean": 0.03982,
+      "std": 0.0,
+      "values": [
+        0.03982
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "undirected",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "si_kozachenko_k-1": {
+      "mean": 0.172624,
+      "std": 0.0,
+      "values": [
+        0.172624
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "undirected",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "si_kernel_W-0.5_k-1": {
+      "mean": 0.59837,
+      "std": 0.0,
+      "values": [
+        0.59837
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "mi_gaussian": {
+      "mean": 0.000215,
+      "std": 0.0,
+      "values": [
+        0.000215
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "undirected",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "mi_kraskov_NN-4": {
+      "mean": 0.116193,
+      "std": 0.0,
+      "values": [
+        0.116193
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "mi_kraskov_NN-4_DCE": {
+      "mean": 0.115526,
+      "std": 0.0,
+      "values": [
+        0.115526
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "mi_kernel_W-0.25": {
+      "mean": 0.180175,
+      "std": 0.0,
+      "values": [
+        0.180175
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "unordered",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "tlmi_gaussian": {
+      "mean": 0.000234,
+      "std": 0.0,
+      "values": [
+        0.000234
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "tlmi_kraskov_NN-4": {
+      "mean": 0.229806,
+      "std": 0.0,
+      "values": [
+        0.229806
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "tlmi_kraskov_NN-4_DCE": {
+      "mean": 0.229096,
+      "std": 0.0,
+      "values": [
+        0.229096
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "tlmi_kernel_W-0.25": {
+      "mean": 0.179744,
+      "std": 0.0,
+      "values": [
+        0.179744
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "te_kraskov_NN-4_k-max-10_tau-max-4": {
+      "mean": 2.723321,
+      "std": 0.0,
+      "values": [
+        2.723321
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M04"
+      ]
+    },
+    "te_kraskov_NN-4_DCE_k-max-10_tau-max-4": {
+      "mean": 3.350742,
+      "std": 0.0,
+      "values": [
+        3.350742
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M04"
+      ]
+    },
+    "te_kraskov_NN-4_DCE_k-2_kt-1_l-1_lt-1": {
+      "mean": 1.341146,
+      "std": 0.0,
+      "values": [
+        1.341146
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M04"
+      ]
+    },
+    "te_kraskov_NN-4_DCE_k-1_kt-1_l-1_lt-1": {
+      "mean": 1.214395,
+      "std": 0.0,
+      "values": [
+        1.214395
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M04"
+      ]
+    },
+    "te_kraskov_NN-4_k-1_kt-1_l-1_lt-1": {
+      "mean": 0.477605,
+      "std": 0.0,
+      "values": [
+        0.477605
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M04"
+      ]
+    },
+    "te_kernel_W-0.25_k-1": {
+      "mean": 0.314795,
+      "std": 0.0,
+      "values": [
+        0.314795
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M14"
+      ]
+    },
+    "gc_gaussian_k-max-10_tau-max-2": {
+      "mean": 0.366186,
+      "std": 0.0,
+      "values": [
+        0.366186
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "gc_gaussian_k-1_kt-1_l-1_lt-1": {
+      "mean": 0.024108,
+      "std": 0.0,
+      "values": [
+        0.024108
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "linear",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "te_symbolic_k-1_kt-1_l-1_lt-1": {
+      "mean": 0.105891,
+      "std": 0.0,
+      "values": [
+        0.105891
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "symbolic",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "te_symbolic_k-10_kt-1_l-1_lt-1": {
+      "mean": 0.367308,
+      "std": 0.0,
+      "values": [
+        0.367308
+      ],
+      "category": "infotheory",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "infotheory",
+        "temporal",
+        "directed",
+        "symbolic",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "phi_star_t-1_norm-0": {
+      "mean": 0.18033,
+      "std": 0.0,
+      "values": [
+        0.18033
+      ],
+      "category": "infotheory",
+      "labels": [
+        "linear",
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "phi_star_t-1_norm-1": {
+      "mean": 0.188437,
+      "std": 0.0,
+      "values": [
+        0.188437
+      ],
+      "category": "infotheory",
+      "labels": [
+        "linear",
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "phi_Geo_t-1_norm-0": {
+      "mean": 0.476723,
+      "std": 0.0,
+      "values": [
+        0.476723
+      ],
+      "category": "infotheory",
+      "labels": [
+        "linear",
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "phi_Geo_t-1_norm-1": {
+      "mean": 0.482173,
+      "std": 0.0,
+      "values": [
+        0.482173
+      ],
+      "category": "infotheory",
+      "labels": [
+        "linear",
+        "unsigned",
+        "infotheory",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "bivariate",
+        "time-dependent",
+        "M05"
+      ]
+    },
+    "phase_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.005852,
+      "std": 0.0,
+      "values": [
+        0.005852
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "phase_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.004513,
+      "std": 0.0,
+      "values": [
+        0.004513
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "phase_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000144,
+      "std": 0.0,
+      "values": [
+        0.000144
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "phase_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.000149,
+      "std": 0.0,
+      "values": [
+        0.000149
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M10"
+      ]
+    },
+    "phase_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 8.6e-05,
+      "std": 0.0,
+      "values": [
+        8.6e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M10"
+      ]
+    },
+    "phase_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 8.1e-05,
+      "std": 0.0,
+      "values": [
+        8.1e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M10"
+      ]
+    },
+    "cohmag_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.004366,
+      "std": 0.0,
+      "values": [
+        0.004366
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "cohmag_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000149,
+      "std": 0.0,
+      "values": [
+        0.000149
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "cohmag_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000116,
+      "std": 0.0,
+      "values": [
+        0.000116
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "cohmag_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 9.4e-05,
+      "std": 0.0,
+      "values": [
+        9.4e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "cohmag_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 7.7e-05,
+      "std": 0.0,
+      "values": [
+        7.7e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "cohmag_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 7.7e-05,
+      "std": 0.0,
+      "values": [
+        7.7e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "icoh_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.004194,
+      "std": 0.0,
+      "values": [
+        0.004194
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "icoh_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000126,
+      "std": 0.0,
+      "values": [
+        0.000126
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "icoh_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000108,
+      "std": 0.0,
+      "values": [
+        0.000108
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "icoh_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 8.7e-05,
+      "std": 0.0,
+      "values": [
+        8.7e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "icoh_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 8e-05,
+      "std": 0.0,
+      "values": [
+        8e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "icoh_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 7.3e-05,
+      "std": 0.0,
+      "values": [
+        7.3e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "psi_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.018514,
+      "std": 0.0,
+      "values": [
+        0.018514
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "directed",
+        "linear/nonlinear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "psi_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.017627,
+      "std": 0.0,
+      "values": [
+        0.017627
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "directed",
+        "linear/nonlinear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "psi_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.017639,
+      "std": 0.0,
+      "values": [
+        0.017639
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "directed",
+        "linear/nonlinear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.006244,
+      "std": 0.0,
+      "values": [
+        0.006244
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M10"
+      ]
+    },
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000172,
+      "std": 0.0,
+      "values": [
+        0.000172
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M10"
+      ]
+    },
+    "plv_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000133,
+      "std": 0.0,
+      "values": [
+        0.000133
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M10"
+      ]
+    },
+    "plv_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.000118,
+      "std": 0.0,
+      "values": [
+        0.000118
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "plv_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 9.1e-05,
+      "std": 0.0,
+      "values": [
+        9.1e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "plv_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 8.2e-05,
+      "std": 0.0,
+      "values": [
+        8.2e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M10"
+      ]
+    },
+    "pli_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.003878,
+      "std": 0.0,
+      "values": [
+        0.003878
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M14"
+      ]
+    },
+    "pli_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000126,
+      "std": 0.0,
+      "values": [
+        0.000126
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "pli_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000104,
+      "std": 0.0,
+      "values": [
+        0.000104
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "pli_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 8.7e-05,
+      "std": 0.0,
+      "values": [
+        8.7e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "pli_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 8e-05,
+      "std": 0.0,
+      "values": [
+        8e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "pli_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 7.6e-05,
+      "std": 0.0,
+      "values": [
+        7.6e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "wpli_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.004557,
+      "std": 0.0,
+      "values": [
+        0.004557
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M14"
+      ]
+    },
+    "wpli_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000123,
+      "std": 0.0,
+      "values": [
+        0.000123
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "wpli_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000105,
+      "std": 0.0,
+      "values": [
+        0.000105
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "wpli_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 8.7e-05,
+      "std": 0.0,
+      "values": [
+        8.7e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "wpli_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 8.1e-05,
+      "std": 0.0,
+      "values": [
+        8.1e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "wpli_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 7.3e-05,
+      "std": 0.0,
+      "values": [
+        7.3e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "dspli_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.003877,
+      "std": 0.0,
+      "values": [
+        0.003877
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "dspli_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000146,
+      "std": 0.0,
+      "values": [
+        0.000146
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "dspli_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000113,
+      "std": 0.0,
+      "values": [
+        0.000113
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "dspli_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 8.9e-05,
+      "std": 0.0,
+      "values": [
+        8.9e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "dspli_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 7.4e-05,
+      "std": 0.0,
+      "values": [
+        7.4e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "dspli_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 7.1e-05,
+      "std": 0.0,
+      "values": [
+        7.1e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "dswpli_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.005683,
+      "std": 0.0,
+      "values": [
+        0.005683
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "dswpli_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000146,
+      "std": 0.0,
+      "values": [
+        0.000146
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "dswpli_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000123,
+      "std": 0.0,
+      "values": [
+        0.000123
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "dswpli_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.000101,
+      "std": 0.0,
+      "values": [
+        0.000101
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "dswpli_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 8.5e-05,
+      "std": 0.0,
+      "values": [
+        8.5e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "dswpli_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 7.7e-05,
+      "std": 0.0,
+      "values": [
+        7.7e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M07"
+      ]
+    },
+    "ppc_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.005038,
+      "std": 0.0,
+      "values": [
+        0.005038
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "ppc_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000148,
+      "std": 0.0,
+      "values": [
+        0.000148
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "ppc_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000128,
+      "std": 0.0,
+      "values": [
+        0.000128
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "ppc_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.000101,
+      "std": 0.0,
+      "values": [
+        0.000101
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "ppc_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 8.5e-05,
+      "std": 0.0,
+      "values": [
+        8.5e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "ppc_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 8.1e-05,
+      "std": 0.0,
+      "values": [
+        8.1e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "undirected",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M12"
+      ]
+    },
+    "dtf_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 2.743303,
+      "std": 0.0,
+      "values": [
+        2.743303
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dtf_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.003037,
+      "std": 0.0,
+      "values": [
+        0.003037
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dtf_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.0029,
+      "std": 0.0,
+      "values": [
+        0.0029
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dtf_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.001828,
+      "std": 0.0,
+      "values": [
+        0.001828
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dtf_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.001711,
+      "std": 0.0,
+      "values": [
+        0.001711
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dtf_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.001598,
+      "std": 0.0,
+      "values": [
+        0.001598
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dcoh_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 3.20402,
+      "std": 0.0,
+      "values": [
+        3.20402
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dcoh_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.00298,
+      "std": 0.0,
+      "values": [
+        0.00298
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dcoh_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.002894,
+      "std": 0.0,
+      "values": [
+        0.002894
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dcoh_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.001832,
+      "std": 0.0,
+      "values": [
+        0.001832
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dcoh_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.00162,
+      "std": 0.0,
+      "values": [
+        0.00162
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "dcoh_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.001598,
+      "std": 0.0,
+      "values": [
+        0.001598
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "pdcoh_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 2.174334,
+      "std": 0.0,
+      "values": [
+        2.174334
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "pdcoh_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.00301,
+      "std": 0.0,
+      "values": [
+        0.00301
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "pdcoh_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.002904,
+      "std": 0.0,
+      "values": [
+        0.002904
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "pdcoh_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.00183,
+      "std": 0.0,
+      "values": [
+        0.00183
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "pdcoh_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.001632,
+      "std": 0.0,
+      "values": [
+        0.001632
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "pdcoh_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.001622,
+      "std": 0.0,
+      "values": [
+        0.001622
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "gpdcoh_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 3.228846,
+      "std": 0.0,
+      "values": [
+        3.228846
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "gpdcoh_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.002963,
+      "std": 0.0,
+      "values": [
+        0.002963
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "gpdcoh_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.002944,
+      "std": 0.0,
+      "values": [
+        0.002944
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "gpdcoh_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.001885,
+      "std": 0.0,
+      "values": [
+        0.001885
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "gpdcoh_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.00163,
+      "std": 0.0,
+      "values": [
+        0.00163
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "gpdcoh_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.001604,
+      "std": 0.0,
+      "values": [
+        0.001604
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "ddtf_multitaper_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 4.314972,
+      "std": 0.0,
+      "values": [
+        4.314972
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "ddtf_multitaper_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.002989,
+      "std": 0.0,
+      "values": [
+        0.002989
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "ddtf_multitaper_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.002926,
+      "std": 0.0,
+      "values": [
+        0.002926
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "ddtf_multitaper_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.001838,
+      "std": 0.0,
+      "values": [
+        0.001838
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "ddtf_multitaper_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.001624,
+      "std": 0.0,
+      "values": [
+        0.001624
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "ddtf_multitaper_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.001681,
+      "std": 0.0,
+      "values": [
+        0.001681
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "gd_multitaper_delay_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.020613,
+      "std": 0.0,
+      "values": [
+        0.020613
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "gd_multitaper_delay_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.019395,
+      "std": 0.0,
+      "values": [
+        0.019395
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "gd_multitaper_delay_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.019,
+      "std": 0.0,
+      "values": [
+        0.019
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M01"
+      ]
+    },
+    "sgc_nonparametric_mean_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.53669,
+      "std": 0.0,
+      "values": [
+        0.53669
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_nonparametric_mean_fs-1_fmin-0_fmax-0-25": {
+      "mean": 0.000154,
+      "std": 0.0,
+      "values": [
+        0.000154
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_nonparametric_mean_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 0.000137,
+      "std": 0.0,
+      "values": [
+        0.000137
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_nonparametric_max_fs-1_fmin-0_fmax-0-5": {
+      "mean": 0.000149,
+      "std": 0.0,
+      "values": [
+        0.000149
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_nonparametric_max_fs-1_fmin-0_fmax-0-25": {
+      "mean": 9.6e-05,
+      "std": 0.0,
+      "values": [
+        9.6e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_nonparametric_max_fs-1_fmin-0-25_fmax-0-5": {
+      "mean": 9.7e-05,
+      "std": 0.0,
+      "values": [
+        9.7e-05
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-0_fmax-0-5_order-None": {
+      "mean": 0.038294,
+      "std": 0.0,
+      "values": [
+        0.038294
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-0_fmax-0-25_order-None": {
+      "mean": 0.000376,
+      "std": 0.0,
+      "values": [
+        0.000376
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-0-25_fmax-0-5_order-None": {
+      "mean": 0.000371,
+      "std": 0.0,
+      "values": [
+        0.000371
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-1e-05_fmax-0-5_order-1": {
+      "mean": 0.032614,
+      "std": 0.0,
+      "values": [
+        0.032614
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-0_fmax-0-25_order-1": {
+      "mean": 0.000371,
+      "std": 0.0,
+      "values": [
+        0.000371
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-0-25_fmax-0-5_order-1": {
+      "mean": 0.000351,
+      "std": 0.0,
+      "values": [
+        0.000351
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-1e-05_fmax-0-5_order-20": {
+      "mean": 0.152475,
+      "std": 0.0,
+      "values": [
+        0.152475
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-0_fmax-0-25_order-20": {
+      "mean": 0.000357,
+      "std": 0.0,
+      "values": [
+        0.000357
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_parametric_mean_fs-1_fmin-0-25_fmax-0-5_order-20": {
+      "mean": 0.000338,
+      "std": 0.0,
+      "values": [
+        0.000338
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-1e-05_fmax-0-5_order-None": {
+      "mean": 0.000382,
+      "std": 0.0,
+      "values": [
+        0.000382
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-0_fmax-0-25_order-None": {
+      "mean": 0.000216,
+      "std": 0.0,
+      "values": [
+        0.000216
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-0-25_fmax-0-5_order-None": {
+      "mean": 0.000207,
+      "std": 0.0,
+      "values": [
+        0.000207
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-1e-05_fmax-0-5_order-1": {
+      "mean": 0.00035,
+      "std": 0.0,
+      "values": [
+        0.00035
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-0_fmax-0-25_order-1": {
+      "mean": 0.000217,
+      "std": 0.0,
+      "values": [
+        0.000217
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-0-25_fmax-0-5_order-1": {
+      "mean": 0.000204,
+      "std": 0.0,
+      "values": [
+        0.000204
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M05"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-1e-05_fmax-0-5_order-20": {
+      "mean": 0.000344,
+      "std": 0.0,
+      "values": [
+        0.000344
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-0_fmax-0-25_order-20": {
+      "mean": 0.000208,
+      "std": 0.0,
+      "values": [
+        0.000208
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "sgc_parametric_max_fs-1_fmin-0-25_fmax-0-5_order-20": {
+      "mean": 0.000211,
+      "std": 0.0,
+      "values": [
+        0.000211
+      ],
+      "category": "spectral",
+      "labels": [
+        "unsigned",
+        "embedding",
+        "spectral",
+        "directed",
+        "lagged",
+        "linear",
+        "bivariate",
+        "frequency-dependent",
+        "M06"
+      ]
+    },
+    "psi_wavelet_mean_fs-1_fmin-0_fmax-0-5_mean": {
+      "mean": 60.481288,
+      "std": 0.0,
+      "values": [
+        60.481288
+      ],
+      "category": "wavelet",
+      "labels": [
+        "unsigned",
+        "wavelet",
+        "undirected",
+        "time/frequency dependent",
+        "bivariate",
+        "M08"
+      ]
+    },
+    "psi_wavelet_mean_fs-1_fmin-0_fmax-0-25_mean": {
+      "mean": 60.43393,
+      "std": 0.0,
+      "values": [
+        60.43393
+      ],
+      "category": "wavelet",
+      "labels": [
+        "unsigned",
+        "wavelet",
+        "undirected",
+        "time/frequency dependent",
+        "bivariate",
+        "M08"
+      ]
+    },
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": {
+      "mean": 0.010294,
+      "std": 0.0,
+      "values": [
+        0.010294
+      ],
+      "category": "wavelet",
+      "labels": [
+        "unsigned",
+        "wavelet",
+        "undirected",
+        "time/frequency dependent",
+        "bivariate",
+        "M08"
+      ]
+    },
+    "psi_wavelet_max_fs-1_fmin-0_fmax-0-5_max": {
+      "mean": 0.000172,
+      "std": 0.0,
+      "values": [
+        0.000172
+      ],
+      "category": "wavelet",
+      "labels": [
+        "unsigned",
+        "wavelet",
+        "undirected",
+        "time/frequency dependent",
+        "bivariate",
+        "M08"
+      ]
+    },
+    "psi_wavelet_max_fs-1_fmin-0_fmax-0-25_max": {
+      "mean": 0.000139,
+      "std": 0.0,
+      "values": [
+        0.000139
+      ],
+      "category": "wavelet",
+      "labels": [
+        "unsigned",
+        "wavelet",
+        "undirected",
+        "time/frequency dependent",
+        "bivariate",
+        "M08"
+      ]
+    },
+    "psi_wavelet_max_fs-1_fmin-0-25_fmax-0-5_max": {
+      "mean": 0.000126,
+      "std": 0.0,
+      "values": [
+        0.000126
+      ],
+      "category": "wavelet",
+      "labels": [
+        "unsigned",
+        "wavelet",
+        "undirected",
+        "time/frequency dependent",
+        "bivariate",
+        "M08"
+      ]
+    },
+    "lmfit_Ridge": {
+      "mean": 0.114522,
+      "std": 0.0,
+      "values": [
+        0.114522
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "unordered",
+        "normal",
+        "linear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "lmfit_Lasso": {
+      "mean": 0.132073,
+      "std": 0.0,
+      "values": [
+        0.132073
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "unordered",
+        "normal",
+        "linear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "lmfit_SGDRegressor": {
+      "mean": 0.135348,
+      "std": 0.0,
+      "values": [
+        0.135348
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "unordered",
+        "normal",
+        "linear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "lmfit_ElasticNet": {
+      "mean": 0.132293,
+      "std": 0.0,
+      "values": [
+        0.132293
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "unordered",
+        "normal",
+        "linear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "lmfit_BayesianRidge": {
+      "mean": 0.138035,
+      "std": 0.0,
+      "values": [
+        0.138035
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "unordered",
+        "normal",
+        "linear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "gpfit_DotProduct": {
+      "mean": 10.412929,
+      "std": 0.0,
+      "values": [
+        10.412929
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "unordered",
+        "normal",
+        "nonlinear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "gpfit_RBF": {
+      "mean": 16.805856,
+      "std": 0.0,
+      "values": [
+        16.805856
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "unordered",
+        "normal",
+        "nonlinear",
+        "directed",
+        "bivariate",
+        "contemporaneous",
+        "M14"
+      ]
+    },
+    "coint_johansen_max_eig_stat_order-0_ardiff-10": {
+      "mean": 0.102286,
+      "std": 0.0,
+      "values": [
+        0.102286
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_johansen_trace_stat_order-0_ardiff-10": {
+      "mean": 0.000213,
+      "std": 0.0,
+      "values": [
+        0.000213
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_johansen_max_eig_stat_order-0_ardiff-1": {
+      "mean": 0.063668,
+      "std": 0.0,
+      "values": [
+        0.063668
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_johansen_trace_stat_order-0_ardiff-1": {
+      "mean": 0.000213,
+      "std": 0.0,
+      "values": [
+        0.000213
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_johansen_max_eig_stat_order-1_ardiff-10": {
+      "mean": 0.104451,
+      "std": 0.0,
+      "values": [
+        0.104451
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_johansen_trace_stat_order-1_ardiff-10": {
+      "mean": 0.000218,
+      "std": 0.0,
+      "values": [
+        0.000218
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_johansen_max_eig_stat_order-1_ardiff-1": {
+      "mean": 0.067094,
+      "std": 0.0,
+      "values": [
+        0.067094
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_johansen_trace_stat_order-1_ardiff-1": {
+      "mean": 0.000207,
+      "std": 0.0,
+      "values": [
+        0.000207
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_aeg_tstat_trend-c_autolag-aic_maxlag-10": {
+      "mean": 0.269589,
+      "std": 0.0,
+      "values": [
+        0.269589
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_aeg_tstat_trend-ct_autolag-aic_maxlag-10": {
+      "mean": 0.271105,
+      "std": 0.0,
+      "values": [
+        0.271105
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "coint_aeg_tstat_trend-ct_autolag-bic_maxlag-10": {
+      "mean": 0.2715,
+      "std": 0.0,
+      "values": [
+        0.2715
+      ],
+      "category": "misc",
+      "labels": [
+        "misc",
+        "unsigned",
+        "temporal",
+        "undirected",
+        "nonlinear",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M13"
+      ]
+    },
+    "pec": {
+      "mean": 0.002391,
+      "std": 0.0,
+      "values": [
+        0.002391
+      ],
+      "category": "misc",
+      "labels": [
+        "unsigned",
+        "misc",
+        "undirected",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M11"
+      ]
+    },
+    "pec_orth": {
+      "mean": 0.001652,
+      "std": 0.0,
+      "values": [
+        0.001652
+      ],
+      "category": "misc",
+      "labels": [
+        "unsigned",
+        "misc",
+        "undirected",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M11"
+      ]
+    },
+    "pec_log": {
+      "mean": 0.001233,
+      "std": 0.0,
+      "values": [
+        0.001233
+      ],
+      "category": "misc",
+      "labels": [
+        "unsigned",
+        "misc",
+        "undirected",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M11"
+      ]
+    },
+    "pec_orth_log": {
+      "mean": 0.001809,
+      "std": 0.0,
+      "values": [
+        0.001809
+      ],
+      "category": "misc",
+      "labels": [
+        "unsigned",
+        "misc",
+        "undirected",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M11"
+      ]
+    },
+    "pec_orth_abs": {
+      "mean": 0.001582,
+      "std": 0.0,
+      "values": [
+        0.001582
+      ],
+      "category": "misc",
+      "labels": [
+        "unsigned",
+        "misc",
+        "undirected",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M11"
+      ]
+    },
+    "pec_orth_log_abs": {
+      "mean": 0.00187,
+      "std": 0.0,
+      "values": [
+        0.00187
+      ],
+      "category": "misc",
+      "labels": [
+        "unsigned",
+        "misc",
+        "undirected",
+        "linear",
+        "bivariate",
+        "time-dependent",
+        "M11"
+      ]
+    },
+    "ids": {
+      "mean": 0.001051,
+      "std": 0.0,
+      "values": [
+        0.001051
+      ],
+      "category": "misc",
+      "labels": [
+        "unsigned",
+        "misc",
+        "undirected",
+        "nonlinear"
+      ]
+    }
+  },
+  "config": "config.yaml",
+  "mp_context": "spawn",
+  "seed": 0,
+  "environment": {
+    "datetime": "2026-05-25T15:18:37",
+    "pyspi_git_sha": "badfb4ebdb6b7d56e88a85f33c8f10e8a8ba6431",
+    "python_version": "3.12.12",
+    "platform": "Linux-5.14.0-611.54.1.el9_7.x86_64-x86_64",
+    "dep_versions": {
+      "pyspi": "2.0.1",
+      "numpy": "2.4.2",
+      "scipy": "1.17.0",
+      "pandas": "3.0.2",
+      "scikit-learn": "1.8.0",
+      "statsmodels": "0.14.6",
+      "mne": "1.12.1",
+      "mne-connectivity": "0.8.1",
+      "spectral-connectivity": "2.0.0",
+      "nitime": "0.12.1",
+      "hyppo": "0.5.2",
+      "cdt": "0.6.0",
+      "torch": "2.11.0",
+      "tslearn": "0.8.1",
+      "dtaidistance": "2.3.13",
+      "pyEDM": "2.5.0",
+      "h5py": "3.16.0",
+      "pyyaml": "6.0.3",
+      "tqdm": "4.67.3"
+    },
+    "dep_fingerprint": "sha256:6e440b9ce05c968b",
+    "env": {
+      "OMP_NUM_THREADS": "1",
+      "OPENBLAS_NUM_THREADS": "1",
+      "MKL_NUM_THREADS": "1",
+      "VECLIB_MAXIMUM_THREADS": "1",
+      "PYSPI_N_JOBS": ""
+    }
+  }
+}
