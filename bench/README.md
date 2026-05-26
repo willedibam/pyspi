@@ -31,29 +31,26 @@ config filename (e.g. `benchmarked90_config.yaml`), or a path.
 
 ## Output
 
-One JSON file (`bench/results/timings_*.json`), written incrementally after
-each cell — interrupt-safe, `--resume` skips completed cells. Carries an
+One JSON file per cell, written atomically to `bench/results/cells/` as
+`<label>_M<M>_T<T>_n<n_jobs>.json`. `--resume` skips cells whose JSON exists
+with `repeats >= --repeats`. Each file is self-contained, with an
 `environment` block (pyspi git sha, dependency versions + fingerprint,
-platform) so results pin to an exact environment. Each result entry has
-per-cell wall time, per-SPI timings (mean/std), peak RSS, and failed-SPI count.
+platform) pinning results to an exact environment. Per-cell fields:
 
-Load for analysis:
-
-```python
-import json, pandas as pd
-d = json.load(open("bench/results/timings_xxx.json"))
-cells = pd.json_normalize(d["results"])              # one row per (M,T,n_jobs)
-```
+- `cell_wall_seconds {mean, std, values}`, `n_spis`, `n_spis_failed`, `failed_spis: [...]`
+- `rss_mb_end`, `rss_mb_delta` (per-cell, via `psutil.Process().memory_info().rss`)
+- `spi_seconds: {identifier: {mean, std, values, category, labels}}`
+  - `category` is one of `basic | distance | causal | infotheory | spectral | wavelet | misc`
+  - `labels` is the SPI's merged label list (includes `Mxx` size tags + stat-type tags)
 
 ## Cut a benchmarked config
 
-`cut_config.py` turns a timing JSON into a `benchmarked<N>_config.yaml` — the
-former notebook step, now self-contained.
+`cut_config.py` turns a single per-cell JSON into a `benchmarked<N>_config.yaml`.
 
 ```bash
 # Measure per-SPI walltime, then keep the fastest 90%
 python -m bench.bench_compute --preset amortized --config config.yaml
-python -m bench.cut_config --bench-json bench/results/timings_config_*.json --keep 90
+python -m bench.cut_config --bench-json bench/results/cells/<file>.json --keep 90
 ```
 
 Cost model (`--mode`):
@@ -64,9 +61,22 @@ Cost model (`--mode`):
   the true per-variant budget impact — the shared computation is built once.
 - `raw` — each SPI's own measured walltime.
 
-Output goes to `pyspi/benchmarked<N>[_amortized]_config.yaml`; dropped SPIs are
-listed as trailing comments for auditability. `--m`/`--t` pick the bench cell
-(default: largest).
+Output goes to `pyspi/benchmarked<N>[_amortized]_config.yaml`; by default
+dropped SPIs are commented out (not deleted) so the YAML carries the full
+provenance of the cut. Pass `--no-preserve-dropped` to delete instead.
+
+## Analyse + forecast
+
+```bash
+# Cross-cell analysis (anchor stability, scaling fits, cumulative cost)
+python -m bench.analyse_cells --results-glob 'bench/results/cells/<pattern>.json' \
+    --config pyspi/config.yaml --percentiles 80,90,95,99 \
+    --output-dir bench/results/analysis
+
+# Predict cell wall time at a target (M, T) from the scaling fits
+python -m bench.forecast_cell --config pyspi/benchmarked90_amortized_config.yaml \
+    --M 64 --T 3200
+```
 
 ## Cluster (PBS)
 

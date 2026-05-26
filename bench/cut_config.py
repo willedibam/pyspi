@@ -17,7 +17,7 @@ Cost model — two modes:
              full cost to one variant overcounts. Ungrouped SPIs use raw time.
 
 Usage:
-    python -m bench.cut_config --bench-json bench/results/physics_config_M64_T3200_n1.json --keep 90
+    python -m bench.cut_config --bench-json bench/results/cells/physics_config_M64_T3200_n1.json --keep 90
     python -m bench.cut_config --bench-json <path> --keep 80 --mode raw
 """
 
@@ -33,7 +33,7 @@ from pathlib import Path
 
 import yaml
 
-from pyspi.calculator import _expand_lagged_correlation_configs
+from pyspi.calculator import _expand_lagged_correlation_configs, _split_config_params
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUNDLED_CONFIG_DIR = REPO_ROOT / "pyspi"
@@ -52,6 +52,9 @@ def parse_args(argv=None):
                    help="Cost model (default: amortized).")
     p.add_argument("-o", "--output", type=Path, default=None,
                    help="Output config path (default: pyspi/benchmarked<keep>[_amortized]_config.yaml).")
+    p.add_argument("--no-preserve-dropped", action="store_true",
+                   help="Delete dropped variants/classes from the output instead of "
+                        "commenting them out (default: preserve as comments).")
     return p.parse_args(argv)
 
 
@@ -66,8 +69,12 @@ def walk_spis(configfile: Path):
             if class_name == "LaggedCorrelation" and configs is not None:
                 configs = _expand_lagged_correlation_configs(configs)
             for params in ([None] if configs is None else configs):
-                spi = (getattr(module, class_name)() if params is None
-                       else getattr(module, class_name)(**params))
+                if params is None:
+                    spi = getattr(module, class_name)()
+                    ctor_params = None
+                else:
+                    ctor_params, _ = _split_config_params(params)
+                    spi = getattr(module, class_name)(**ctor_params)
                 yield module_name, class_name, params, spi.identifier, spi
 
 
@@ -87,27 +94,112 @@ def amortized_costs(records: list, raw: dict[str, float]) -> dict[str, float]:
     return cost
 
 
-def emit_config(source_path: Path, records: list, kept: set[str], header: str) -> str:
+def _dump_variant(params: dict | None) -> list[str]:
+    """Render one config variant (a param dict, or None for no-args) as YAML lines.
+
+    Returns a list of lines like ``["- estimator: kraskov", "  prop_k: 4"]``. For
+    None (no-args SPI), returns ``["- {}"]`` — but that case shouldn't reach here
+    in normal use (it's handled at the class level via ``configs: null``).
+    """
+    if params is None or params == {}:
+        return ["- {}"]
+    text = yaml.dump([params], sort_keys=False, default_flow_style=False, indent=2).rstrip()
+    return text.splitlines()
+
+
+def _render_class_block(class_name: str, src_entry: dict,
+                        kept: list, dropped: list) -> str:
+    """Render a class block: labels, dependencies, configs (kept), then commented dropped.
+
+    The class header is at the LEFT MARGIN (the caller indents under the module).
+    Returns a string with NO trailing newline.
+
+    Special cases:
+      - single no-args SPI (configs: null in source):  kept=[None] -> configs: null
+        kept; kept=[] -> the whole class is fully dropped (caller comments it out).
+      - some kept, some dropped: kept variants emitted normally, dropped appended as
+        ``  # - estimator: ...`` comments under the configs: list.
+    """
+    lines = [f"{class_name}:"]
+    labels = src_entry.get("labels")
+    if labels is not None:
+        lines.append("  labels:")
+        for lab in labels:
+            lines.append(f"    - {lab}")
+    if "dependencies" in src_entry:
+        deps = src_entry["dependencies"]
+        if deps is None:
+            lines.append("  dependencies:")
+        else:
+            lines.append("  dependencies:")
+            for d in deps:
+                lines.append(f"    - {d}")
+
+    # configs handling
+    if kept == [None]:
+        lines.append("  configs:")
+    else:
+        lines.append("  configs:")
+        for p in kept:
+            if p is None:
+                continue
+            for vl in _dump_variant(p):
+                lines.append("  " + vl)
+        for p in dropped:
+            if p is None:
+                # commented no-args means the class is fully dropped — handled by caller
+                lines.append("  # (no-args variant dropped)")
+                continue
+            for vl in _dump_variant(p):
+                lines.append("  # " + vl)
+    return "\n".join(lines)
+
+
+def emit_config(source_path: Path, records: list, kept_ids: set[str], header: str,
+                preserve_dropped: bool = True) -> str:
+    """Emit the cut YAML. If preserve_dropped, dropped variants/classes are kept
+    as commented blocks instead of being removed."""
     source = yaml.safe_load(source_path.read_text())
-    out: dict = {}
-    for module_name, class_name, params, identifier, _ in records:
-        if identifier not in kept:
-            continue
-        module = out.setdefault(module_name, {})
-        if class_name not in module:
-            src_entry = source[module_name][class_name]
-            module[class_name] = {
-                "labels": src_entry.get("labels"),
-                "dependencies": src_entry.get("dependencies"),
-                "configs": [],
-            }
-        module[class_name]["configs"].append(params)
-    for module in out.values():
-        for entry in module.values():
-            if entry["configs"] == [None]:
-                entry["configs"] = None
-    body = yaml.dump(out, sort_keys=False, default_flow_style=False)
-    return header + body
+
+    # Group records by (module, class), preserving source order.
+    grouped: dict[tuple[str, str], list[tuple]] = {}
+    order: list[tuple[str, str]] = []
+    for module, cls, params, ident, _ in records:
+        key = (module, cls)
+        if key not in grouped:
+            grouped[key] = []
+            order.append(key)
+        grouped[key].append((params, ident))
+
+    out_lines: list[str] = [header.rstrip()]
+    current_module: str | None = None
+
+    for (module, cls) in order:
+        variants = grouped[(module, cls)]
+        kept = [p for p, i in variants if i in kept_ids]
+        dropped = [p for p, i in variants if i not in kept_ids]
+
+        if not preserve_dropped and not kept:
+            continue  # drop the class entirely
+
+        if module != current_module:
+            if current_module is not None:
+                out_lines.append("")
+            out_lines.append(f"{module}:")
+            current_module = module
+
+        src_entry = source[module][cls]
+        if kept or not preserve_dropped:
+            # Some variants kept: render normally with kept + commented dropped.
+            block = _render_class_block(cls, src_entry, kept, dropped if preserve_dropped else [])
+            out_lines.append("\n".join("  " + l for l in block.splitlines()))
+        else:
+            # All variants dropped: render the full class block and comment every line.
+            block = _render_class_block(cls, src_entry, dropped, [])
+            out_lines.append("\n".join("  # " + l for l in block.splitlines()))
+        out_lines.append("")  # blank line between class blocks
+
+    return "\n".join(out_lines) + "\n"
 
 
 def main(argv=None) -> int:
@@ -153,7 +245,8 @@ def main(argv=None) -> int:
         f"# Cutoff        : fastest kept <= {kept_max:.3f}s ; slowest dropped >= "
         f"{drop_min:.3f}s.\n#\n"
     )
-    text = emit_config(args.config, records, kept, header)
+    text = emit_config(args.config, records, kept, header,
+                       preserve_dropped=not args.no_preserve_dropped)
     if dropped:
         text += "\n# --- DROPPED (slowest %d, %s cost) ---\n" % (len(dropped), args.mode)
         text += "".join(f"#   {cost[i]:9.3f}s  {i}\n" for i in reversed(dropped))

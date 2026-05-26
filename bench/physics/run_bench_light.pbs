@@ -8,7 +8,7 @@
 
 # Light bench grid: M={4,8,16} x T={200,400,800,1600,3200} = 15 cells,
 # full config.yaml at n_jobs=1. Sequential (no -J) — one job writes 15
-# per-cell JSONs into bench/results/ incrementally; safe to interrupt
+# per-cell JSONs into bench/results/cells/ incrementally; safe to interrupt
 # (--resume picks up remaining cells on resubmit).
 #
 # Submit from the pyspi-fork repo root:
@@ -33,6 +33,6 @@ echo "[bench] host=$(hostname) start=$(date)"
 python -m bench.bench_compute \
     --m 4,8,16 --t 200,400,800,1600,3200 --n-jobs 1 \
     --config config.yaml --repeats 1 \
-    --output-dir bench/results --label physics_config \
+    --output-dir bench/results/cells --label physics_config \
     --resume
 echo "[bench] finished at $(date)"

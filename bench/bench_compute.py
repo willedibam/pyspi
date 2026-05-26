@@ -33,7 +33,6 @@ import importlib.metadata as im
 import json
 import os
 import platform
-import resource
 import subprocess
 import sys
 import time
@@ -43,8 +42,11 @@ from pathlib import Path
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 import numpy as np
+import psutil
 
-from pyspi.calculator import Calculator
+from pyspi.calculator import Calculator, load_spis_from_yaml
+
+CATEGORY_PREFIX = ".statistics."  # python module suffix becomes the category field
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BUNDLED_CONFIG_DIR = REPO_ROOT / "pyspi"
@@ -117,11 +119,29 @@ def make_calculator(config: str, dataset: np.ndarray) -> Calculator:
     return Calculator(dataset=dataset, configfile=config, normalise=False, verbose=False)
 
 
-def peak_rss_mb() -> float:
-    """Process peak RSS in MB. macOS reports bytes; Linux reports KB."""
-    r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    scale = 1.0 if sys.platform == "darwin" else 1024.0
-    return (r * scale) / (1024.0 * 1024.0)
+def spi_metadata(calc: Calculator) -> dict[str, dict]:
+    """Return {identifier: {"category": <basic|distance|...>, "labels": [...]}}.
+
+    ``category`` is the python module suffix (``.statistics.basic`` -> ``basic``);
+    ``labels`` is the SPI's merged label list (class labels + per-config overrides),
+    which includes the ``Mxx`` size-applicability tags alongside stat-type tags.
+    """
+    out: dict[str, dict] = {}
+    for ident, spi in calc._spis.items():
+        mod = type(spi).__module__
+        cat = mod.split(CATEGORY_PREFIX, 1)[1] if CATEGORY_PREFIX in mod else mod
+        labels = list(getattr(spi, "labels", []) or [])
+        out[ident] = {"category": cat, "labels": labels}
+    return out
+
+
+_PROC = psutil.Process()
+
+
+def rss_mb() -> float:
+    """Process current RSS in MB (NOT the high-watermark — that monotonically
+    accumulates across cells in the same process and gives misleading deltas)."""
+    return _PROC.memory_info().rss / (1024.0 * 1024.0)
 
 
 def git_sha() -> str | None:
@@ -185,18 +205,21 @@ def resolve_grid(args) -> list[tuple[int, int, int]]:
 
 def run_cell(M, T, n_jobs, config, mp_context, repeats, seed) -> dict:
     """Run one (M, T, n_jobs) cell ``repeats`` times. Returns a self-contained entry dict."""
-    rss_before = peak_rss_mb()
+    rss_before = rss_mb()
     rng = np.random.default_rng(seed)
     totals: list[float] = []
     per_spi: dict[str, list[float]] = {}
+    failed_ids: set[str] = set()
     n_spis = 0
-    n_failed = 0
     error = None
+    meta: dict[str, dict] = {}
 
     for _ in range(repeats):
         arr = rng.standard_normal((M, T)).astype(np.float64)
         try:
             calc = make_calculator(config, arr)
+            if not meta:
+                meta = spi_metadata(calc)
             t0 = time.perf_counter()
             calc.compute(n_jobs=n_jobs, mp_context=mp_context, progress=False)
             totals.append(time.perf_counter() - t0)
@@ -204,21 +227,30 @@ def run_cell(M, T, n_jobs, config, mp_context, repeats, seed) -> dict:
             for k, v in calc.timings.items():
                 per_spi.setdefault(k, []).append(float(v))
             tbl = calc.table
-            n_failed = sum(
-                bool(np.all(np.isnan(np.asarray(tbl[s])[~np.eye(M, dtype=bool)])))
-                for s in calc.spis
-            )
+            for s in calc.spis:
+                if bool(np.all(np.isnan(np.asarray(tbl[s])[~np.eye(M, dtype=bool)]))):
+                    failed_ids.add(s)
         except Exception as exc:  # noqa: BLE001
             error = f"{type(exc).__name__}: {exc}"
             break
 
+    spi_seconds = {}
+    for k, v in per_spi.items():
+        entry_v = summarise(v)
+        if k in meta:
+            entry_v["category"] = meta[k]["category"]
+            entry_v["labels"] = meta[k]["labels"]
+        spi_seconds[k] = entry_v
+
     entry = {
         "M": M, "T": T, "n_jobs": n_jobs, "repeats": len(totals),
         "cell_wall_seconds": summarise(totals) if totals else None,
-        "n_spis": n_spis, "n_spis_failed": n_failed,
-        "peak_rss_mb": round(peak_rss_mb(), 1),
-        "rss_delta_mb": round(peak_rss_mb() - rss_before, 1),
-        "spi_seconds": {k: summarise(v) for k, v in per_spi.items()},
+        "n_spis": n_spis,
+        "n_spis_failed": len(failed_ids),
+        "failed_spis": sorted(failed_ids),
+        "rss_mb_end": round(rss_mb(), 1),
+        "rss_mb_delta": round(rss_mb() - rss_before, 1),
+        "spi_seconds": spi_seconds,
     }
     if error is not None:
         entry["error"] = error
@@ -288,7 +320,8 @@ def main(argv=None) -> int:
             cw = entry["cell_wall_seconds"]
             print(f"[bench]   {wall:.1f}s wall (cell mean {cw['mean']:.2f}s "
                   f"+/- {cw['std']:.2f}s, {entry['n_spis']} SPIs, "
-                  f"{entry['n_spis_failed']} failed, {entry['peak_rss_mb']:.0f} MB)",
+                  f"{entry['n_spis_failed']} failed, "
+                  f"RSS {entry['rss_mb_end']:.0f} MB (+{entry['rss_mb_delta']:+.0f}))",
                   file=sys.stderr)
         _atomic_write_json(path, entry)
 

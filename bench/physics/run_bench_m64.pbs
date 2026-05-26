@@ -35,6 +35,6 @@ python -m bench.bench_compute \
     --m 64 --t 200,400,800,1600,3200 --n-jobs 1 \
     --array-index "$PBS_ARRAY_INDEX" \
     --config config.yaml --repeats 1 \
-    --output-dir bench/results --label physics_config \
+    --output-dir bench/results/cells --label physics_config \
     --resume
 echo "[bench] finished at $(date)"
