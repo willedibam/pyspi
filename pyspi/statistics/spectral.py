@@ -81,6 +81,12 @@ class NonparametricSpectral(Unsigned):
 class NonparametricSpectralMultivariate(NonparametricSpectral):
     _cache_namespace = "spectral_mv"
 
+    @property
+    def _cache_subkey(self):
+        # Default: cache key is (measure,), one per class. GroupDelay and
+        # PhaseSlopeIndex override this — their cache also keys on fmin/fmax.
+        return (type(self).__name__,)
+
     def _get_cache(self, data):
         try:
             res = data.spectral_mv[self.key]
@@ -339,6 +345,11 @@ class PhaseSlopeIndex(NonparametricSpectralMultivariate, Undirected):
         super().__init__(**kwargs)
         self._measure = "phase_slope_index"
 
+    @property
+    def _cache_subkey(self):
+        # Narrower cache: (class, fmin, fmax) per the key property override.
+        return (type(self).__name__, self._fmin, self._fmax)
+
     def _get_statistic(self, C):
         return C.phase_slope_index(
             frequencies_of_interest=[self._fmin, self._fmax],
@@ -354,6 +365,11 @@ class GroupDelay(NonparametricSpectralMultivariate, Directed):
         self.identifier = "gd"
         super().__init__(**kwargs)
         self._measure = "group_delay"
+
+    @property
+    def _cache_subkey(self):
+        # Narrower cache: (class, fmin, fmax) per the key property override.
+        return (type(self).__name__, self._fmin, self._fmax)
 
     def _get_statistic(self, C):
         return C.group_delay(

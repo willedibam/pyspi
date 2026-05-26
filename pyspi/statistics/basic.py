@@ -17,6 +17,11 @@ class Estimators(Undirected, Signed):
     labels = ["basic", "unordered", "linear", "undirected"]
     _cache_namespace = "covariance"
 
+    @property
+    def _cache_subkey(self):
+        # Cache is data.covariance[estimator]; (kind, squared) are post-lookup.
+        return (self._estimator,)
+
     def __init__(self, kind, estimator="EmpiricalCovariance", squared=False):
         paramstr = f"_{estimator}"
         if squared:

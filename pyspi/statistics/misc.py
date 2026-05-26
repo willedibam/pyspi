@@ -26,6 +26,13 @@ class Cointegration(Undirected, Unsigned):
     labels = ["misc", "unsigned", "temporal", "undirected", "nonlinear"]
     _cache_namespace = "coint"
 
+    @property
+    def _cache_subkey(self):
+        # Cache key matches self.key (per cache lookup in _from_cache).
+        if self._method == "johansen":
+            return (self._method, self._det_order, self._k_ar_diff)
+        return (self._method, self._autolag, self._maxlag, self._trend)
+
     def __init__(
         self,
         method="johansen",

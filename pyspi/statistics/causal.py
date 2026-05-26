@@ -75,6 +75,11 @@ class ConvergentCrossMapping(Directed, Signed):
     # keyed by embedding dimension — bucket them onto one parallel worker.
     _cache_namespace = "ccm"
 
+    @property
+    def _cache_subkey(self):
+        # Cache is data.ccm[E]; statistic is post-lookup.
+        return (self._E,)
+
     def __init__(self, statistic="mean", embedding_dimension=None):
         self._statistic = statistic
         self._E = embedding_dimension

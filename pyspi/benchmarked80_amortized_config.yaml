@@ -3,7 +3,7 @@
 # Source config : /Users/wedi0306/Code/pyspi-fork/pyspi/config.yaml
 # Bench JSON    : physics_config_M16_T800_n1.json (pyspi badfb4ebdb6b, M=16 T=800 n_jobs=1)
 # Cost model    : amortized
-# Keep 80% : kept 262 / 328 SPIs, dropped 66.
+# Keep 80% : kept 267 / 328 SPIs (target 262; +5 snapped from partial cache buckets), dropped 61.
 # Cutoff        : fastest kept <= 1.615s ; slowest dropped >= 1.615s.
 #
 .statistics.basic:
@@ -1059,18 +1059,18 @@
     dependencies:
     configs:
     - fs: 1
-    # - fmin: 0
-    #   fmax: 0.25
-    # - fmin: 0.25
-    #   fmax: 0.5
-    # - fs: 1
-    #   statistic: max
-    # - fmin: 0
-    #   fmax: 0.25
-    #   statistic: max
-    # - fmin: 0.25
-    #   fmax: 0.5
-    #   statistic: max
+    - fmin: 0
+      fmax: 0.25
+    - fmin: 0.25
+      fmax: 0.5
+    - fs: 1
+      statistic: max
+    - fmin: 0
+      fmax: 0.25
+      statistic: max
+    - fmin: 0.25
+      fmax: 0.5
+      statistic: max
 
   PartialDirectedCoherence:
     labels:
@@ -1458,20 +1458,20 @@
       bandwidth: 0.5
 
 
-# --- DROPPED (slowest 66, amortized cost) ---
+# --- DROPPED (slowest 61, amortized cost) ---
 #     505.800s  hhg
 #     411.135s  gpfit_RBF
 #     342.692s  mgcx_maxlag-10
-#     292.735s  ccm_E-10_diff
-#     292.735s  ccm_E-10_max
-#     292.735s  ccm_E-10_mean
-#     292.735s  ccm_E-1_diff
-#     292.735s  ccm_E-1_max
-#     292.735s  ccm_E-1_mean
-#     292.735s  ccm_E-None_diff
-#     292.735s  ccm_E-None_max
-#     292.735s  ccm_E-None_mean
+#     332.132s  ccm_E-None_diff
+#     332.132s  ccm_E-None_max
+#     332.132s  ccm_E-None_mean
+#     332.019s  ccm_E-10_diff
+#     332.019s  ccm_E-10_max
+#     332.019s  ccm_E-10_mean
 #     257.963s  gpfit_DotProduct
+#     214.054s  ccm_E-1_diff
+#     214.054s  ccm_E-1_max
+#     214.054s  ccm_E-1_mean
 #     105.554s  mgcx_maxlag-1
 #      77.367s  dcorrx_maxlag-10
 #      62.259s  psi_wavelet_mean_fs-1_fmin-0_fmax-0-25_mean
@@ -1520,8 +1520,3 @@
 #       1.625s  gpdcoh_multitaper_mean_fs-1_fmin-0-25_fmax-0-5
 #       1.625s  gpdcoh_multitaper_mean_fs-1_fmin-0_fmax-0-25
 #       1.625s  gpdcoh_multitaper_mean_fs-1_fmin-0_fmax-0-5
-#       1.615s  dcoh_multitaper_max_fs-1_fmin-0-25_fmax-0-5
-#       1.615s  dcoh_multitaper_max_fs-1_fmin-0_fmax-0-25
-#       1.615s  dcoh_multitaper_max_fs-1_fmin-0_fmax-0-5
-#       1.615s  dcoh_multitaper_mean_fs-1_fmin-0-25_fmax-0-5
-#       1.615s  dcoh_multitaper_mean_fs-1_fmin-0_fmax-0-25

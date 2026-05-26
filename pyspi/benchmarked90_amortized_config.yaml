@@ -3,7 +3,7 @@
 # Source config : /Users/wedi0306/Code/pyspi-fork/pyspi/config.yaml
 # Bench JSON    : physics_config_M16_T800_n1.json (pyspi badfb4ebdb6b, M=16 T=800 n_jobs=1)
 # Cost model    : amortized
-# Keep 90% : kept 295 / 328 SPIs, dropped 33.
+# Keep 90% : kept 295 / 328 SPIs (target 295), dropped 33.
 # Cutoff        : fastest kept <= 5.520s ; slowest dropped >= 6.790s.
 #
 .statistics.basic:
@@ -1462,16 +1462,16 @@
 #     505.800s  hhg
 #     411.135s  gpfit_RBF
 #     342.692s  mgcx_maxlag-10
-#     292.735s  ccm_E-10_diff
-#     292.735s  ccm_E-10_max
-#     292.735s  ccm_E-10_mean
-#     292.735s  ccm_E-1_diff
-#     292.735s  ccm_E-1_max
-#     292.735s  ccm_E-1_mean
-#     292.735s  ccm_E-None_diff
-#     292.735s  ccm_E-None_max
-#     292.735s  ccm_E-None_mean
+#     332.132s  ccm_E-None_diff
+#     332.132s  ccm_E-None_max
+#     332.132s  ccm_E-None_mean
+#     332.019s  ccm_E-10_diff
+#     332.019s  ccm_E-10_max
+#     332.019s  ccm_E-10_mean
 #     257.963s  gpfit_DotProduct
+#     214.054s  ccm_E-1_diff
+#     214.054s  ccm_E-1_max
+#     214.054s  ccm_E-1_mean
 #     105.554s  mgcx_maxlag-1
 #      77.367s  dcorrx_maxlag-10
 #      62.259s  psi_wavelet_mean_fs-1_fmin-0_fmax-0-25_mean
