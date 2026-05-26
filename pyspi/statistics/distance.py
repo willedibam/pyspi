@@ -401,6 +401,13 @@ class Barycenter(Directed, Signed):
     labels = ["distance", "signed", "undirected", "temporal", "nonlinear"]
     _cache_namespace = "barycenter"
 
+    @property
+    def _cache_subkey(self):
+        # Actual cache is keyed (mode, pair); statistic/squared are post-lookup
+        # transforms. Sub-bucket amortization by mode so 4 separate caches don't
+        # get lumped into one and mis-cost the cheap modes.
+        return (self._mode,)
+
     def __init__(self, mode="euclidean", squared=False, statistic="mean"):
         if mode == "euclidean":
             self._fn = euclidean_barycenter

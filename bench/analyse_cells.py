@@ -51,10 +51,16 @@ def _strip(params):
     return {k: v for k, v in params.items() if k not in CONSTRUCTOR_DROP}
 
 
-def cache_namespace_map(configfile: Path) -> dict[str, str | None]:
-    """Return {identifier: _cache_namespace} for every SPI in the config."""
+def cache_namespace_map(configfile: Path) -> dict[str, tuple | None]:
+    """Return {identifier: bucket_key} for every SPI in the config.
+
+    The bucket key is ``(namespace, *cache_subkey_values)`` if the class
+    declares ``_cache_namespace``, else ``None``. ``_cache_subkey`` is an
+    optional per-instance tuple that splits a namespace into independent
+    caches (e.g. Barycenter caches per ``mode``).
+    """
     source = yaml.safe_load(configfile.read_text())
-    out: dict[str, str | None] = {}
+    out: dict[str, tuple | None] = {}
     for module_name, module_spis in source.items():
         module = importlib.import_module(module_name, "pyspi")
         for class_name, entry in (module_spis or {}).items():
@@ -65,7 +71,11 @@ def cache_namespace_map(configfile: Path) -> dict[str, str | None]:
                 configs = _expand_lagged_correlation_configs(configs)
             for params in [None] if configs is None else configs:
                 spi = cls() if params is None else cls(**_strip(params))
-                out[spi.identifier] = ns
+                if ns is None:
+                    out[spi.identifier] = None
+                else:
+                    subkey = tuple(getattr(spi, "_cache_subkey", ()))
+                    out[spi.identifier] = (ns, *subkey)
     return out
 
 
@@ -97,18 +107,20 @@ def load_cells(paths: list[Path]) -> list[dict]:
     return cells
 
 
-def long_df(cells: list[dict], ns_map: dict[str, str | None]) -> pd.DataFrame:
+def long_df(cells: list[dict], ns_map: dict[str, tuple | None]) -> pd.DataFrame:
     rows = []
     for c in cells:
         raw = {k: v["mean"] for k, v in c["spi_seconds"].items()}
         amo = amortized(raw, ns_map)
         for ident, r in raw.items():
+            bucket = ns_map.get(ident)
             rows.append({
                 "M": c["M"], "T": c["T"],
                 "identifier": ident,
                 "raw_s": r,
                 "amortized_s": amo[ident],
-                "cache_namespace": ns_map.get(ident),
+                "cache_namespace": bucket[0] if bucket else None,
+                "cache_subkey": str(bucket[1:]) if bucket and len(bucket) > 1 else None,
             })
     return pd.DataFrame(rows)
 

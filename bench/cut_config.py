@@ -79,12 +79,25 @@ def walk_spis(configfile: Path):
 
 
 def amortized_costs(records: list, raw: dict[str, float]) -> dict[str, float]:
+    """Amortize cost within each shared-cache bucket.
+
+    A bucket is identified by ``(_cache_namespace, *_cache_subkey)``. The
+    subkey (a per-instance tuple, default ``()``) lets a class declare which
+    constructor params split its namespace into independent caches — e.g.
+    Barycenter caches per ``mode``, so its variants amortize per mode rather
+    than across all 16 of them.
+    """
     groups: dict = defaultdict(list)
     for _, _, _, identifier, spi in records:
-        groups[getattr(type(spi), "_cache_namespace", None)].append(identifier)
+        ns = getattr(type(spi), "_cache_namespace", None)
+        if ns is None:
+            groups[None].append(identifier)
+            continue
+        subkey = tuple(getattr(spi, "_cache_subkey", ()))
+        groups[(ns, *subkey)].append(identifier)
     cost: dict[str, float] = {}
-    for namespace, ids in groups.items():
-        if namespace is None:
+    for key, ids in groups.items():
+        if key is None:
             for i in ids:
                 cost[i] = raw[i]
         else:

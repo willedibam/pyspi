@@ -126,6 +126,15 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
 class NonparametricSpectralBivariate(NonparametricSpectral):
     _cache_namespace = "spectral_bv"
 
+    @property
+    def _cache_subkey(self):
+        # Per-pair Connectivity is shared across classes, but the per-class
+        # measure extraction (DTF, dDTF, dCoh, etc.) dominates in practice
+        # (~10s per class at M=16,T=800 vs <1s for the shared Multitaper).
+        # Bucket amortization by class so variants of one measure share, but
+        # different measures don't get cross-amortized.
+        return (type(self).__name__,)
+
     def _get_cache(self, data, i, j):
         """Cache Connectivity object per (i,j) pair, not per (measure,i,j).
 
