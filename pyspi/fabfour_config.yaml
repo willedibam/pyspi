@@ -8,6 +8,7 @@
       - unisgned
       - bivariate
       - contemporaneous
+      - M14
     dependencies:
     configs:
       - estimator: EmpiricalCovariance
@@ -20,6 +21,7 @@
       - signed
       - bivariate
       - contemporaneous
+      - M14
     dependencies:
     configs:
       - squared: True
@@ -33,6 +35,7 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M03
     configs:
       - estimator: gaussian
 
@@ -45,6 +48,7 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M11
     dependencies:
     configs:
       - orth: False

@@ -31,6 +31,7 @@
     - signed
     - multivariate
     - contemporaneous
+    - M14
     dependencies: null
     configs:
     - estimator: EmpiricalCovariance
@@ -64,6 +65,7 @@
     - signed
     - multivariate
     - contemporaneous
+    - M14
     dependencies: null
     configs:
     - estimator: EmpiricalCovariance
@@ -97,6 +99,7 @@
     - signed
     - bivariate
     - contemporaneous
+    - M14
     dependencies: null
     configs:
     - squared: true
@@ -108,6 +111,7 @@
     - signed
     - bivariate
     - contemporaneous
+    - M14
     dependencies: null
     configs:
     - squared: true
@@ -119,6 +123,7 @@
     - signed/unsigned
     - bivariate
     - time-dependent
+    - MXX
     dependencies: null
     configs:
     - estimator: pearson
@@ -182,9 +187,12 @@
     - signed/unsigned
     - bivariate
     - time-dependent
+    - M14
     dependencies: null
     configs:
     - statistic: max
+      labels:
+        - M10
     - statistic: max
       squared: true
     - statistic: mean
@@ -202,6 +210,7 @@
     - unordered
     - nonlinear
     - undirected
+    - MXX
     dependencies: null
     configs:
     - metric: euclidean
@@ -217,6 +226,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M10
     dependencies: null
     configs:
     - global_constraint: null
@@ -229,6 +239,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - MXX
     dependencies: null
     configs:
     - metric: euclidean
@@ -244,6 +255,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M10
     dependencies: null
     configs:
     - global_constraint: null
@@ -256,6 +268,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M14
     dependencies: null
     configs:
     - mode: euclidean
@@ -277,21 +290,28 @@
     - mode: dtw
       statistic: mean
       squared: true
+      labels:
+        - M09
     - mode: dtw
       statistic: max
       squared: true
     - mode: sgddtw
       statistic: mean
       squared: true
+      labels:
+        - M09
     - mode: sgddtw
       statistic: max
       squared: true
     - mode: softdtw
       statistic: mean
       squared: true
+      labels:
+        - M09
     - mode: softdtw
       statistic: max
       squared: true
+
   GromovWasserstainTau:
     labels:
     - unsigned
@@ -299,6 +319,7 @@
     - unordered
     - nonlinear
     - undirected
+    - MXX
     dependencies: null
     configs: null
 .statistics.causal:
@@ -309,6 +330,7 @@
     - unsigned
     - bivariate
     - contemporaneous
+    - M02
     dependencies: null
     configs: null
   RegressionErrorCausalInference:
@@ -318,6 +340,7 @@
     - unsigned
     - bivariate
     - contemporaneous
+    - M14
     dependencies: null
     configs: null
   ConvergentCrossMapping:
@@ -327,6 +350,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M14
     dependencies: null
     configs:
     - statistic: max
@@ -347,6 +371,7 @@
     - unsigned
     - bivariate
     - contemporaneous
+    - M14
     configs:
     - estimator: gaussian
     - estimator: kozachenko
@@ -358,6 +383,7 @@
     - unsigned
     - bivariate
     - contemporaneous
+    - M14
     configs:
     - estimator: gaussian
     - estimator: kozachenko
@@ -369,6 +395,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M03
     configs:
     - estimator: gaussian
     - estimator: kozachenko
@@ -378,6 +405,7 @@
     - directed
     - time-dependent
     - bivariate
+    - MXX
     configs:
     - estimator: gaussian
       history_length: 1
@@ -396,6 +424,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M03
     configs:
     - estimator: gaussian
     - estimator: kozachenko
@@ -406,8 +435,11 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M14
     configs:
     - estimator: gaussian
+      labels:
+        - M05
     - estimator: kozachenko
     - estimator: kernel
   MutualInfo:
@@ -417,6 +449,7 @@
     - unsigned
     - bivariate
     - contemporaneous
+    - M14
     configs:
     - estimator: gaussian
     - estimator: kraskov
@@ -433,6 +466,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M14
     configs:
     - estimator: gaussian
     - estimator: kraskov
@@ -449,6 +483,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M04
     configs:
     - estimator: kraskov
       prop_k: 4
@@ -458,19 +493,29 @@
       kernel_width: 0.25
       k_history: 1
       l_history: 1
+      labels:
+        - M14
     - estimator: gaussian
       auto_embed_method: MAX_CORR_AIS
       k_search_max: 10
       tau_search_max: 2
+      labels:
+        - M05
     - estimator: gaussian
       k_history: 1
       l_history: 1
+      labels:
+        - M05
     - estimator: symbolic
       k_history: 1
       l_history: 1
+      labels:
+        - M05
     - estimator: symbolic
       k_history: 10
       l_history: 1
+      labels:
+        - M05
   IntegratedInformation:
     labels:
     - undirected
@@ -478,6 +523,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M05
     dependencies: null
     configs:
     - phitype: star
@@ -494,6 +540,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M01
     dependencies: null
     configs:
     - fs: 1
@@ -503,12 +550,18 @@
       fmax: 0.5
     - fs: 1
       statistic: max
+      labels:
+        - M10
     - fmin: 0
       fmax: 0.25
       statistic: max
+      labels:
+        - M10
     - fmin: 0.25
       fmax: 0.5
       statistic: max
+      labels:
+        - M10
   CoherenceMagnitude:
     labels:
     - undirected
@@ -516,6 +569,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M12
     dependencies: null
     configs:
     - fs: 1
@@ -538,6 +592,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M12
     dependencies: null
     configs:
     - fs: 1
@@ -560,6 +615,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M01
     dependencies: null
     configs:
     - fmin: 0
@@ -575,6 +631,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M10
     dependencies: null
     configs:
     - fs: 1
@@ -584,9 +641,13 @@
       fmax: 0.5
     - fs: 1
       statistic: max
+      labels:
+        - M12
     - fmin: 0
       fmax: 0.25
       statistic: max
+      labels:
+        - M12
     - fmin: 0.25
       fmax: 0.5
       statistic: max
@@ -597,13 +658,20 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M07
     dependencies: null
     configs:
     - fs: 1
+      labels:
+        - M14
     - fmin: 0
       fmax: 0.25
+      labels:
+        - M01
     - fmin: 0.25
       fmax: 0.5
+      labels:
+        - M01
     - fs: 1
       statistic: max
     - fmin: 0
@@ -619,13 +687,20 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M07
     dependencies: null
     configs:
     - fs: 1
+      labels:
+        - M14
     - fmin: 0
       fmax: 0.25
+      labels:
+        - M01
     - fmin: 0.25
       fmax: 0.5
+      labels:
+        - M01
     - fs: 1
       statistic: max
     - fmin: 0
@@ -641,13 +716,20 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M07
     dependencies: null
     configs:
     - fs: 1
+      labels:
+        - M12
     - fmin: 0
       fmax: 0.25
+      labels:
+        - M12
     - fmin: 0.25
       fmax: 0.5
+      labels:
+        - M12
     - fs: 1
       statistic: max
     - fmin: 0
@@ -663,13 +745,20 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M07
     dependencies: null
     configs:
     - fs: 1
+      labels:
+        - M12
     - fmin: 0
       fmax: 0.25
+      labels:
+        - M12
     - fmin: 0.25
       fmax: 0.5
+      labels:
+        - M12
     - fs: 1
       statistic: max
     - fmin: 0
@@ -685,6 +774,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M12
     dependencies: null
     configs:
     - fs: 1
@@ -707,6 +797,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M06
     dependencies: null
     configs:
     - fmin: 0
@@ -728,6 +819,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M06
     dependencies: null
     configs:
     - fmin: 0
@@ -749,6 +841,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M06
     dependencies: null
     configs:
     - fmin: 0
@@ -770,6 +863,7 @@
     - linear
     - bivariate
     - frequency-dependent
+    - M06
     dependencies: null
     configs:
     - fmin: 0
@@ -791,6 +885,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M06
     dependencies: null
     configs:
     - fmin: 0
@@ -812,6 +907,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M01
     dependencies: null
     configs:
     - fmin: 0
@@ -830,6 +926,7 @@
     - unsigned
     - bivariate
     - frequency-dependent
+    - M06
     dependencies: null
     configs:
     - method: nonparametric
@@ -860,28 +957,40 @@
       fmin: 0
       fmax: 0.5
       statistic: mean
+      labels:
+        - M05
     - method: parametric
       fmin: 0
       fmax: 0.25
       statistic: mean
+      labels:
+        - M05
     - fmin: 0.25
       fmax: 0.5
       method: parametric
       statistic: mean
+      labels:
+        - M05
     - fs: 1
       order: 1
       method: parametric
       statistic: mean
+      labels:
+        - M05
     - fmin: 0
       fmax: 0.25
       order: 1
       method: parametric
       statistic: mean
+      labels:
+        - M05
     - fmin: 0.25
       fmax: 0.5
       order: 1
       method: parametric
       statistic: mean
+      labels:
+        - M05
     - fs: 1
       order: 20
       method: parametric
@@ -899,28 +1008,40 @@
     - fs: 1
       method: parametric
       statistic: max
+      labels:
+        - M05
     - fmin: 0
       fmax: 0.25
       method: parametric
       statistic: max
+      labels:
+        - M05
     - fmin: 0.25
       fmax: 0.5
       method: parametric
       statistic: max
+      labels:
+        - M05
     - fs: 1
       order: 1
       method: parametric
       statistic: max
+      labels:
+        - M05
     - fmin: 0
       fmax: 0.25
       order: 1
       method: parametric
       statistic: max
+      labels:
+        - M05
     - fmin: 0.25
       fmax: 0.5
       order: 1
       method: parametric
       statistic: max
+      labels:
+        - M05
     - fs: 1
       order: 20
       method: parametric
@@ -942,6 +1063,7 @@
     - unsigned
     - time/frequency dependent
     - bivariate
+    - M08
     dependencies: null
     configs:
     - fmin: 0.25
@@ -963,6 +1085,7 @@
     - unsigned
     - bivariate
     - contemporaneous
+    - M14
     dependencies: null
     configs:
     - model: Ridge
@@ -977,6 +1100,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M13
     dependencies: null
     configs:
     - method: johansen
@@ -1033,6 +1157,7 @@
     - unsigned
     - bivariate
     - time-dependent
+    - M11
     dependencies: null
     configs:
     - orth: false

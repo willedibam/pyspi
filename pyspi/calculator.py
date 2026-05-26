@@ -20,6 +20,46 @@ logger = get_logger("pyspi.calculator")
 # LaggedCorrelation config expansion: max_tau -> tau=1..max_tau
 # ---------------------------------------------------------------------------
 
+def _as_label_list(labels):
+    if labels is None:
+        return []
+    if isinstance(labels, str):
+        return [labels]
+    return list(labels)
+
+
+def _is_module_label(label):
+    return (
+        isinstance(label, str)
+        and len(label) == 3
+        and label[0] == "M"
+        and (label[1:].isdigit() or label[1:] == "XX")
+    )
+
+
+def _merge_spi_labels(spi, family_labels=None, config_labels=None):
+    labels = list(getattr(spi, "labels", []))
+    family_labels = _as_label_list(family_labels)
+    config_labels = _as_label_list(config_labels)
+
+    if any(_is_module_label(label) for label in config_labels):
+        labels = [label for label in labels if not _is_module_label(label)]
+        family_labels = [
+            label for label in family_labels if not _is_module_label(label)
+        ]
+
+    merged = []
+    for label in labels + family_labels + config_labels:
+        if label not in merged:
+            merged.append(label)
+    spi.labels = merged
+
+
+def _split_config_params(params):
+    params = dict(params or {})
+    config_labels = params.pop("labels", None)
+    return params, config_labels
+
 def _resolve_configfile(configfile, subset):
     """Return the path to the active config yaml from (configfile, subset)."""
     if configfile is not None:
@@ -60,6 +100,7 @@ def load_spis_from_yaml(configfile, optional_dependencies=None):
         logger.info("Importing module %s", module_name)
         module = importlib.import_module(module_name, __package__)
         for fcn, entry in (module_spis or {}).items():
+            family_labels = entry.get("labels")
             required = entry.get("dependencies")
             if required and not all(deps.get(d, False) for d in required):
                 configs = entry.get("configs") or [None]
@@ -72,11 +113,14 @@ def load_spis_from_yaml(configfile, optional_dependencies=None):
                 configs = _expand_lagged_correlation_configs(configs)
             if configs is None:
                 spi = getattr(module, fcn)()
+                _merge_spi_labels(spi, family_labels)
                 spis[spi.identifier] = spi
                 logger.info('[%d] %s.%s(x,y) -> "%s"', len(spis), module_name, fcn, spi.identifier)
                 continue
             for params in configs:
+                params, config_labels = _split_config_params(params)
                 spi = getattr(module, fcn)(**params)
+                _merge_spi_labels(spi, family_labels, config_labels)
                 spis[spi.identifier] = spi
                 logger.info('[%d] %s.%s(x,y,%s) -> "%s"', len(spis), module_name, fcn, params, spi.identifier)
     return spis, excluded

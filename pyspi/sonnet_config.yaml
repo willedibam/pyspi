@@ -8,6 +8,7 @@
       - unsigned
       - bivariate
       - contemporaneous
+      - M14
     dependencies:
     configs:
       - estimator: EmpiricalCovariance
@@ -20,6 +21,7 @@
       - unsigned
       - bivariate 
       - time-dependent
+      - M10
     dependencies:
     configs:
       - global_constraint: itakura
@@ -31,10 +33,13 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M14
     dependencies:
     configs:
       - mode: dtw
         statistic: mean
+        labels:
+          - M09
 
 .statistics.causal:
 
@@ -46,6 +51,7 @@
       - unsigned
       - bivariate
       - contemporaneous
+      - M02
     dependencies:
     configs:
 
@@ -59,6 +65,7 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M03
     configs:
       - estimator: gaussian
 
@@ -70,6 +77,7 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M04
     configs:
       - estimator: kraskov
         prop_k: 4
@@ -86,6 +94,7 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M05
     dependencies: 
     configs:
       - phitype: 'star'
@@ -100,6 +109,7 @@
       - unsigned
       - bivariate
       - frequency-dependent
+      - M12
     dependencies:
     configs:
       - fs: 1
@@ -112,6 +122,7 @@
       - bivariate
       - frequency-dependent
       - time-frequency dependent
+      - M01
     dependencies:
     configs:
       - fmin: 0
@@ -124,6 +135,7 @@
       - unsigned
       - bivariate
       - frequency-dependent
+      - M07
     dependencies:
     configs:
       - fs: 1
@@ -137,6 +149,7 @@
       - unsigned
       - bivariate
       - frequency-dependent
+      - M06
     dependencies:
     configs:
       - method: nonparametric
@@ -154,6 +167,7 @@
       - bivariate
       - frequency-dependent
       - time-frequency dependent
+      - M08
     dependencies:
     configs:
       - fs: 1
@@ -167,6 +181,7 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M13
     dependencies:
     configs:
       - method: aeg
@@ -183,6 +198,7 @@
       - unsigned
       - bivariate
       - time-dependent
+      - M11
     dependencies:
     configs:
       - orth: False

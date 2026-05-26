@@ -1,4 +1,4 @@
-from pyspi.calculator import Calculator, Data, CalculatorFrame
+from pyspi.calculator import Calculator, Data, CalculatorFrame, load_spis_from_yaml
 from pyspi.data import load_dataset
 import numpy as np 
 import os
@@ -75,6 +75,52 @@ def test_calculator_labels():
     test_labels = ['label1', 'label2']
     calc = Calculator(labels = test_labels)
     assert calc.labels == ['label1', 'label2'], f"Calculator labels property did not return the expected list: {test_labels} "
+
+def test_yaml_spi_labels_inherit_and_override(tmp_path):
+    """YAML family labels apply to SPIs; config labels override module labels."""
+    configfile = tmp_path / "labels_config.yaml"
+    configfile.write_text(
+        """
+.statistics.basic:
+  CrossCorrelation:
+    labels:
+      - family-label
+      - M14
+    dependencies:
+    configs:
+      - statistic: "max"
+        labels:
+          - override-label
+          - M10
+      - statistic: "mean"
+  KendallTau:
+    labels:
+      - MXX
+    dependencies:
+    configs:
+      - squared: False
+        labels:
+          - M14
+""",
+        encoding="utf-8",
+    )
+
+    spis, _ = load_spis_from_yaml(str(configfile), optional_dependencies={})
+
+    inherited = spis["xcorr_mean_sig-True"].labels
+    assert "family-label" in inherited
+    assert "M14" in inherited
+    assert "M10" not in inherited
+
+    overridden = spis["xcorr_max_sig-True"].labels
+    assert "family-label" in overridden
+    assert "override-label" in overridden
+    assert "M10" in overridden
+    assert "M14" not in overridden
+
+    mxx_overridden = spis["kendalltau"].labels
+    assert "M14" in mxx_overridden
+    assert "MXX" not in mxx_overridden
 
 def test_pass_single_integer_as_dataset():
     """Test whether correct error is thrown when incorrect data type passed into calculator."""
