@@ -30,7 +30,7 @@
 #     qsub -v M,T,CONFIG,REPEATS bench/run_benchmark.pbs
 #
 #   # bundled preset (parallel speedup curve):
-#   qsub -v PRESET=parallel,CONFIG=benchmarked90_config.yaml bench/run_benchmark.pbs
+#   qsub -v PRESET=parallel,CONFIG=benchmarked90_amortized_config.yaml bench/run_benchmark.pbs
 #
 # Env (-v), with defaults:
 #   M, T      comma-separated grid axes. If BOTH set, they override PRESET.

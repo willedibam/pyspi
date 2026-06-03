@@ -7,7 +7,7 @@ sweeps with a single non-notebook script.
 
 ```bash
 # Parallel speedup curve at M=16, T=800 (n_jobs = 1,2,4,8,16)
-python -m bench.bench_compute --preset parallel --config benchmarked90_config.yaml
+python -m bench.bench_compute --preset parallel --config benchmarked90_amortized_config.yaml
 
 # Per-SPI walltime sweep over an M x T grid (n_jobs=1) — feeds amortized configs
 python -m bench.bench_compute --preset scaling --config config.yaml
@@ -18,7 +18,7 @@ python -m bench.bench_compute --m 8,16,32 --t 200,800 --n-jobs 1,4,8 --config fa
 
 Run from the repo root so `bench.bench_compute` is importable. `--config`
 accepts a bundled subset name (`all`/`fast`/`sonnet`/`fabfour`), a bundled
-config filename (e.g. `benchmarked90_config.yaml`), or a path.
+config filename (e.g. `benchmarked90_amortized_config.yaml`), or a path.
 
 ## Presets
 
@@ -91,7 +91,7 @@ qsub -J 1-4 -v M=32,64,T=1000,4000,CONFIG=config.yaml bench/run_benchmark.pbs
 qsub -v M=64,T=2000,CONFIG=config.yaml bench/run_benchmark.pbs
 
 # a bundled preset:
-qsub -v PRESET=parallel,CONFIG=benchmarked90_config.yaml bench/run_benchmark.pbs
+qsub -v PRESET=parallel,CONFIG=benchmarked90_amortized_config.yaml bench/run_benchmark.pbs
 ```
 
 Set `M` and `T` (comma-separated) to benchmark your real data sizes — the
