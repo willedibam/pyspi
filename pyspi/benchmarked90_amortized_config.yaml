@@ -3,8 +3,17 @@
 # Source config : /Users/wedi0306/Code/pyspi-fork/pyspi/config.yaml
 # Bench JSON    : physics_config_M16_T800_n1.json (pyspi badfb4ebdb6b, M=16 T=800 n_jobs=1)
 # Cost model    : amortized
-# Keep 90% : kept 295 / 328 SPIs (target 295), dropped 33.
+# Keep 90% : kept 297 / 328 SPIs (target 295; +2 manual: te_kraskov DCE k=1,2),
+#            dropped 31.
 # Cutoff        : fastest kept <= 5.520s ; slowest dropped >= 6.790s.
+#
+# Manual edit: the two te_kraskov_NN-4_DCE_k-{1,2}_kt-1_l-1_lt-1 variants are
+# uncommented (added back to the kept set) for methodological coverage. Dynamic
+# Correlation Exclusion (DCE) corrects the kraskov nearest-neighbour estimator
+# for temporal autocorrelation; without it, TE on autocorrelated signals is
+# biased upward. The amortized-cost cut sees only their cost (7.3s, 7.7s) and
+# dropped them at p90; the methodological correctness argument adds them back.
+# Re-running bench/cut_config will overwrite this edit — re-apply by hand.
 #
 .statistics.basic:
   Covariance:
@@ -727,16 +736,16 @@
     #   k_search_max: 10
     #   tau_search_max: 4
     #   dyn_corr_excl: AUTO
-    # - estimator: kraskov
-    #   prop_k: 4
-    #   k_history: 2
-    #   l_history: 1
-    #   dyn_corr_excl: AUTO
-    # - estimator: kraskov
-    #   prop_k: 4
-    #   k_history: 1
-    #   l_history: 1
-    #   dyn_corr_excl: AUTO
+    - estimator: kraskov
+      prop_k: 4
+      k_history: 2
+      l_history: 1
+      dyn_corr_excl: AUTO
+    - estimator: kraskov
+      prop_k: 4
+      k_history: 1
+      l_history: 1
+      dyn_corr_excl: AUTO
 
   IntegratedInformation:
     labels:
@@ -1458,7 +1467,7 @@
       bandwidth: 0.5
 
 
-# --- DROPPED (slowest 33, amortized cost) ---
+# --- DROPPED (slowest 31, amortized cost; te_kraskov DCE k=1,2 manually kept) ---
 #     505.800s  hhg
 #     411.135s  gpfit_RBF
 #     342.692s  mgcx_maxlag-10
@@ -1488,7 +1497,5 @@
 #       7.926s  softdtw_constraint-sakoe-chiba
 #       7.920s  softdtw
 #       7.746s  softdtw_constraint-itakura
-#       7.670s  te_kraskov_NN-4_DCE_k-2_kt-1_l-1_lt-1
-#       7.305s  te_kraskov_NN-4_DCE_k-1_kt-1_l-1_lt-1
 #       6.837s  hsic_biased
 #       6.790s  hsic
