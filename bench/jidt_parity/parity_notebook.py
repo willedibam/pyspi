@@ -124,6 +124,47 @@ nb.cells.append(nbf.v4.new_markdown_cell(
     "At T=1600, the typical AR(1) MI/TE we're estimating is ~0.03-0.10 nats with KSG estimator standard error of order `1/sqrt(k * N) ~ 0.012`. The implementation-vs-implementation absolute gap we measure (~2e-3 nats) is one order of magnitude below the inherent estimator noise -- the two implementations agree to within ~10% of one estimator standard deviation. T=200 already resolves the patterns; longer T not needed for this question.\n"
 ))
 
+# ---------------------------------------------------------------------------
+# Extended paths (Theiler, auto-embed, higher embedding) -- parity_bench_extended.py
+# ---------------------------------------------------------------------------
+ext_path = os.path.join(HERE, "parity_summary_extended.csv")
+if os.path.exists(ext_path):
+    nb.cells.append(nbf.v4.new_markdown_cell(
+        "# Extended paths: Theiler window, auto-embed, higher embedding\n"
+        "\n"
+        "`parity_bench.py` covered defaults (fixed k=1, no Theiler). The shipped configs also use "
+        "`dyn_corr_excl`, `auto_embed_method=MAX_CORR_AIS`, and higher `k_history`. "
+        "`parity_bench_extended.py` benchmarks those against JIDT.\n"
+    ))
+    nb.cells.append(nbf.v4.new_code_cell(
+        "ext = pd.read_csv('parity_summary_extended.csv')\n"
+        "ext.sort_values(['estimator','measure','T'])\n"
+    ))
+    nb.cells.append(nbf.v4.new_markdown_cell(
+        "## Findings (extended) -- two bugs diagnosed and FIXED\n"
+        "\n"
+        "An earlier run of this suite flagged two ported paths that diverged from JIDT. Research (Kraskov et al. 2004; Ragwitz & Kantz 2002; Wibral et al. 2014; JIDT source) confirmed JIDT was correct in both cases, and both were fixed. The numbers below are post-fix.\n"
+        "\n"
+        "### Verified clean (always were)\n"
+        "- `gaussian TE_k2` (k_history=2): machine precision (4e-16). The delay-embedding layout in `_te_build_embeddings` is exact for higher order.\n"
+        "- `kraskov TE_k2`, `kraskov TE_DCE5`, `kernel TE_DCE5`: converge to JIDT at the estimator noise floor (~1.5-3e-3 nats at T=1600). The Theiler-windowed TE paths were already correct.\n"
+        "\n"
+        "### Fixed -- `kraskov MI_DCE5` (Theiler MI counting)\n"
+        "Before: NumPy gave ~half of JIDT and moved the *wrong direction* (window pushed JIDT's MI up, the port's down). Root cause: the windowed branch of `_ksg_mi_pair` counted marginal neighbours **inclusively** (<= eps) while the w=0 branch and JIDT count **strictly** (< eps); the boundary k-th neighbour inflated n_x/n_y and flipped the sign. KSG1 keeps the full N in psi(N) (only the *neighbour set* is windowed) -- confirmed verbatim in JIDT and IDTxl. Fix: strict marginal counting (`eps*(1-1e-10)`), full N. After: abs_err 1.8e-2 -> **2.3e-3** at T=1600, correct direction, at the KSG noise floor.\n"
+        "\n"
+        "### Fixed -- auto-embed (bias-corrected AIS)\n"
+        "Before: `_gaussian_ais` was the raw in-sample log-det multiinformation with no bias correction, so it increased monotonically in k and saturated at `k_search_max` (median k=10). Fix: subtract the chi-squared-null mean `k/(2N)` (df = dim(Y_f)*k = k), matching JIDT's `ActiveInfoStorageCalculatorGaussian`. This yields an interior maximum. After: `gaussian TE_autoembed` selects the same (k,tau) as JIDT in **100%** of seeds/T (median k=7) and converges to ~1.9e-3 at T=1600.\n"
+        "\n"
+        "### Also fixed -- MI/TLMI `dyn_corr_excl: AUTO` routing\n"
+        "MI/TLMI previously coerced any string (incl. `AUTO`) to w=0, silently dropping the Theiler window -- a regression from the JIDT-era `_set_theiler_window`. `_resolve_theiler` was lifted to `JIDTBase` and the four MI/TLMI kraskov sites (bivariate + multivariate) now compute the per-pair autocorrelation window. With the counting fix above, AUTO now applies a correct window.\n"
+        "\n"
+        "### Remaining approximation -- `kraskov TE_autoembed` (~26% off JIDT)\n"
+        "Now non-saturating, but the port still selects the embedding with **Gaussian** AIS even for the kraskov estimator (picks k=7), whereas JIDT MAX_CORR_AIS uses the destination's **own** (KSG) estimator (picks k=2). JIDT's *gaussian* auto-embed also picks k=7, so the gaussian criterion is faithful; the gap is purely gaussian-AIS-vs-KSG-AIS for selection. No shipped config enables kraskov auto-embedding, so this is left as a documented approximation (estimator-consistent KSG-AIS embedding is a possible future upgrade).\n"
+        "\n"
+        "### JIDT limitation -- `symbolic TE_k10`\n"
+        "JIDT throws `ArrayIndexOutOfBoundsException` at k_history=10 (10! symbols overflow its joint-histogram index), so `symbolic k_history=10` could not have run under the original JIDT pyspi. The NumPy port (np.unique over *observed* symbols) does not crash, but at k=10 with T<=1600 the symbol space is massively undersampled, so the values (~1e-3) are finite-sample artifacts. Use smaller k or much larger T.\n"
+    ))
+
 out_nb = os.path.join(HERE, "parity_notebook.ipynb")
 with open(out_nb, "w") as f:
     nbf.write(nb, f)

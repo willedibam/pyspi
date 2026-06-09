@@ -546,11 +546,19 @@ def _ksg_mi_pair(x, y, k, w, tree_x, tree_y):
             e = d_valid[k - 1] if len(d_valid) >= k else np.inf
             eps[i] = e
 
-            ix = tree_x.query_ball_point([[x[i]]], e, p=np.inf)[0]
-            iy = tree_y.query_ball_point([[y[i]]], e, p=np.inf)[0]
+            # Count marginal neighbours STRICTLY within eps (< eps), matching
+            # KSG1 and the w==0 branch above. Inclusive (<= eps) counting wrongly
+            # admits the k-th neighbour at the boundary, inflating n_x/n_y and
+            # flipping the sign of the Theiler-window effect on MI.
+            e_strict = e * (1.0 - 1e-10)
+            ix = tree_x.query_ball_point([[x[i]]], e_strict, p=np.inf)[0]
+            iy = tree_y.query_ball_point([[y[i]]], e_strict, p=np.inf)[0]
             n_x[i] = sum(1 for j in ix if abs(j - i) > w and j != i)
             n_y[i] = sum(1 for j in iy if abs(j - i) > w and j != i)
 
+    # psi(N) uses the full, unreduced N (KSG1 convention; only the neighbour
+    # set is window-restricted, not the normalisation). See JIDT
+    # MutualInfoCalculatorMultiVariateKraskov.
     mi = digamma(k) - np.mean(digamma(n_x + 1) + digamma(n_y + 1)) + digamma(N)
     return float(mi)
 
@@ -601,9 +609,16 @@ def _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau):
 
 
 def _gaussian_ais(targ, k, tau):
-    """Gaussian AIS: MI(Y_future; Y_past_embedding(k, tau)).
+    """Bias-corrected Gaussian AIS criterion: MI(Y_future; Y_past_embedding(k, tau)).
 
     Used for AIS-criterion auto-embedding: select (k, tau) = argmax AIS.
+
+    The raw in-sample log-det multiinformation is biased upward by the mean of
+    its chi-squared null, E[MI_null] = df / (2N) with df = dim(Y_f)*k = k (the
+    future is 1-D). Without this correction the criterion increases monotonically
+    in k and saturates at k_max. Subtracting k/(2N) gives an interior maximum and
+    matches JIDT's ActiveInfoStorageCalculatorGaussian.computeAdditionalBiasToRemove.
+    Ref: Ragwitz & Kantz (2002); Wibral et al. (2014); Lizier JIDT.
     """
     T = len(targ)
     start = (k - 1) * tau
@@ -613,6 +628,7 @@ def _gaussian_ais(targ, k, tau):
     Y_f = targ[start + 1: end + 1].reshape(-1, 1)
     Y_p = np.column_stack([targ[start - i * tau: end - i * tau] for i in range(k)])
     YfYp = np.concatenate([Y_f, Y_p], axis=1)
+    N = Y_f.shape[0]
 
     def _slogdet(arr):
         cov = np.cov(arr, rowvar=False, ddof=1)
@@ -621,7 +637,8 @@ def _gaussian_ais(targ, k, tau):
         sign, ld = np.linalg.slogdet(cov)
         return ld if sign > 0 else -np.inf
 
-    return 0.5 * (_slogdet(Y_f) + _slogdet(Y_p) - _slogdet(YfYp))
+    ais_raw = 0.5 * (_slogdet(Y_f) + _slogdet(Y_p) - _slogdet(YfYp))
+    return ais_raw - k / (2.0 * N)
 
 
 def _auto_embed_gaussian_te(src, targ, k_max, tau_max):
@@ -918,29 +935,30 @@ class JIDTBase(Unsigned):
             H_Y = self._entropy_calc.computeAverageLocalOfObservations()
             return H_XY - H_Y
 
-    def _set_theiler_window(self, data, i, j):
-        if self._dyn_corr_excl == "AUTO":
-            if not hasattr(data, "theiler"):
+    def _resolve_theiler(self, data, i, j):
+        """Theiler/dynamic-correlation-exclusion window for pair (i, j).
+
+        None -> 0 (no window); an integer -> that window; "AUTO" -> the
+        autocorrelation time 2*<acf(x_i), acf(x_j)>, cached per dataset.
+        Shared by MI/TLMI/TE; only the kNN (kraskov) paths consume it.
+        """
+        raw_w = getattr(self, '_dyn_corr_excl', None)
+        if raw_w is None:
+            return 0
+        if raw_w == "AUTO":
+            if not hasattr(data, 'theiler'):
                 z = data.to_numpy()
-                theiler_window = -np.ones((data.n_processes, data.n_processes))
-
-                for _i in range(data.n_processes):
-                    targ = z[_i]
-                    for _j in range(_i + 1, data.n_processes):
-                        src = z[_j]
-                        theiler_window[_i, _j] = 2 * np.dot(
-                            utils.acf(src), utils.acf(targ)
+                M = data.n_processes
+                theiler = -np.ones((M, M))
+                for _i in range(M):
+                    for _j in range(_i + 1, M):
+                        theiler[_i, _j] = 2 * np.dot(
+                            utils.acf(z[_i]), utils.acf(z[_j])
                         )
-                        theiler_window[_j, _i] = theiler_window[_i, _j]
-                data.theiler = theiler_window
-
-            self._calc.setProperty(
-                self._DYN_CORR_EXCL_PROP_NAME, str(int(data.theiler[i, j]))
-            )
-        elif self._dyn_corr_excl is not None:
-            self._calc.setProperty(
-                self._DYN_CORR_EXCL_PROP_NAME, str(int(self._dyn_corr_excl))
-            )
+                        theiler[_j, _i] = theiler[_i, _j]
+                data.theiler = theiler
+            return int(data.theiler[i, j])
+        return int(raw_w)
 
 
 class JointEntropy(JIDTBase, Undirected):
@@ -1020,7 +1038,6 @@ class MutualInfo(JIDTBase, Undirected):
 
     def __setstate__(self, state):
         super().__setstate__(state)
-        self.__dict__.update(state)
         self._calc = self._getcalc("MutualInfo")
 
     @parse_bivariate
@@ -1038,8 +1055,7 @@ class MutualInfo(JIDTBase, Undirected):
                 tree_x = cKDTree(z[i].reshape(-1, 1))
                 tree_y = cKDTree(z[j].reshape(-1, 1))
                 k = int(self._prop_k)
-                raw_w = getattr(self, '_dyn_corr_excl', None)
-                w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
+                w = self._resolve_theiler(data, i, j)
                 return _ksg_mi_pair(z[i], z[j], k, w, tree_x, tree_y)
 
         # kernel estimator: use numpy KernelMICalculator
@@ -1066,12 +1082,11 @@ class MutualInfo(JIDTBase, Undirected):
             Z = data.to_numpy(squeeze=True)
             M, N = Z.shape
             k = int(self._prop_k)
-            raw_w = getattr(self, '_dyn_corr_excl', None)
-            w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
             marginal_trees = [cKDTree(Z[i].reshape(-1, 1)) for i in range(M)]
             result = np.full((M, M), np.nan)
             for i in range(M):
                 for j in range(i + 1, M):
+                    w = self._resolve_theiler(data, i, j)
                     mi = _ksg_mi_pair(Z[i], Z[j], k, w,
                                       marginal_trees[i], marginal_trees[j])
                     result[i, j] = result[j, i] = mi
@@ -1090,7 +1105,6 @@ class TimeLaggedMutualInfo(JIDTBase, Directed):
 
     def __setstate__(self, state):
         super().__setstate__(state)
-        self.__dict__.update(state)
         self._calc = self._getcalc("MutualInfo")
 
     @parse_bivariate
@@ -1107,8 +1121,7 @@ class TimeLaggedMutualInfo(JIDTBase, Directed):
                 tree_x = cKDTree(src.reshape(-1, 1))
                 tree_y = cKDTree(tgt.reshape(-1, 1))
                 k = int(self._prop_k)
-                raw_w = getattr(self, '_dyn_corr_excl', None)
-                w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
+                w = self._resolve_theiler(data, i, j)
                 return _ksg_mi_pair(src, tgt, k, w, tree_x, tree_y)
 
         # kernel estimator: use numpy KernelMICalculator
@@ -1141,8 +1154,6 @@ class TimeLaggedMutualInfo(JIDTBase, Directed):
             Z = data.to_numpy(squeeze=True)
             M, T = Z.shape
             k = int(self._prop_k)
-            raw_w = getattr(self, '_dyn_corr_excl', None)
-            w = 0 if raw_w is None or isinstance(raw_w, str) else int(raw_w)
             Z_src = Z[:, :-1]
             Z_tgt = Z[:, 1:]
             src_trees = [cKDTree(Z_src[i].reshape(-1, 1)) for i in range(M)]
@@ -1152,6 +1163,7 @@ class TimeLaggedMutualInfo(JIDTBase, Directed):
                 for j in range(M):
                     if i == j:
                         continue
+                    w = self._resolve_theiler(data, i, j)
                     mi = _ksg_mi_pair(Z_src[i], Z_tgt[j], k, w,
                                       src_trees[i], tgt_trees[j])
                     result[i, j] = mi
@@ -1217,27 +1229,7 @@ class TransferEntropy(JIDTBase, Directed):
 
     def __setstate__(self, state):
         super().__setstate__(state)
-        self.__dict__.update(state)
         self._calc = self._getcalc("TransferEntropy")
-
-    def _resolve_theiler(self, data, i, j):
-        raw_w = getattr(self, '_dyn_corr_excl', None)
-        if raw_w is None:
-            return 0
-        if raw_w == "AUTO":
-            if not hasattr(data, 'theiler'):
-                z = data.to_numpy()
-                M = data.n_processes
-                theiler = -np.ones((M, M))
-                for _i in range(M):
-                    for _j in range(_i + 1, M):
-                        theiler[_i, _j] = 2 * np.dot(
-                            utils.acf(z[_i]), utils.acf(z[_j])
-                        )
-                        theiler[_j, _i] = theiler[_i, _j]
-                data.theiler = theiler
-            return int(data.theiler[i, j])
-        return int(raw_w)
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None, verbose=False):
@@ -1268,7 +1260,13 @@ class TransferEntropy(JIDTBase, Directed):
             if est == 'gaussian':
                 return _auto_embed_gaussian_te(src, targ, k_max, tau_max)
             else:
-                # Use gaussian AIS for embedding selection, then kraskov TE
+                # Select the embedding by maximising the bias-corrected *Gaussian*
+                # AIS, then run kraskov TE on it. This is a linear proxy: the
+                # estimator-consistent choice (Wibral et al. 2014; JIDT
+                # MAX_CORR_AIS) would maximise the KSG AIS for a nonlinear target,
+                # which can select a shorter embedding (e.g. k=2 vs 7 on AR(1)).
+                # Kept as a deliberate approximation — no shipped config enables
+                # kraskov auto-embedding — but flagged for a future KSG-AIS upgrade.
                 best_k, best_tau, best_ais = 1, 1, -np.inf
                 for k in range(1, k_max + 1):
                     for tau in range(1, tau_max + 1):
@@ -1338,9 +1336,7 @@ class CausalEntropy(JIDTBase, Directed):
     def _compute_causal_entropy(self, src, targ):
         src = np.squeeze(src)
         targ = np.squeeze(targ)
-        est = self._estimator
 
-        # All estimators now have numpy calculators
         causal_entropy = 0
         for i in range(1, self._n + 1):
             Yp = _numpy_delay_embedding(targ, i - 1)[:-1]
