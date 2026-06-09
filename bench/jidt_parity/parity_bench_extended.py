@@ -29,6 +29,7 @@ from pyspi.statistics.infotheory import (
     _kraskov_te_bivariate,
     _gaussian_te_bivariate,
     _gaussian_ais,
+    _ksg_ais,
     _auto_embed_gaussian_te,
 )
 
@@ -128,6 +129,16 @@ def _numpy_pick_embedding(targ, k_max, tau_max):
     return best_k, best_tau
 
 
+def _numpy_pick_embedding_ksg(targ, k_max, tau_max, k_nn, w=0):
+    best_k, best_tau, best_ais = 1, 1, -np.inf
+    for k in range(1, k_max + 1):
+        for tau in range(1, tau_max + 1):
+            ais = _ksg_ais(targ, k, tau, k_nn, w)
+            if ais > best_ais:
+                best_ais, best_k, best_tau = ais, k, tau
+    return best_k, best_tau
+
+
 def TE_gaussian_auto(x, y):
     k_max, tau_max = 10, 2
     nk, ntau = _numpy_pick_embedding(y, k_max, tau_max)
@@ -147,7 +158,8 @@ def TE_gaussian_auto(x, y):
 
 def TE_kraskov_auto(x, y):
     k_max, tau_max = 10, 2
-    nk, ntau = _numpy_pick_embedding(y, k_max, tau_max)   # gaussian AIS (port's choice)
+    # estimator-consistent KSG AIS (matches the SPI and JIDT MAX_CORR_AIS)
+    nk, ntau = _numpy_pick_embedding_ksg(y, k_max, tau_max, K_NN, w=0)
     n_val = _kraskov_te_bivariate(x, y, nk, ntau, 1, 1, k_nn=K_NN, w=0)
     calc = cont.kraskov.TransferEntropyCalculatorKraskov()
     calc.setProperty("k", str(K_NN))
@@ -220,7 +232,7 @@ def run():
         # fraction where (k,tau) match
         picks["match"] = (picks.numpy_k == picks.jidt_k) & (picks.numpy_tau == picks.jidt_tau)
         frac = picks.groupby("cell").match.mean()
-        print("\n=== Auto-embed (k,tau) selection: NumPy(Gaussian-AIS) vs JIDT(MAX_CORR_AIS) ===")
+        print("\n=== Auto-embed (k,tau) selection: NumPy(estimator-matched AIS) vs JIDT(MAX_CORR_AIS) ===")
         for _, r in pick_summary.iterrows():
             print(f"  {r.cell}: numpy median (k={int(r.numpy_k)},tau={int(r.numpy_tau)})  "
                   f"jidt median (k={int(r.jidt_k)},tau={int(r.jidt_tau)})  "

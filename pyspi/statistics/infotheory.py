@@ -563,6 +563,59 @@ def _ksg_mi_pair(x, y, k, w, tree_x, tree_y):
     return float(mi)
 
 
+def _ksg_mi_general(A, B, k_nn, w=0):
+    """KSG Estimator 1 MI(A; B) for multivariate A (N,dA), B (N,dB), L-inf norm.
+
+    Generalisation of _ksg_mi_pair to arbitrary marginal dimensions (the pair
+    version is kept for the 1-D/1-D MI grids where pre-built trees are reused).
+    Marginal neighbours are counted strictly (< eps); psi(N) uses full N. An
+    optional Theiler window w excludes |j-i| <= w from the neighbour set.
+    """
+    A = np.asarray(A, dtype=np.float64)
+    B = np.asarray(B, dtype=np.float64)
+    if A.ndim == 1:
+        A = A[:, None]
+    if B.ndim == 1:
+        B = B[:, None]
+    N = A.shape[0]
+    AB = np.column_stack([A, B])
+    tree_ab = cKDTree(AB)
+    tree_a = cKDTree(A)
+    tree_b = cKDTree(B)
+
+    if w == 0:
+        dists, _ = tree_ab.query(AB, k=k_nn + 1, p=np.inf)
+        eps = dists[:, k_nn] * (1.0 - 1e-10)
+        n_a = np.array([len(lst) - 1 for lst in
+                        tree_a.query_ball_point(A, eps, p=np.inf)], dtype=np.float64)
+        n_b = np.array([len(lst) - 1 for lst in
+                        tree_b.query_ball_point(B, eps, p=np.inf)], dtype=np.float64)
+    else:
+        n_query = min(k_nn + 2 * w + 2, N)
+        dists_all, idx_all = tree_ab.query(AB, k=n_query, p=np.inf)
+        n_a = np.empty(N)
+        n_b = np.empty(N)
+        for i in range(N):
+            valid = np.abs(idx_all[i] - i) > w
+            valid[0] = False
+            d_valid = dists_all[i][valid]
+            if len(d_valid) < k_nn:
+                all_d = np.max(np.abs(AB - AB[i]), axis=1)
+                all_d[max(0, i - w): i + w + 1] = np.inf
+                all_d[i] = np.inf
+                d_valid = np.sort(all_d)
+                d_valid = d_valid[np.isfinite(d_valid)]
+            e = d_valid[k_nn - 1] if len(d_valid) >= k_nn else np.inf
+            e_strict = e * (1.0 - 1e-10)
+            ia = tree_a.query_ball_point(A[i], e_strict, p=np.inf)
+            ib = tree_b.query_ball_point(B[i], e_strict, p=np.inf)
+            n_a[i] = sum(1 for j in ia if abs(j - i) > w and j != i)
+            n_b[i] = sum(1 for j in ib if abs(j - i) > w and j != i)
+
+    return float(digamma(k_nn) + digamma(N)
+                 - np.mean(digamma(n_a + 1) + digamma(n_b + 1)))
+
+
 # ---------------------------------------------------------------------------
 # Transfer Entropy helpers
 # ---------------------------------------------------------------------------
@@ -639,6 +692,27 @@ def _gaussian_ais(targ, k, tau):
 
     ais_raw = 0.5 * (_slogdet(Y_f) + _slogdet(Y_p) - _slogdet(YfYp))
     return ais_raw - k / (2.0 * N)
+
+
+def _ksg_ais(targ, k, tau, k_nn, w=0):
+    """KSG (Kraskov) AIS = MI(Y_future; Y_past_embedding(k, tau)), for embedding
+    selection of the *kraskov* TE estimator.
+
+    Estimator-consistent counterpart of _gaussian_ais: the KSG estimator is
+    approximately bias-free, so max-KSG-AIS over k has a genuine interior peak
+    without an explicit bias term (cf. JIDT MAX_CORR_AIS, which returns 0 extra
+    bias for KSG; Wibral et al. 2014). Selecting the embedding with the same
+    estimator used for the final TE avoids the linear/nonlinear mismatch of
+    using Gaussian AIS to embed a nonlinear estimator.
+    """
+    T = len(targ)
+    start = (k - 1) * tau
+    end = T - 1
+    if start >= end:
+        return -np.inf
+    Y_f = targ[start + 1: end + 1].reshape(-1, 1)
+    Y_p = np.column_stack([targ[start - i * tau: end - i * tau] for i in range(k)])
+    return _ksg_mi_general(Y_f, Y_p, k_nn, w)
 
 
 def _auto_embed_gaussian_te(src, targ, k_max, tau_max):
@@ -1260,21 +1334,19 @@ class TransferEntropy(JIDTBase, Directed):
             if est == 'gaussian':
                 return _auto_embed_gaussian_te(src, targ, k_max, tau_max)
             else:
-                # Select the embedding by maximising the bias-corrected *Gaussian*
-                # AIS, then run kraskov TE on it. This is a linear proxy: the
-                # estimator-consistent choice (Wibral et al. 2014; JIDT
-                # MAX_CORR_AIS) would maximise the KSG AIS for a nonlinear target,
-                # which can select a shorter embedding (e.g. k=2 vs 7 on AR(1)).
-                # Kept as a deliberate approximation — no shipped config enables
-                # kraskov auto-embedding — but flagged for a future KSG-AIS upgrade.
+                # Estimator-consistent: select the embedding by maximising the
+                # KSG AIS (same estimator as the final TE), then run kraskov TE.
+                # Using Gaussian AIS here would pick the embedding by *linear*
+                # predictability for a nonlinear estimator (Wibral et al. 2014;
+                # JIDT MAX_CORR_AIS uses the destination's own estimator).
+                k_nn = int(self._prop_k)
+                w = self._resolve_theiler(data, i, j)
                 best_k, best_tau, best_ais = 1, 1, -np.inf
                 for k in range(1, k_max + 1):
                     for tau in range(1, tau_max + 1):
-                        ais = _gaussian_ais(targ, k, tau)
+                        ais = _ksg_ais(targ, k, tau, k_nn, w)
                         if ais > best_ais:
                             best_ais, best_k, best_tau = ais, k, tau
-                k_nn = int(self._prop_k)
-                w = self._resolve_theiler(data, i, j)
                 return _kraskov_te_bivariate(src, targ, best_k, best_tau, 1, 1, k_nn, w)
 
         # kernel/symbolic path: numpy calculators
