@@ -172,18 +172,26 @@ class KernelEntropyCalculator:
         X = self._obs
         N, d = X.shape
         w = self._kernel_width
+        # NORMALISE: JIDT scales the bandwidth by std (kernelWidthsInUse = w*std)
+        # rather than standardising data. Equivalent operation here is to
+        # standardise X *and* add log2(prod(std)) to the entropy — otherwise
+        # we'd be reporting H(X/std) = H(X) - log2(std), missing the scale
+        # term and giving a constant downward bias of d*log2(std) nats/bits.
+        log_std_total = 0.0
         if self._normalise:
             stds = np.std(X, axis=0, ddof=1)
             stds = np.where(stds > 0, stds, 1.0)
             X = X / stds[None, :]
+            log_std_total = float(np.sum(np.log2(stds)))
 
         tree = cKDTree(X)
         # JIDT half-width = kernel_width (not kernel_width/2)
         counts = tree.query_ball_point(X, r=w, p=np.inf,
                                         return_length=True)
         counts = np.asarray(counts, dtype=np.float64)
-        # JIDT formula: H = mean(log2(N) - log2(count)) + d*log2(2*w)  [bits]
-        return float(np.mean(np.log2(N) - np.log2(counts)) + d * np.log2(2.0 * w))
+        # H = mean(log2(N) - log2(count)) + d*log2(2*w) + sum_d log2(std_d)  [bits]
+        return float(np.mean(np.log2(N) - np.log2(counts))
+                     + d * np.log2(2.0 * w) + log_std_total)
 
 
 class KernelMICalculator:
