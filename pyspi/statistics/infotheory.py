@@ -1,3 +1,11 @@
+"""Information-theoretic statistics, implemented in pure NumPy.
+
+The estimators here were ported from JIDT (Lizier, 2014, "JIDT: An
+information-theoretic toolkit for studying the dynamics of complex systems",
+Frontiers in Robotics and AI), which served as the reference implementation the
+port was validated against; the version used for validation was JIDT 1.6.1.
+"""
+
 import math
 import numpy as np
 from pyspi import utils
@@ -818,24 +826,18 @@ def _kraskov_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau, k_nn, w
 
 
 # ---------------------------------------------------------------------------
-# JIDT Base class — with estimator dispatch
+# Information-theory base class — with estimator dispatch
 # ---------------------------------------------------------------------------
 
-class JIDTBase(Unsigned):
+class InfoTheoryBase(Unsigned):
 
-    _NNK_PROP_NAME = "k"
     _AUTO_EMBED_METHOD_PROP_NAME = "AUTO_EMBED_METHOD"
-    _DYN_CORR_EXCL_PROP_NAME = "DYN_CORR_EXCL"
-    _KERNEL_WIDTH_PROP_NAME = "KERNEL_WIDTH"
     _K_HISTORY_PROP_NAME = "k_HISTORY"
     _K_TAU_PROP_NAME = "k_TAU"
     _L_HISTORY_PROP_NAME = "l_HISTORY"
     _L_TAU_PROP_NAME = "l_TAU"
     _K_SEARCH_MAX_PROP_NAME = "AUTO_EMBED_K_SEARCH_MAX"
     _TAU_SEARCH_MAX_PROP_NAME = "AUTO_EMBED_TAU_SEARCH_MAX"
-    _BIAS_CORRECTION = "BIAS_CORRECTION"
-    _NORMALISE = "NORMALISE"
-    _SEED = "NOISE_SEED"
 
     def __init__(
         self, estimator="gaussian", kernel_width=0.5, prop_k=4, dyn_corr_excl=None
@@ -886,17 +888,6 @@ class JIDTBase(Unsigned):
         for attr in newone.__dict__:
             setattr(newone, attr, copy.deepcopy(getattr(self, attr), memo))
         return newone
-
-    def _setup(self, calc):
-        if self._estimator == "kernel":
-            calc.setProperty(self._KERNEL_WIDTH_PROP_NAME, str(self._kernel_width))
-        elif self._estimator == "kraskov":
-            calc.setProperty(self._NNK_PROP_NAME, str(self._prop_k))
-
-        calc.setProperty(self._BIAS_CORRECTION, "false")
-        calc.setProperty(self._SEED, "42")
-
-        return calc
 
     def _getkey(self):
         if self._estimator == "kernel":
@@ -1035,7 +1026,7 @@ class JIDTBase(Unsigned):
         return int(raw_w)
 
 
-class JointEntropy(JIDTBase, Undirected):
+class JointEntropy(InfoTheoryBase, Undirected):
 
     name = "Joint entropy"
     identifier = "je"
@@ -1066,7 +1057,7 @@ class JointEntropy(JIDTBase, Undirected):
         return super().multivariate(data)
 
 
-class ConditionalEntropy(JIDTBase, Directed):
+class ConditionalEntropy(InfoTheoryBase, Directed):
 
     name = "Conditional entropy"
     identifier = "ce"
@@ -1101,7 +1092,7 @@ class ConditionalEntropy(JIDTBase, Directed):
         return super().multivariate(data)
 
 
-class MutualInfo(JIDTBase, Undirected):
+class MutualInfo(InfoTheoryBase, Undirected):
     name = "Mutual information"
     identifier = "mi"
     labels = ["unsigned", "infotheory", "unordered", "undirected"]
@@ -1168,7 +1159,7 @@ class MutualInfo(JIDTBase, Undirected):
         return super().multivariate(data)
 
 
-class TimeLaggedMutualInfo(JIDTBase, Directed):
+class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
     name = "Time-lagged mutual information"
     identifier = "tlmi"
     labels = ["unsigned", "infotheory", "temporal", "directed"]
@@ -1245,7 +1236,7 @@ class TimeLaggedMutualInfo(JIDTBase, Directed):
         return super().multivariate(data)
 
 
-class TransferEntropy(JIDTBase, Directed):
+class TransferEntropy(InfoTheoryBase, Directed):
 
     name = "Transfer entropy"
     identifier = "te"
@@ -1359,7 +1350,7 @@ class TransferEntropy(JIDTBase, Directed):
         return np.nan
 
 
-class CrossmapEntropy(JIDTBase, Directed):
+class CrossmapEntropy(InfoTheoryBase, Directed):
 
     name = "Cross-map entropy"
     identifier = "xme"
@@ -1395,7 +1386,7 @@ class CrossmapEntropy(JIDTBase, Directed):
         return H_xy - H_y
 
 
-class CausalEntropy(JIDTBase, Directed):
+class CausalEntropy(InfoTheoryBase, Directed):
 
     name = "Causally conditioned entropy"
     identifier = "cce"
@@ -1472,7 +1463,7 @@ class DirectedInfo(CausalEntropy, Directed):
         return entropy_rates - causal_entropy
 
 
-class StochasticInteraction(JIDTBase, Undirected):
+class StochasticInteraction(InfoTheoryBase, Undirected):
 
     name = "Stochastic interaction"
     identifier = "si"

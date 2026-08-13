@@ -2,12 +2,12 @@
 
     python -m pyspi compute \
         --data ts.npy \
-        --config pyspi/benchmarked90_amortized_config.yaml \
+        --config benchmarked_p90 \
         --output table.parquet \
         --n-jobs 4 \
         --checkpoint-dir results/
 
-If ``--config`` is omitted, the bundled ``config.yaml`` is used. If
+If ``--config`` is omitted, the bundled ``full`` config is used. If
 ``--output`` is omitted, the result table is written next to the data file as
 ``<data-stem>.spi.parquet``.
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .calculator import Calculator
+from .calculator import Calculator, bundled_configs
 
 
 def _load_array(path: Path) -> np.ndarray:
@@ -40,8 +40,9 @@ def main(argv=None) -> int:
     cp = sub.add_parser("compute", help="Compute SPIs on a saved dataset.")
     cp.add_argument("--data", type=Path, required=True,
                     help="Path to time series array (.npy/.csv/.txt). Shape (processes, observations).")
-    cp.add_argument("--config", type=Path, default=None,
-                    help="YAML config selecting which SPIs to compute (default: bundled config.yaml).")
+    cp.add_argument("--config", default="full",
+                    help="Bundled config name or path to your own YAML (default: full). "
+                         "Bundled: " + ", ".join(bundled_configs()) + ".")
     cp.add_argument("--output", type=Path, default=None,
                     help="Where to write the result parquet (default: <data>.spi.parquet).")
     cp.add_argument("--n-jobs", type=int, default=1,
@@ -52,8 +53,8 @@ def main(argv=None) -> int:
                     help="Ignore existing checkpoints; recompute every SPI.")
     cp.add_argument("--mp-context", choices=["spawn", "fork", "forkserver"], default=None,
                     help="Multiprocessing start method (default: spawn).")
-    cp.add_argument("--normalise", action="store_true",
-                    help="z-score each time series before computing.")
+    cp.add_argument("--no-zscore", action="store_true",
+                    help="Skip z-scoring each time series before computing.")
     cp.add_argument("--quiet", action="store_true",
                     help="Suppress INFO logging; show warnings/errors only.")
 
@@ -65,8 +66,8 @@ def main(argv=None) -> int:
 
     calc = Calculator(
         dataset=arr,
-        configfile=str(args.config) if args.config else None,
-        normalise=args.normalise,
+        config=args.config,
+        zscore=not args.no_zscore,
         verbose=not args.quiet,
     )
     calc.compute(

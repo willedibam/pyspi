@@ -4,45 +4,6 @@ import warnings
 import pandas as pd
 import os
 import yaml
-from colorama import Fore, init
-init(autoreset=True)
-
-def _contains_nan(a, nan_policy='propagate'):
-    policies = ['propagate', 'raise', 'omit']
-    if nan_policy not in policies:
-        raise ValueError("nan_policy must be one of {%s}" %
-                         ', '.join("'%s'" % s for s in policies))
-    try:
-        # Calling np.sum to avoid creating a huge array into memory
-        # e.g. np.isnan(a).any()
-        with np.errstate(invalid='ignore'):
-            contains_nan = np.isnan(np.sum(a))
-    except TypeError:
-        # If the check cannot be properly performed we fallback to omitting
-        # nan values and raising a warning. This can happen when attempting to
-        # sum things that are not numbers (e.g. as in the function `mode`).
-        contains_nan = False
-        nan_policy = 'omit'
-        warnings.warn("The input array could not be properly checked for nan "
-                      "values. nan values will be ignored.", RuntimeWarning)
-
-    if contains_nan and nan_policy == 'raise':
-        raise ValueError("The input contains nan values")
-
-    return (contains_nan, nan_policy)
-
-
-def strshort(instr,mlength):
-    """Shorten a string using ellipsis
-    """
-    if isinstance(instr,list):
-        outstr = []
-        for i in range(len(instr)):
-            cstr = instr[i]
-            outstr.append((cstr[:mlength-6] + '...' + cstr[-3:]) if len(cstr) > mlength else cstr)
-    else:
-        outstr = (instr[:mlength-6] + '...' + instr[-3:]) if len(instr) > mlength else instr
-    return outstr
 
 def acf(x, mode='positive'):
     """Return the autocorrelation function using FFT-based computation.
@@ -81,50 +42,9 @@ def swap_chars(s, i_1, i_2):
         i_1, i_2 = i_2, i_1
     return ''.join([s[0:i_1], s[i_2], s[i_1+1:i_2], s[i_1], s[i_2+1:]])
 
-def normalise(a, axis=0, nan_policy='propogate'):
-
-    contains_nan, nan_policy = _contains_nan(a, nan_policy)
-
-    if contains_nan and nan_policy == 'omit':
-        return (a - np.nanmin(a,axis=axis)) / (np.nanmax(a,axis=axis) - np.nanmin(a,axis=axis))
-    else:
-        return (a - np.min(a,axis=axis)) / (np.max(a,axis=axis) - np.min(a,axis=axis))
-
-def standardise(a, dimension=0, df=1):
-    """Z-standardise a numpy array along a given dimension.
-
-    Standardise array along the axis defined in dimension using the denominator
-    (N - df) for the calculation of the standard deviation.
-
-    Args:
-        a : numpy array
-            data to be standardised
-        dimension : int [optional]
-            dimension along which array should be standardised
-        df : int [optional]
-            degrees of freedom for the denominator of the standard derivation
-
-    Returns:
-        numpy array
-            standardised data
-    """
-    # Avoid division by standard deviation if the process is constant.
-    a_sd = a.std(axis=dimension, ddof=df)
-
-    if np.isclose(a_sd, 0):
-        return a - a.mean(axis=dimension)
-    else:
-        return (a - a.mean(axis=dimension)) / a_sd
-
 def convert_mdf_to_ddf(df):
     ddf = pd.pivot_table(data=df.stack(dropna=False).reset_index(),index='Dataset',columns=['SPI-1', 'SPI-2'],dropna=False).T.droplevel(0)
     return ddf
-
-def check_optional_deps():
-    """Return an empty dict. No optional runtime deps are gated any more
-    (JIDT/Java, Octave/oct2py all removed in favour of pure-numpy/Python
-    replacements). Kept as an extension point."""
-    return {}
 
 def filter_spis(keywords, output_name = None, configfile= None):
     """
@@ -150,15 +70,13 @@ def filter_spis(keywords, output_name = None, configfile= None):
     if not isinstance(keywords, list):
         raise ValueError("Keywords must be provided as a list of strings.")
 
-    # if no configfile and no keywords are provided, use the default 'config.yaml' in pyspi location
+    # Default to the full bundled config; otherwise accept a bundled name or path.
+    from pyspi.calculator import resolve_config
     if configfile is None:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        default_config = os.path.join(script_dir, 'config.yaml')
-        if not os.path.isfile(default_config):
-            raise FileNotFoundError(f"Default 'config.yaml' file not found in {script_dir}.")
-        configfile = default_config
-        source_file_info = f"Default 'config.yaml' file from {script_dir} was used as the source file."
+        configfile = resolve_config("full")
+        source_file_info = f"Default bundled config '{configfile}' was used as the source file."
     else:
+        configfile = resolve_config(configfile)
         source_file_info = f"User-specified config file '{configfile}' was used as the source file."
 
     # load in user-specified yaml
@@ -178,7 +96,7 @@ def filter_spis(keywords, output_name = None, configfile= None):
     for module in yf:
         module_spis = {}
         for spi in yf[module]:
-            spi_labels = yf[module][spi].get('labels')
+            spi_labels = yf[module][spi].get('labels') or []
             if all(keyword in spi_labels for keyword in keywords):
                 module_spis[spi] = yf[module][spi]
                 if yf[module][spi].get('configs'):
@@ -211,7 +129,7 @@ def filter_spis(keywords, output_name = None, configfile= None):
 - Total SPIs Matched: {spis_found} SPI(s) were found with the specific keywords: {keywords}.
 - New File Created: A YAML file named `{output_name}.yaml` has been saved in the current directory: `{output_file}'
 - Next Steps: To utilise the filtered set of SPIs, please initialise a new Calculator instance with the following command:
-`Calculator(configfile='{output_file}')`
+`Calculator(config='{output_file}')`
 """)
 
 def inspect_calc_results(calc):

@@ -32,7 +32,7 @@ def dataset():
 
 @pytest.fixture(scope="module")
 def serial_table(dataset):
-    calc = Calculator(dataset=dataset, configfile=str(CONFIG), normalise=False)
+    calc = Calculator(dataset=dataset, configfile=str(CONFIG), zscore=False)
     calc.compute(n_jobs=1, progress=False)
     return calc.table.copy()
 
@@ -42,7 +42,7 @@ def serial_table(dataset):
 def test_parallel_matches_serial(dataset, serial_table, n_jobs, mp_context):
     """Parallel n_jobs>1 must produce numerically identical tables to serial,
     for every start method and across all cache namespaces (incl. CCM)."""
-    calc = Calculator(dataset=dataset, configfile=str(CONFIG), normalise=False)
+    calc = Calculator(dataset=dataset, configfile=str(CONFIG), zscore=False)
     calc.compute(n_jobs=n_jobs, mp_context=mp_context, progress=False)
     parallel_table = calc.table
 
@@ -63,7 +63,7 @@ def test_checkpoint_resume_matches_full_run(dataset, serial_table, tmp_path):
     cp_dir = tmp_path / "ckpt"
 
     # First pass: run serial with checkpoint_dir to populate .npy files.
-    calc1 = Calculator(dataset=dataset, configfile=str(CONFIG), normalise=False)
+    calc1 = Calculator(dataset=dataset, configfile=str(CONFIG), zscore=False)
     calc1.compute(n_jobs=1, checkpoint_dir=cp_dir, progress=False)
     saved = sorted(cp_dir.glob("*.npy"))
     assert len(saved) == len(calc1.spis), "Checkpoint dir missing files after first run."
@@ -75,7 +75,7 @@ def test_checkpoint_resume_matches_full_run(dataset, serial_table, tmp_path):
     assert len(list(cp_dir.glob("*.npy"))) < len(calc1.spis)
 
     # Second pass: parallel resume. Should re-compute only the removed SPIs.
-    calc2 = Calculator(dataset=dataset, configfile=str(CONFIG), normalise=False)
+    calc2 = Calculator(dataset=dataset, configfile=str(CONFIG), zscore=False)
     calc2.compute(n_jobs=2, checkpoint_dir=cp_dir, resume=True,
                   mp_context="spawn", progress=False)
 
@@ -97,7 +97,7 @@ def test_failure_isolation(dataset):
     paths (_compute_serial and _parallel._run_task); test_parallel_matches_serial
     covers that the parallel path completes the full table.
     """
-    calc = Calculator(dataset=dataset, configfile=str(CONFIG), normalise=False)
+    calc = Calculator(dataset=dataset, configfile=str(CONFIG), zscore=False)
 
     # Poison one Covariance instance's multivariate() at the instance level so
     # other Covariance/Precision siblings (which share the class method via the

@@ -1,4 +1,5 @@
-from pyspi.calculator import Calculator, Data, CalculatorFrame, load_spis_from_yaml
+from pyspi.calculator import (Calculator, Data, CalculatorFrame,
+                              load_spis_from_yaml, resolve_config, bundled_configs)
 from pyspi.data import load_dataset
 import numpy as np 
 import os
@@ -16,47 +17,21 @@ def test_whether_calculator_computes():
     calc = Calculator(dataset=data)
     calc.compute()
 
-def test_whether_calc_instantiates_without_octave():
-    # set octave to false to emulate a system without octave (i.e., fails the check)
-    Calculator._optional_dependencies['octave'] = False
-    calc = Calculator()
-    is_initialised = isinstance(calc, Calculator)
-    Calculator._optional_dependencies = {}
-    assert is_initialised, "Calculator failed to instantiate without Octave."
-
-def test_whether_calc_instantiates_without_java():
-    # set java to false and all other deps to true
-    Calculator._optional_dependencies['java'] = False
-    Calculator._optional_dependencies['octave'] = True
-    calc = Calculator()
-    is_initialised = isinstance(calc, Calculator)
-    Calculator._optional_dependencies = {}
-    assert is_initialised, "Calculator failed to instantiate without Java."
-
-def test_whether_calc_instantiates_wo_optional_deps():
-    # set all optional deps to false
-    Calculator._optional_dependencies['java'] = False
-    Calculator._optional_dependencies['octave'] = False
-    calc = Calculator()
-    is_initialised = isinstance(calc, Calculator)
-    Calculator._optional_dependencies = {}
-    assert is_initialised, "Calculator failed to instantiate without optional dependencies."
-
-@pytest.mark.parametrize("subset", [
+@pytest.mark.parametrize("config", [
     'fabfour',
     'fast',
     'sonnet'
 ])
-def test_whether_calculator_instantiates_with_subsets(subset):
-    """Test whether the calculator instantiates with each of the available subsets"""
-    calc = Calculator(subset=subset)
+def test_whether_calculator_instantiates_with_bundled_configs(config):
+    """Test whether the calculator instantiates with each of the bundled configs"""
+    calc = Calculator(config=config)
     assert isinstance(calc, Calculator), "Calculator failed to instantiate"
 
-def test_whether_invalid_subset_throws_error():
-    """Test whether the calculator fails to instantiate with an invalid subset"""
+def test_whether_invalid_config_throws_error():
+    """Test whether the calculator fails to instantiate with an unknown config name."""
     with pytest.raises(ValueError) as excinfo:
-        calc = Calculator(subset='nviutw')
-    assert "Subset 'nviutw' does not exist" in str(excinfo.value), "Subset not found error not displaying."
+        Calculator(config='nviutw')
+    assert "Unknown config 'nviutw'" in str(excinfo.value), "Unknown-config error not displaying."
 
 def test_whether_calculator_compute_fails_with_no_dataset():
     """Test whether the calculator fails to compute SPIs when no dataset is provided."""
@@ -105,7 +80,7 @@ def test_yaml_spi_labels_inherit_and_override(tmp_path):
         encoding="utf-8",
     )
 
-    spis, _ = load_spis_from_yaml(str(configfile), optional_dependencies={})
+    spis = load_spis_from_yaml(str(configfile))
 
     inherited = spis["xcorr_mean_sig-True"].labels
     assert "family-label" in inherited
@@ -170,26 +145,46 @@ def test_data_object_process_and_observations(shape, n_procs_expected, n_obs_exp
     assert calc.dataset.n_observations == n_obs_expected, f"Number of observations returned by Calculator ({calc.dataset.n_observations}) does not match exepected: {n_obs_expected}"
     assert calc.dataset.n_processes == n_procs_expected, f"Number of processes returned by Calculator ({calc.dataset.n_processes}) does not match exepected: {n_procs_expected}"
 
-@pytest.mark.parametrize("yaml_filename", [
-    'fabfour_config', 
-    'fast_config',
-    'sonnet_config'])
-def test_whether_config_files_exist(yaml_filename):
-    """Check whether the config, fabfour, fast, sonnet_config files exist"""
-    expected_file = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'pyspi', f'{yaml_filename}.yaml'))
-    assert os.path.isfile(expected_file), f"{yaml_filename}.yaml file was not found."
+EXPECTED_CONFIGS = [
+    "full", "fast", "sonnet", "fabfour",
+    "benchmarked_p80", "benchmarked_p90", "benchmarked_p95", "benchmarked_p99",
+]
 
-@pytest.mark.parametrize("subset, procs, obs", [
-    ("all", 2, 100),
-    ("all", 5, 100),
+@pytest.mark.parametrize("name", EXPECTED_CONFIGS)
+def test_bundled_config_resolves(name):
+    """Every advertised config name resolves to a file that exists."""
+    assert os.path.isfile(resolve_config(name)), f"config '{name}' did not resolve to a file."
+
+def test_bundled_configs_matches_shipped_set():
+    """bundled_configs() is exactly the advertised set - catches a stray or missing yaml."""
+    assert sorted(bundled_configs()) == sorted(EXPECTED_CONFIGS)
+
+def test_unknown_config_name_raises():
+    with pytest.raises(ValueError, match="Unknown config"):
+        Calculator(config="does_not_exist")
+
+def test_config_accepts_a_path(tmp_path):
+    """A path is resolved as a path, not looked up as a bundled name."""
+    cfg = tmp_path / "mine.yaml"
+    cfg.write_text(".statistics.basic:\n  Covariance:\n    configs:\n      - squared: False\n")
+    calc = Calculator(config=str(cfg))
+    assert calc.n_spis == 1
+
+def test_missing_config_path_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        Calculator(config=str(tmp_path / "nope.yaml"))
+
+@pytest.mark.parametrize("config, procs, obs", [
+    ("full", 2, 100),
+    ("full", 5, 100),
     ("fabfour", 8, 100),
     ("fast", 10, 100),
     ("sonnet", 3, 100)
 ])
-def test_whether_table_shape_correct_before_compute(subset, procs, obs):
+def test_whether_table_shape_correct_before_compute(config, procs, obs):
     """Test whether the pre-configured table is the correct shape prior to computing SPIs."""
     dat = np.random.randn(procs, obs)
-    calc = Calculator(dataset=dat, subset=subset)
+    calc = Calculator(dataset=dat, config=config)
     num_spis = calc.n_spis
     expected_table_shape = (procs, num_spis*procs)
     assert calc.table.shape == expected_table_shape, f"Calculator table ({subset}) shape: ({calc.table.shape}) does not match expected shape: {expected_table_shape}"
@@ -244,7 +239,7 @@ def test_whether_data_object_has_name_with_dataset():
 def test_whether_data_normalise_works():
     """Check whether the data is being normalised by default when loading into data object"""
     dataset = 4 * np.random.randn(10, 500)
-    d = Data(data=dataset, normalise=True)
+    d = Data(data=dataset, zscore=True)
     returned_dataset = d.to_numpy(squeeze=True)
     assert returned_dataset.mean() == pytest.approx(0, 1e-8), f"Returned dataset mean is not close to zero: {returned_dataset.mean()}"
     assert returned_dataset.std() == pytest.approx(1, 0.01), f"Returned dataset std is not close to one: {returned_dataset.std()}"
@@ -283,7 +278,7 @@ def test_add_multivariate_process_to_existing_data_object():
 #     """Try to remove valid processes from existing dataset by specifying one or more indices. 
 #     Check if correct indices are being used."""
 #     dataset = np.random.randn(5, 100)
-#     d = Data(data=dataset, normalise=False)
+#     d = Data(data=dataset, zscore=False)
 #     rows_to_remove = index
 #     expected_dataset = np.delete(dataset, rows_to_remove, axis=0)
 #     d.remove_process(index)
@@ -311,7 +306,7 @@ def test_calculator_frame_normal_operation():
 
     # create calculator frame
     calc_frame = CalculatorFrame(name="MyCalcFrame", datasets=[Data(data=data, dim_order='ps') for data in datasets], 
-                                 names=dataset_names, labels=dataset_labels, subset='fabfour')
+                                 names=dataset_names, labels=dataset_labels, config='fabfour')
     assert(isinstance(calc_frame, CalculatorFrame)), "CalculatorFrame failed to instantiate."
 
     # check the properties of the frame
@@ -336,7 +331,7 @@ def test_correlation_frame_normal_operation():
     dataset_names = ['d1', 'd2', 'd3']
     dataset_labels = ['label1', 'label2', 'label3']
     calc_frame = CalculatorFrame(name="MyCalcFrame", datasets=[Data(data=data, dim_order='ps') for data in datasets], 
-                                 names=dataset_names, labels=dataset_labels, subset='fabfour')
+                                 names=dataset_names, labels=dataset_labels, config='fabfour')
     
     calc_frame.compute()
     cf = calc_frame.get_correlation_df()
@@ -347,8 +342,8 @@ def test_normalisation_flag():
     """Test whether the normalisation flag when instantiating
     the calculator works as expected."""
     data = np.random.randn(3, 100)
-    calc = Calculator(dataset=data, normalise=False, detrend=False)
+    calc = Calculator(dataset=data, zscore=False, detrend=False)
     calc_loaded_dataset = calc.dataset.to_numpy().squeeze()
     
-    assert (calc_loaded_dataset == data).all(), f"Calculator normalise=False not producing the correct output." 
+    assert (calc_loaded_dataset == data).all(), f"Calculator zscore=False not producing the correct output." 
     

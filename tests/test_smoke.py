@@ -78,7 +78,7 @@ def test_gaussian_mi_analytical():
     from pyspi.statistics.infotheory import MutualInfo
 
     X = generate_coupled_ar1(M=3, T=1000)
-    data = Data(X, normalise=True)
+    data = Data(X, zscore=True)
 
     mi = MutualInfo(estimator='gaussian')
     result = mi.multivariate(data)
@@ -111,7 +111,7 @@ def test_kraskov_mi():
     from pyspi.statistics.infotheory import MutualInfo
 
     X = generate_coupled_ar1(M=3, T=500)
-    data = Data(X, normalise=True)
+    data = Data(X, zscore=True)
 
     mi = MutualInfo(estimator='kraskov', prop_k=4)
     result = mi.multivariate(data)
@@ -130,7 +130,7 @@ def test_kernel_mi():
     from pyspi.statistics.infotheory import MutualInfo
 
     X = generate_coupled_ar1(M=3, T=500)
-    data = Data(X, normalise=True)
+    data = Data(X, zscore=True)
 
     mi = MutualInfo(estimator='kernel', kernel_width=0.25)
     result = mi.multivariate(data)
@@ -149,7 +149,7 @@ def test_transfer_entropy():
     from pyspi.statistics.infotheory import TransferEntropy
 
     X = generate_coupled_ar1(M=3, T=500, coupling=0.5)
-    data = Data(X, normalise=True)
+    data = Data(X, zscore=True)
 
     for est in ('gaussian', 'kraskov', 'kernel', 'symbolic'):
         if est == 'kernel':
@@ -179,7 +179,7 @@ def test_joint_conditional_entropy():
     from pyspi.statistics.infotheory import JointEntropy, ConditionalEntropy
 
     X = generate_coupled_ar1(M=3, T=300)
-    data = Data(X, normalise=True)
+    data = Data(X, zscore=True)
 
     for est in ('gaussian', 'kernel', 'kozachenko'):
         je = JointEntropy(estimator=est)
@@ -206,7 +206,7 @@ def test_basic_spis():
     from pyspi.statistics.distance import DynamicTimeWarping
 
     X = generate_coupled_ar1(M=3, T=200)
-    data = Data(X, normalise=True)
+    data = Data(X, zscore=True)
 
     for SPI, kwargs in [
         (Covariance, {}),
@@ -232,7 +232,7 @@ def test_spectral_spis():
     from pyspi.statistics.spectral import CoherenceMagnitude
 
     X = generate_coupled_ar1(M=3, T=200)
-    data = Data(X, normalise=True)
+    data = Data(X, zscore=True)
 
     spi = CoherenceMagnitude()
     result = spi.multivariate(data)

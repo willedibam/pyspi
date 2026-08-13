@@ -61,7 +61,7 @@ def _attach_data(shm_name, shape, dtype_str, procnames, name):
     shared = shm.SharedMemory(name=shm_name)
     arr = np.ndarray(shape, dtype=np.dtype(dtype_str), buffer=shared.buf)
     data = Data.__new__(Data)
-    data.normalise = False
+    data.zscore = False
     data.detrend = False
     data._data = arr
     data.data_type = arr.dtype.type
@@ -141,13 +141,8 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, pro
 
     # Direct call to the shared loader — no throwaway Calculator instantiation,
     # no stdout suppression needed.
-    from pyspi.calculator import load_spis_from_yaml, Calculator
-    if Calculator._optional_dependencies is None:
-        from pyspi.utils import check_optional_deps
-        Calculator._optional_dependencies = check_optional_deps()
-    spis, _ = load_spis_from_yaml(
-        configfile, optional_dependencies=Calculator._optional_dependencies,
-    )
+    from pyspi.calculator import load_spis_from_yaml
+    spis = load_spis_from_yaml(configfile)
 
     # Pin nested thread pools AFTER SPI modules import (cdt autosets NJOBS to
     # cpu_count() on import; we override it back to 1 here).

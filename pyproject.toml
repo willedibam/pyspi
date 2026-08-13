@@ -51,14 +51,9 @@ dependencies = [
     "tslearn>=0.6",
     "dtaidistance>=2.3",
     "pyEDM>=1.15",
-    "h5py>=3.8",
     "pyyaml>=6.0",
     "tqdm>=4.65",
-    "seaborn>=0.12",
     "colorama>=0.4",
-    "plotly>=6.8.0",
-    "matplotlib>=3.10.8",
-    "nbformat>=5.10.4",
 ]
 
 [project.optional-dependencies]
@@ -68,6 +63,27 @@ testing = [
 # Optional: only required for loading the sktime/aeon .ts dataset format.
 tsfile = [
     "aeon>=1.0",
+]
+# Optional: the compute-cost benchmark suite and its analysis notebook (bench/).
+# Not needed to use pyspi.
+bench = [
+    "psutil>=5.9",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "plotly>=5.20",
+    "nbformat>=5.10",
+    "ipykernel>=6.29",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=7",
+    "psutil>=5.9",
+    "matplotlib>=3.8",
+    "seaborn>=0.13",
+    "plotly>=5.20",
+    "nbformat>=5.10",
+    "ipykernel>=6.29",
 ]
 
 [project.urls]
@@ -87,13 +103,10 @@ markers = [
 include = ["pyspi*"]
 
 [tool.setuptools.package-data]
+# Globs, not an enumeration: hand-listing these is what previously let four
+# shipped configs and two datasets go missing from the wheel unnoticed.
 pyspi = [
-    "config.yaml",
-    "sonnet_config.yaml",
-    "fast_config.yaml",
-    "fabfour_config.yaml",
-    "data/cml.npy",
-    "data/forex.npy",
-    "data/standard_normal.npy",
-    "data/cml7.npy",
+    "configs/*.yaml",
+    "data/*.npy",
 ]
+"pyspi.lib.ids" = ["LICENSE.txt"]

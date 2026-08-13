@@ -9,7 +9,7 @@ from scipy import stats
 
 # From this package
 from .data import Data
-from .utils import convert_mdf_to_ddf, check_optional_deps, inspect_calc_results
+from .utils import convert_mdf_to_ddf, inspect_calc_results
 from . import _parallel
 from ._logging import get_logger, configure as _configure_logging
 
@@ -60,39 +60,55 @@ def _split_config_params(params):
     config_labels = params.pop("labels", None)
     return params, config_labels
 
-def _resolve_configfile(configfile, subset):
-    """Return the path to the active config yaml from (configfile, subset)."""
-    if configfile is not None:
-        return configfile
-    here = os.path.dirname(os.path.abspath(__file__))
-    if subset == "fast":
-        return os.path.join(here, "fast_config.yaml")
-    if subset == "sonnet":
-        return os.path.join(here, "sonnet_config.yaml")
-    if subset == "fabfour":
-        return os.path.join(here, "fabfour_config.yaml")
-    if subset == "all":
-        return os.path.join(here, "config.yaml")
-    raise ValueError(
-        f"Subset '{subset}' does not exist. Try 'all' (default), 'fast', 'sonnet', or 'fabfour'."
+CONFIG_DIR = Path(__file__).parent / "configs"
+
+
+def bundled_configs():
+    """Names of the bundled configs, i.e. the valid non-path values of ``config``."""
+    return sorted(p.stem for p in CONFIG_DIR.glob("*.yaml"))
+
+
+def resolve_config(config):
+    """Resolve ``config`` to a config yaml path.
+
+    Accepts either the name of a bundled config (``"full"``, ``"fast"``,
+    ``"benchmarked_p90"``, ...) or a path to a user-written yaml. A value is
+    treated as a path if it carries a directory component or a ``.yaml``/
+    ``.yml`` suffix; otherwise it is looked up in :data:`CONFIG_DIR`.
+    """
+    text = str(config)
+    looks_like_path = (
+        os.sep in text
+        or (os.altsep is not None and os.altsep in text)
+        or text.endswith((".yaml", ".yml"))
     )
+    if looks_like_path:
+        path = Path(text).expanduser()
+        if not path.is_file():
+            raise FileNotFoundError(f"Config file not found: {path}")
+        return str(path)
+
+    path = CONFIG_DIR / f"{text}.yaml"
+    if not path.is_file():
+        raise ValueError(
+            f"Unknown config '{text}'. Bundled configs are: "
+            f"{', '.join(bundled_configs())}. "
+            f"To use your own, pass a path to a .yaml file."
+        )
+    return str(path)
 
 
-def load_spis_from_yaml(configfile, optional_dependencies=None):
+def load_spis_from_yaml(configfile):
     """Instantiate all SPIs from a configfile.
 
-    Returns ``(spis, excluded_spis)`` where ``spis`` is a dict mapping
-    identifier to SPI instance, and ``excluded_spis`` is a list of
-    ``[label, deps]`` pairs for SPIs whose optional dependencies were missing.
+    Returns a dict mapping identifier to SPI instance.
 
     Shared between :class:`Calculator` and the parallel worker initializer
     (see :func:`pyspi._parallel._worker_init`) so workers don't need to
     instantiate a throwaway Calculator just to rebuild ``_spis``. Progress is
     emitted via the ``pyspi.calculator`` logger at INFO level.
     """
-    deps = optional_dependencies or {}
     spis = {}
-    excluded = []
     logger.info("Loading configuration file: %s", configfile)
     with open(configfile) as f:
         yf = yaml.load(f, Loader=yaml.FullLoader)
@@ -101,13 +117,6 @@ def load_spis_from_yaml(configfile, optional_dependencies=None):
         module = importlib.import_module(module_name, __package__)
         for fcn, entry in (module_spis or {}).items():
             family_labels = entry.get("labels")
-            required = entry.get("dependencies")
-            if required and not all(deps.get(d, False) for d in required):
-                configs = entry.get("configs") or [None]
-                logger.info("Optional dependencies %s not met; skipping %d SPI(s)", required, len(configs))
-                for params in configs:
-                    excluded.append([f"{fcn}(x,y,{params})", required])
-                continue
             configs = entry.get("configs")
             if fcn == "LaggedCorrelation" and configs is not None:
                 configs = _expand_lagged_correlation_configs(configs)
@@ -123,7 +132,7 @@ def load_spis_from_yaml(configfile, optional_dependencies=None):
                 _merge_spi_labels(spi, family_labels, config_labels)
                 spis[spi.identifier] = spi
                 logger.info('[%d] %s.%s(x,y,%s) -> "%s"', len(spis), module_name, fcn, params, spi.identifier)
-    return spis, excluded
+    return spis
 
 
 def _expand_lagged_correlation_configs(configs):
@@ -164,24 +173,34 @@ class Calculator:
             The name of the calculator. Mainly used for printing the results but can be useful if you have multiple instances, default=None.
         labels (array_like, optional):
             Any set of strings by which you want to label the calculator. This can be useful later for classification purposes, default=None.
-        subset (str, optional):
-            A pre-configured subset of SPIs to use. Options are "all", "fast", "sonnet", or "fabfour", default="all".
-        configfile (str, optional):
-            The location of the YAML configuration file for a user-defined subset. See :ref:`Using a reduced SPI set`, defaults to :code:`'</path/to/pyspi>/pyspi/config.yaml'`
+        config (str, optional):
+            Which SPIs to compute. Either the name of a bundled config or a path
+            to your own YAML file, default="full". Bundled configs are:
+
+            - ``"full"`` -- every SPI (~328).
+            - ``"fast"`` -- drops the slowest SPIs.
+            - ``"sonnet"`` -- 14 representative SPIs, one per module (M01-M14).
+            - ``"fabfour"`` -- 4 SPIs: covariance, Spearman, directed information,
+              power-envelope correlation.
+            - ``"benchmarked_p80"`` / ``"_p90"`` / ``"_p95"`` / ``"_p99"`` -- keep
+              the fastest N% of SPIs by measured amortized compute cost, so
+              ``benchmarked_p80`` is the cheapest and ``benchmarked_p99`` the most
+              complete. See ``bench/README.md`` for how these were derived.
         detrend (bool, optional):
             If True, detrend each time series in the MTS dataset individually along the time axis, default=False.
-        normalise (bool, optional):
-            If True, z-score normalise each time series in the MTS dataset individually along the time axis, default=True.
+        zscore (bool, optional):
+            If True, z-score each time series in the MTS dataset individually along
+            the time axis, default=True. Per-process (rather than whole-dataset)
+            standardisation is deliberate: it removes each process's arbitrary
+            gain/units without letting the choice of the other processes in the
+            dataset influence any pairwise statistic.
     """
-    _optional_dependencies = None
-
     def __init__(
-        self, dataset=None, name=None, labels=None, subset="all", configfile=None,
-        detrend=False, normalise=True, verbose=True,
+        self, dataset=None, name=None, labels=None, config="full",
+        detrend=False, zscore=True, verbose=True,
     ):
         self._spis = {}
-        self._excluded_spis = list()
-        self._normalise = normalise
+        self._zscore = zscore
         self._detrend = detrend
         self._timings = {}
         self._verbose = verbose
@@ -189,16 +208,11 @@ class Calculator:
         # verbose maps to a process-global pyspi logger level (INFO vs WARNING).
         _configure_logging(verbose)
 
-        configfile = _resolve_configfile(configfile, subset)
-
-        if not Calculator._optional_dependencies:
-            Calculator._optional_dependencies = check_optional_deps()
+        configfile = resolve_config(config)
 
         self._configfile = configfile  # stored so parallel workers can re-instantiate SPIs
-        self._subset = subset
-        self._spis, self._excluded_spis = load_spis_from_yaml(
-            configfile, optional_dependencies=Calculator._optional_dependencies,
-        )
+        self._config = config
+        self._spis = load_spis_from_yaml(configfile)
 
         duplicates = [
             n for n, count in Counter(self._spis.keys()).items() if count > 1
@@ -212,25 +226,6 @@ class Calculator:
         self._labels = labels
 
         logger.info("%d SPI(s) were successfully initialised.", len(self.spis))
-
-        if self._excluded_spis:
-            # Dependency exclusions are logged at WARNING — visible even when
-            # verbose=False, because they change which SPIs run.
-            missing_deps = [dep for dep, is_met in self._optional_dependencies.items() if not is_met]
-            lines = [
-                "Some optional dependencies were not detected; certain SPIs are excluded.",
-                f"Missing dependencies: {', '.join(missing_deps)}",
-                f"{len(self._excluded_spis)} SPI(s) excluded:",
-            ]
-            dependency_groups = {}
-            for spi in self._excluded_spis:
-                for dep in spi[1]:
-                    dependency_groups.setdefault(dep, []).append(spi[0])
-            for dep, spi_list in dependency_groups.items():
-                lines.append(f"  dependency '{dep}' affects {len(spi_list)} SPI(s): {', '.join(spi_list)}")
-            lines.append(f"Install [{', '.join(missing_deps)}] for the full set, "
-                         f"or continue with the reduced {self.n_spis} SPIs.")
-            logger.warning("\n".join(lines))
 
         if dataset is not None:
             self.load_dataset(dataset)
@@ -335,7 +330,7 @@ class Calculator:
         if not isinstance(dataset, Data):
             self._dataset = Data(
                 Data.convert_to_numpy(dataset),
-                normalise=self._normalise,
+                zscore=self._zscore,
                 detrend=self._detrend,
             )
         else:
@@ -673,7 +668,7 @@ class CalculatorFrame:
             self.add_calculator(calc)
 
     def init_from_yaml(
-        self, document, detrend=False, normalise=True, n_processes=None, n_observations=None, **kwargs
+        self, document, detrend=False, zscore=True, n_processes=None, n_observations=None, **kwargs
     ):
         datasets = []
         names = []
@@ -693,7 +688,7 @@ class CalculatorFrame:
                             dim_order=dim_order,
                             name=names[-1],
                             detrend=detrend,
-                            normalise=normalise,
+                            zscore=zscore,
                             n_processes=n_processes,
                             n_observations=n_observations,
                         )

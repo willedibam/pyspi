@@ -45,8 +45,12 @@ class Data:
             Order of dimensions, accepts two combinations of the characters 'p', and 's' for processes and observations, default='ps'.
         detrend (bool, optional):
             If True, detrend each time series in the MTS dataset individually along the time axis, default=False.
-        normalise (bool, optional):
-            If True, z-score normalise each time series in the MTS dataset individually along the time axis, default=True.
+        zscore (bool, optional):
+            If True, z-score each time series in the MTS dataset individually
+            along the time axis, default=True. Standardisation is per-process,
+            not whole-dataset: it removes each process's arbitrary gain/units
+            without letting the choice of the other processes in the dataset
+            influence any pairwise statistic.
         name (str, optional):
             Name of the dataset
         procnames (list, optional):
@@ -63,13 +67,13 @@ class Data:
         data=None,
         dim_order="ps",
         detrend=False,
-        normalise=True,
+        zscore=True,
         name=None,
         procnames=None,
         n_processes=None,
         n_observations=None,
     ):
-        self.normalise = normalise
+        self.zscore = zscore
         self.detrend = detrend
         # Explicit empty state so attribute access is consistent before set_data
         # has run (Data() with no args is a legitimate builder-pattern entry point
@@ -207,7 +211,7 @@ class Data:
         else:
             logger.info("[1/2] Skipping detrending of time series in the dataset.")
 
-        if self.normalise:
+        if self.zscore:
             logger.info("[2/2] Normalising (z-scoring) each time series in the dataset...")
             data = zscore(data, axis=1, nan_policy="omit", ddof=1)
         else:
@@ -294,14 +298,33 @@ class Data:
         self.n_replications = self._data.shape[2]
 
 
+# name -> (filename, dim_order, description). Every bundled .npy is stored
+# (observations, processes), hence dim_order 'sp' throughout.
+_DATASETS = {
+    "forex":           ("forex.npy",           "sp", "Foreign-exchange rates (250 obs, 7 processes)."),
+    "cml":             ("cml.npy",             "sp", "Coupled map lattice (500 obs, 10 processes)."),
+    "cml7":            ("cml7.npy",            "sp", "7-process coupled map lattice (100 obs)."),
+    "kuramoto":        ("kuramoto_7.npy",      "sp", "7-oscillator Kuramoto model (100 obs)."),
+    "var1":            ("var1_7.npy",          "sp", "7-process VAR(1) process (100 obs)."),
+    "standard_normal": ("standard_normal.npy", "sp", "i.i.d. standard normal null model (200 obs, 5 processes)."),
+}
+
+
+def available_datasets():
+    """Return ``{name: description}`` for every bundled dataset."""
+    return {name: desc for name, (_f, _d, desc) in _DATASETS.items()}
+
+
 def load_dataset(name):
+    """Load a bundled example dataset by name.
+
+    See :func:`available_datasets` for the full list.
+    """
+    try:
+        filename, dim_order, _desc = _DATASETS[name]
+    except KeyError:
+        raise NameError(
+            f"Unknown dataset: {name}. Available: {', '.join(sorted(_DATASETS))}."
+        ) from None
     basedir = os.path.join(os.path.dirname(__file__), "data")
-    if name == "forex":
-        filename = "forex.npy"
-        dim_order = "sp"
-    elif name == "cml":
-        filename = "cml.npy"
-        dim_order = "sp"
-    else:
-        raise NameError(f"Unknown dataset: {name}.")
     return Data(data=os.path.join(basedir, filename), dim_order=dim_order)
