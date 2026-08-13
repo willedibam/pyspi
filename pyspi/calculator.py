@@ -534,8 +534,11 @@ class Calculator:
         if rmmin:
             self._rmmin()
 
-        # Flatten (get Edge-by-SPI matrix)
-        edges = self.table.stack()
+        # Flatten (get Edge-by-SPI matrix). future_stack=True is the pandas 3
+        # behaviour; unlike the legacy default it keeps all-NaN rows, so the
+        # explicit dropna reproduces the old semantics (self-pairs are all-NaN
+        # because the SPI diagonals are NaN). Verified equivalent on pandas 2.3.
+        edges = self.table.stack(future_stack=True).dropna(how="all")
 
         # Correlate the edge matrix (using pearson and/or spearman correlation)
         cf = pd.DataFrame(
@@ -623,8 +626,8 @@ class CalculatorFrame:
         return cf
 
     def set_calculator(self, calculators):
-        if hasattr(self, "_dataset"):
-            Warning("Overwriting dataset without explicitly deleting.")
+        if hasattr(self, "_calculators"):
+            warnings.warn("Overwriting existing calculators without explicitly deleting.")
             del self._calculators
 
         if isinstance(calculators, Calculator):
@@ -642,7 +645,9 @@ class CalculatorFrame:
             self._calculators = pd.DataFrame()
 
         if isinstance(calc, CalculatorFrame):
-            self._calculators = pd.concat([self._calculators.values, calc])
+            self._calculators = pd.concat(
+                [self._calculators, calc._calculators], ignore_index=True
+            )
         elif isinstance(calc, Calculator):
             self._calculators = pd.concat(
                 [self._calculators, pd.Series(data=calc, name=calc.name)],
@@ -729,9 +734,23 @@ class CalculatorFrame:
         except AttributeError:
             self._calculators = other._calculators
 
-    @forall
-    def compute(calc):
-        calc.compute()
+    def compute(self, **kwargs):
+        """Compute every calculator in the frame, one dataset after another.
+
+        Keyword arguments are forwarded to :meth:`Calculator.compute`, so
+        ``frame.compute(n_jobs=4)`` parallelises *within* each dataset.
+
+        Note that for many datasets on many cores, running one dataset per
+        process (e.g. a scheduler array job) beats ``n_jobs>1`` here: SPIs
+        sharing a cache run serially inside a single worker, which floors the
+        achievable speedup at roughly 2-4x irrespective of ``n_jobs``. See
+        "Running at scale" in the README.
+        """
+        if not hasattr(self, "_calculators"):
+            raise AttributeError("No calculators in frame yet. Initialise before computing.")
+        for i in self._calculators.index:
+            for calc in self._calculators.loc[i]:
+                calc.compute(**kwargs)
 
     @property
     def groups(self):

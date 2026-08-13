@@ -1,6 +1,6 @@
 from pyspi.calculator import (Calculator, Data, CalculatorFrame,
                               load_spis_from_yaml, resolve_config, bundled_configs)
-from pyspi.data import load_dataset
+from pyspi.data import available_datasets, load_dataset
 import numpy as np 
 import os
 import pytest
@@ -272,23 +272,9 @@ def test_add_multivariate_process_to_existing_data_object():
         orig_data_object.add_process(proc=new_multivariate_proc)
     assert "Process must be a 1D numpy array" in str(excinfo.value), "Expected 1D array error NOT thrown."
 
-# @pytest.mark.parametrize("index", 
-#                          [[1], [1, 3], [1, 2, 3]])
-# def test_remove_valid_process_from_existing_dataset(index):
-#     """Try to remove valid processes from existing dataset by specifying one or more indices. 
-#     Check if correct indices are being used."""
-#     dataset = np.random.randn(5, 100)
-#     d = Data(data=dataset, zscore=False)
-#     rows_to_remove = index
-#     expected_dataset = np.delete(dataset, rows_to_remove, axis=0)
-#     d.remove_process(index)
-#     out = d.to_numpy(squeeze=True)
-#     assert out.shape[0] == (5 - len(index)), f"Dataset shape after removing {len(index)} proc(s) not equal to {(5 - len(index))}"
-#     assert np.array_equal(expected_dataset, out), f"Expected dataset after removing proc(s): {index} not equal to dataset returned."
-
-@pytest.mark.parametrize("dataset_name", ["forex", "cml"])
+@pytest.mark.parametrize("dataset_name", sorted(available_datasets()))
 def test_load_valid_dataset(dataset_name):
-    """Test whether the load_dataset function will load all available datasets."""
+    """Every dataset advertised by available_datasets() must actually load."""
     dataset = load_dataset(dataset_name)
     assert isinstance(dataset, Data), f"Could not load dataset: {dataset_name}"
 

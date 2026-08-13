@@ -863,6 +863,23 @@ class InfoTheoryBase(Unsigned):
             self.labels = self.labels + ["symbolic"]
             self._dyn_corr_excl = None
             return
+        elif estimator == "kozachenko":
+            # Kozachenko-Leonenko estimates *entropy* from k-NN distances. The
+            # measures below are computed directly rather than as a sum of
+            # marginal entropies, and there is no KL path for them: composing
+            # them from separate KL entropies is biased, since the per-space
+            # biases do not cancel (avoiding exactly that is why KSG couples
+            # its radii across spaces -- use estimator="kraskov" instead).
+            # Fail here rather than returning NaN at compute time.
+            if isinstance(self, (MutualInfo, TimeLaggedMutualInfo, TransferEntropy)):
+                raise NotImplementedError(
+                    f"The kozachenko estimator is not available for "
+                    f"{type(self).__name__}; use estimator='kraskov' for a "
+                    f"k-nearest-neighbour estimate of this measure."
+                )
+            # k-NN based, so nonlinear -- not "linear" as gaussian is.
+            self.labels = self.labels + ["nonlinear"]
+            self._dyn_corr_excl = None
         else:
             self.labels = self.labels + ["linear"]
             self._dyn_corr_excl = None

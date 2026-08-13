@@ -23,7 +23,7 @@ jobs:
           pip install .
 
       - name: Run data generation
-        run: python tests/generate_benchmark_tables.py
+        run: python tests/tools/generate_benchmark_tables.py --dataset all
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -31,5 +31,5 @@ jobs:
           name: benchmark-tables
           # Glob rather than a fixed filename so this keeps working regardless of
           # which baselines the script writes and what it names them.
-          path: tests/*benchmark_tables*.pkl
+          path: tests/data/baselines/*.npz
           if-no-files-found: error

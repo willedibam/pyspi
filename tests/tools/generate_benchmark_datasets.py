@@ -50,8 +50,10 @@ def generate_kuramoto(M=7, T=100, dt=0.1, K=2.0, seed=0):
 
 
 if __name__ == "__main__":
+    # <repo>/tests/tools/this_file.py -> <repo>/pyspi/data
     here = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(os.path.dirname(here), "pyspi", "data")
+    repo_root = os.path.dirname(os.path.dirname(here))
+    data_dir = os.path.join(repo_root, "pyspi", "data")
 
     var_data = generate_var1(M=7, T=100, seed=0)
     kur_data = generate_kuramoto(M=7, T=100, dt=0.1, K=2.0, seed=0)

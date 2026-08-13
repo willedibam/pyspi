@@ -42,7 +42,7 @@ def parse_bivariate(function):
             if data.n_processes == 2:
                 i,j = 0,1
             else:
-                Warning('i and j not set.')
+                warnings.warn('i and j not set.')
 
         return function(self,data,i=i,j=j)
 

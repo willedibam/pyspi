@@ -1,7 +1,9 @@
 import pytest
 
+
 @pytest.fixture(scope="session")
 def spi_warning_logger(request):
+    """Collect (dataset, SPI) drift records for the session-end summary table."""
     warnings_log = list()
 
     def add_warning(spi, module_name, max_abs, max_rel, num_exceed, num_interactions):
@@ -10,37 +12,38 @@ def spi_warning_logger(request):
     request.session.spi_warnings = warnings_log
     return add_warning
 
+
 def pytest_sessionfinish(session, exitstatus):
-    spi_warnings = getattr(session, 'spi_warnings', [])
+    # Only print when the drift suite actually ran and produced records. The
+    # fixture is session-scoped and lazily instantiated, so `spi_warnings` is
+    # absent for --collect-only and for the default (non-slow) suite, and empty
+    # when the drift suite ran clean — in both cases the banner is noise.
+    spi_warnings = getattr(session, "spi_warnings", None)
+    if not spi_warnings:
+        return
 
     header_line = "=" * 90
     content_line = "-" * 90
     footer_line = "=" * 90
-    header = " SPI DRIFT SUMMARY (abs/rel tolerance vs upstream baseline mean) "
+    header = " SPI DRIFT SUMMARY (abs/rel tolerance vs regenerated baseline) "
     footer = f" Session completed with exit status: {exitstatus} "
-    padded_header = f"{header:^90}"
-    padded_footer = f"{footer:^90}"
 
     print("\n")
     print(header_line)
-    print(padded_header)
+    print(f"{header:^90}")
     print(header_line)
 
-    if spi_warnings:
-        print(f"\nDetected {len(spi_warnings)} (dataset, SPI) pair(s) with drift exceeding "
-              f"ATOL=1e-6 and RTOL=1e-2.\n")
+    print(f"\nDetected {len(spi_warnings)} (dataset, SPI) pair(s) exceeding their "
+          f"family's drift tolerance.\n")
+    print(f"{'Dataset:SPI':<40}{'Cat':<10}{'Max |Δ|':>12}{'Max rel':>12}"
+          f"{'# Exceed':>10}{'Unq Pairs':>12}")
+    print(content_line)
 
-        print(f"{'Dataset:SPI':<40}{'Cat':<10}{'Max |Δ|':>12}{'Max rel':>12}"
-              f"{'# Exceed':>10}{'Unq Pairs':>12}")
-        print(content_line)
-
-        for est, module_name, max_abs, max_rel, num_exceed, num_interactions in spi_warnings:
-            marker = " **" if max_rel > 0.1 or max_abs > 0.1 else ""
-            rel_str = f"{max_rel:>12.4g}" if max_rel == max_rel else f"{'n/a':>12}"
-            print(f"{est+marker:<40}{module_name:<10}{max_abs:>12.4g}{rel_str}"
-                  f"{num_exceed:>10}{num_interactions:>12}")
-    else:
-        print("\n\nNo (dataset, SPI) pair exceeded the drift thresholds.\n")
+    for est, module_name, max_abs, max_rel, num_exceed, num_interactions in spi_warnings:
+        marker = " **" if max_rel > 0.1 or max_abs > 0.1 else ""
+        rel_str = f"{max_rel:>12.4g}" if max_rel == max_rel else f"{'n/a':>12}"
+        print(f"{est + marker:<40}{module_name:<10}{max_abs:>12.4g}{rel_str}"
+              f"{num_exceed:>10}{num_interactions:>12}")
 
     print(footer_line)
-    print(padded_footer)
+    print(f"{footer:^90}")

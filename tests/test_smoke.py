@@ -1,20 +1,14 @@
-"""Smoke test for pyspi fork — numerical correctness checks.
+"""Smoke test for pyspi fork — shape / finiteness / sign checks.
 
-Runs a small set of SPIs on known synthetic data (coupled AR(1)) and checks:
-1. All estimators instantiate without JVM
-2. Bivariate/multivariate methods return finite values
-3. Gaussian MI matches analytical formula
-4. Kernel MI is positive for correlated signals
-5. KSG MI is positive for correlated signals
-6. TE is positive for causally coupled signals
-7. Symbolic TE is positive for causally coupled signals
+Runs a small set of SPIs on known synthetic data (coupled AR(1)) and checks
+that every estimator instantiates without a JVM, that bivariate and
+multivariate methods return correctly-shaped finite matrices, and that
+dependence measures are positive on coupled signals.
 
-Usage:
-    python -m tests.smoke_test
-    # or
-    python tests/smoke_test.py
+These are cheap sanity checks, not correctness checks. Closed-form validation
+of the information-theoretic estimators lives in test_infotheory_analytic.py.
 """
-import sys
+import pytest
 import numpy as np
 
 np.random.seed(42)
@@ -53,23 +47,37 @@ def test_imports():
     from pyspi.statistics.spectral import CoherenceMagnitude, DirectedCoherence
     from pyspi.statistics.misc import LinearModel, GPModel
 
-    # Info-theoretic: all estimators
+    # Info-theoretic: all estimators.
+    # kozachenko is entropy-only: MutualInfo, TimeLaggedMutualInfo and
+    # TransferEntropy are computed directly rather than from marginal
+    # entropies, so those combinations raise NotImplementedError (they used
+    # to return NaN silently). See test_kozachenko_rejected_for_non_entropy.
     for est in ('gaussian', 'kraskov', 'kernel', 'kozachenko'):
-        MutualInfo(estimator=est)
-        TimeLaggedMutualInfo(estimator=est)
         JointEntropy(estimator=est)
         ConditionalEntropy(estimator=est)
         CrossmapEntropy(estimator=est)
         CausalEntropy(estimator=est)
         DirectedInfo(estimator=est)
         StochasticInteraction(estimator=est)
-        if est != 'symbolic':
+        if est != 'kozachenko':
+            MutualInfo(estimator=est)
+            TimeLaggedMutualInfo(estimator=est)
             TransferEntropy(estimator=est)
 
     TransferEntropy(estimator='symbolic')
     TransferEntropy(estimator='kernel', kernel_width=0.25)
 
-    print("  PASS: all estimators instantiate")
+
+@pytest.mark.parametrize("cls_name", ["MutualInfo", "TimeLaggedMutualInfo", "TransferEntropy"])
+def test_kozachenko_rejected_for_non_entropy(cls_name):
+    """kozachenko must fail loudly for measures with no Kozachenko-Leonenko path.
+
+    These three previously fell through to a logging.warning and returned NaN,
+    so an invalid config produced a silently all-NaN SPI rather than an error.
+    """
+    import pyspi.statistics.infotheory as it
+    with pytest.raises(NotImplementedError, match="kozachenko"):
+        getattr(it, cls_name)(estimator="kozachenko")
 
 
 def test_gaussian_mi_analytical():
@@ -88,7 +96,9 @@ def test_gaussian_mi_analytical():
     assert np.all(np.isfinite(result[~np.isnan(result)])), "Non-finite MI values"
     assert np.all(np.isnan(np.diag(result))), "Diagonal should be NaN"
 
-    # Verify against analytical formula
+    # NOTE: this compares against the *sample* correlation, so it is an
+    # implementation-identity check, not independent validation. Real closed-form
+    # validation against the true rho lives in test_infotheory_analytic.py.
     Z = data.to_numpy(squeeze=True)
     R = np.corrcoef(Z)
     r2 = np.clip(R ** 2, 0, 1 - 1e-15)
@@ -101,8 +111,6 @@ def test_gaussian_mi_analytical():
 
     # Coupled processes should have positive MI
     assert result[0, 1] > 0.01, f"MI(0,1) should be positive: {result[0, 1]}"
-
-    print(f"  PASS: gaussian MI (max={np.nanmax(result):.4f})")
 
 
 def test_kraskov_mi():
@@ -121,8 +129,6 @@ def test_kraskov_mi():
     assert np.all(np.isfinite(result[off_diag])), "Non-finite KSG MI"
     assert result[0, 1] > 0, f"KSG MI(0,1) should be positive: {result[0, 1]}"
 
-    print(f"  PASS: kraskov MI (max={np.nanmax(result):.4f})")
-
 
 def test_kernel_mi():
     """Kernel MI is positive for correlated signals."""
@@ -139,8 +145,6 @@ def test_kernel_mi():
     off_diag = ~np.isnan(result)
     assert np.all(np.isfinite(result[off_diag])), "Non-finite kernel MI"
     assert result[0, 1] > 0, f"Kernel MI(0,1) should be positive: {result[0, 1]}"
-
-    print(f"  PASS: kernel MI (max={np.nanmax(result):.4f})")
 
 
 def test_transfer_entropy():
@@ -170,8 +174,6 @@ def test_transfer_entropy():
             # Gaussian TE = Granger causality, should be clearly positive
             assert te_01 > 0.01, f"Gaussian TE(0→1) too small: {te_01}"
 
-        print(f"  PASS: {est} TE (TE(0→1)={te_01:.4f})")
-
 
 def test_joint_conditional_entropy():
     """JE and CE produce finite values for kernel estimator."""
@@ -193,8 +195,6 @@ def test_joint_conditional_entropy():
         assert result_ce.shape == (3, 3)
         off = ~np.isnan(result_ce)
         assert np.all(np.isfinite(result_ce[off])), f"{est} CE has non-finite values"
-
-        print(f"  PASS: {est} JE/CE")
 
 
 def test_basic_spis():
@@ -223,7 +223,6 @@ def test_basic_spis():
         assert result.shape == (3, 3), f"{name} shape: {result.shape}"
         off = ~np.isnan(result)
         assert np.all(np.isfinite(result[off])), f"{name} has non-finite values"
-        print(f"  PASS: {name}")
 
 
 def test_spectral_spis():
@@ -239,43 +238,3 @@ def test_spectral_spis():
     assert result.shape == (3, 3)
     off = ~np.isnan(result)
     assert np.all(np.isfinite(result[off])), "CoherenceMagnitude has non-finite values"
-    print("  PASS: CoherenceMagnitude")
-
-
-def main():
-    print("=" * 60)
-    print("pyspi fork smoke test")
-    print("=" * 60)
-
-    tests = [
-        ("Imports (no JVM)", test_imports),
-        ("Gaussian MI analytical", test_gaussian_mi_analytical),
-        ("Kraskov MI", test_kraskov_mi),
-        ("Kernel MI", test_kernel_mi),
-        ("Transfer Entropy (all estimators)", test_transfer_entropy),
-        ("Joint/Conditional Entropy", test_joint_conditional_entropy),
-        ("Basic SPIs", test_basic_spis),
-        ("Spectral SPIs", test_spectral_spis),
-    ]
-
-    passed = 0
-    failed = 0
-    for name, fn in tests:
-        print(f"\n[{name}]")
-        try:
-            fn()
-            passed += 1
-        except Exception as e:
-            print(f"  FAIL: {e}")
-            import traceback
-            traceback.print_exc()
-            failed += 1
-
-    print(f"\n{'=' * 60}")
-    print(f"Results: {passed} passed, {failed} failed")
-    print(f"{'=' * 60}")
-    return 1 if failed else 0
-
-
-if __name__ == "__main__":
-    sys.exit(main())

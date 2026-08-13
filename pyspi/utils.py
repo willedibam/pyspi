@@ -43,7 +43,7 @@ def swap_chars(s, i_1, i_2):
     return ''.join([s[0:i_1], s[i_2], s[i_1+1:i_2], s[i_1], s[i_2+1:]])
 
 def convert_mdf_to_ddf(df):
-    ddf = pd.pivot_table(data=df.stack(dropna=False).reset_index(),index='Dataset',columns=['SPI-1', 'SPI-2'],dropna=False).T.droplevel(0)
+    ddf = pd.pivot_table(data=df.stack(future_stack=True).reset_index(),index='Dataset',columns=['SPI-1', 'SPI-2'],dropna=False).T.droplevel(0)
     return ddf
 
 def filter_spis(keywords, output_name = None, configfile= None):

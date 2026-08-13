@@ -3,13 +3,14 @@
     python -m pyspi compute \
         --data ts.npy \
         --config benchmarked_p90 \
-        --output table.parquet \
+        --output table.pkl \
         --n-jobs 4 \
         --checkpoint-dir results/
 
 If ``--config`` is omitted, the bundled ``full`` config is used. If
 ``--output`` is omitted, the result table is written next to the data file as
-``<data-stem>.spi.parquet``.
+``<data-stem>.spi.pkl``. The output format follows the extension: ``.pkl``,
+``.csv``, or ``.parquet`` (the last needs ``pip install 'pyspi[parquet]'``).
 """
 
 from __future__ import annotations
@@ -44,7 +45,8 @@ def main(argv=None) -> int:
                     help="Bundled config name or path to your own YAML (default: full). "
                          "Bundled: " + ", ".join(bundled_configs()) + ".")
     cp.add_argument("--output", type=Path, default=None,
-                    help="Where to write the result parquet (default: <data>.spi.parquet).")
+                    help="Where to write results; format follows the extension "
+                         "(.pkl, .csv, .parquet). Default: <data>.spi.pkl.")
     cp.add_argument("--n-jobs", type=int, default=1,
                     help="Worker process count. 1 = serial (default).")
     cp.add_argument("--checkpoint-dir", type=Path, default=None,
@@ -77,14 +79,21 @@ def main(argv=None) -> int:
         mp_context=args.mp_context,
     )
 
-    out = args.output or args.data.with_suffix(".spi.parquet")
-    try:
-        calc.table.to_parquet(out)
-        print(f"Wrote results table -> {out}")
-    except Exception as e:
-        fallback = out.with_suffix(".pkl")
-        calc.table.to_pickle(fallback)
-        print(f"Parquet write failed ({e}); wrote pickle -> {fallback}")
+    out = args.output or args.data.with_suffix(".spi.pkl")
+    if out.suffix == ".parquet":
+        try:
+            calc.table.to_parquet(out)
+        except ImportError:
+            fallback = out.with_suffix(".pkl")
+            calc.table.to_pickle(fallback)
+            print(f"Parquet needs pyarrow (pip install 'pyspi[parquet]'); "
+                  f"wrote pickle -> {fallback}")
+            return 0
+    elif out.suffix == ".csv":
+        calc.table.to_csv(out)
+    else:
+        calc.table.to_pickle(out)
+    print(f"Wrote results table -> {out}")
     return 0
 
 
