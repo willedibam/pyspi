@@ -41,6 +41,10 @@ Feedback is much appreciated through [issues](https://github.com/DynamicsAndNeur
 
 _pyspi_ requires **Python 3.10 or newer**.
 
+> **Upgrading from 2.x?** Version 3.0 removes the Java/JIDT dependency and
+> changes the `Calculator` API. See [CHANGELOG.md](CHANGELOG.md) for the
+> migration table.
+
 ```bash
 pip install pyspi
 ```
