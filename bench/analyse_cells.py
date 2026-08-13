@@ -9,7 +9,6 @@ Writes into --output-dir. Committed (small, human-readable):
 Gitignored (bulk / derived, regenerate in seconds):
   long_costs.csv        (M, T, identifier, raw_s, amortized_s, cache_namespace)
   jaccard_p{N}.csv      kept-set Jaccard between cells at percentile N (also in report.md)
-  extrapolations_M*_T*.csv  scaling fits evaluated at the target cell
   plot_cumulative.png   cumulative amortized cost vs kept-fraction, one line per cell
   plot_kept_drift_p{N}.png  binary heatmap: SPI x cell (1 = kept @ percentile, 0 = dropped)
 
@@ -167,18 +166,6 @@ def fit_scaling(df: pd.DataFrame, min_seconds: float = 0.01) -> pd.DataFrame:
     return pd.DataFrame(rows).sort_values("amortized_at_largest", ascending=False).reset_index(drop=True)
 
 
-def extrapolate(sf: pd.DataFrame, M: int, T: int) -> pd.DataFrame:
-    pred = np.exp(sf.intercept + sf.p_M * np.log(M) + sf.q_T * np.log(T))
-    sigma = sf.log_resid_std
-    lo = pred * np.exp(-sigma)
-    hi = pred * np.exp(sigma)
-    out = sf[["identifier", "p_M", "q_T", "log_resid_std", "amortized_at_largest"]].copy()
-    out[f"pred_M{M}_T{T}_s"] = pred
-    out[f"lo_M{M}_T{T}_s"] = lo
-    out[f"hi_M{M}_T{T}_s"] = hi
-    return out.sort_values(f"pred_M{M}_T{T}_s", ascending=False).reset_index(drop=True)
-
-
 def plot_cumulative(df: pd.DataFrame, percentiles: list[int], out: Path) -> None:
     fig, ax = plt.subplots(figsize=(8, 5))
     for (M, T), sub in df.groupby(["M", "T"]):
@@ -245,7 +232,7 @@ def _md_table(df: pd.DataFrame, floatfmt: str = ".3f", index: bool = False) -> s
 
 
 def write_report(out: Path, summary: pd.DataFrame, jac: dict[int, pd.DataFrame],
-                 scaling: pd.DataFrame, extrap: pd.DataFrame, df: pd.DataFrame,
+                 scaling: pd.DataFrame, df: pd.DataFrame,
                  percentiles: list[int]) -> None:
     lines = ["# Bench-cell analysis", ""]
     lines.append(f"Cells analysed: {len(summary)}.  Per cell: {int(summary.n_spis.iloc[0])} SPIs.")
@@ -283,16 +270,6 @@ def write_report(out: Path, summary: pd.DataFrame, jac: dict[int, pd.DataFrame],
     lines.append(_md_table(scaling.head(25).round(3), ".3f"))
     lines.append("")
 
-    if not extrap.empty:
-        lines.append(f"## Extrapolation to (M=64, T=3200) — top 25 by predicted cost")
-        col = [c for c in extrap.columns if c.startswith("pred_")][0]
-        lines.append(_md_table(extrap.head(25).round(3), ".3f"))
-        lines.append("")
-        lines.append("Note: predictions use a log-linear fit log t = a + p log M + q log T. "
-                     "log_resid_std is the in-sample residual on log scale; lo/hi multiply "
-                     "the prediction by exp(±sigma) for a ~1-sigma envelope.")
-        lines.append("")
-
     out.write_text("\n".join(lines))
 
 
@@ -309,8 +286,6 @@ def parse_args(argv=None):
     p.add_argument("--percentiles", default="80,90,95",
                    help="Comma-separated percentiles to evaluate kept-set Jaccard at.")
     p.add_argument("--output-dir", type=Path, default=REPO_ROOT / "bench" / "results" / "analysis")
-    p.add_argument("--extrapolate-to", default="64,3200",
-                   help='Comma-separated "M,T" target for scaling extrapolation.')
     return p.parse_args(argv)
 
 
@@ -318,7 +293,6 @@ def main(argv=None) -> int:
     args = parse_args(argv)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     percentiles = [int(x) for x in args.percentiles.split(",") if x.strip()]
-    ext_M, ext_T = (int(x) for x in args.extrapolate_to.split(","))
 
     paths = sorted(Path(REPO_ROOT).glob(args.results_glob))
     if not paths:
@@ -343,14 +317,12 @@ def main(argv=None) -> int:
 
     sf = fit_scaling(df)
     sf.to_csv(args.output_dir / "scaling.csv", index=False)
-    extrap = extrapolate(sf, ext_M, ext_T)
-    extrap.to_csv(args.output_dir / f"extrapolations_M{ext_M}_T{ext_T}.csv", index=False)
 
     plot_cumulative(df, percentiles, args.output_dir / "plot_cumulative.png")
     for p in percentiles:
         plot_kept_drift(df, p, args.output_dir / f"plot_kept_drift_p{p}.png")
 
-    write_report(args.output_dir / "report.md", summary, jac, sf, extrap, df, percentiles)
+    write_report(args.output_dir / "report.md", summary, jac, sf, df, percentiles)
 
     print(f"[analyse] wrote artefacts -> {args.output_dir}", file=sys.stderr)
     return 0

@@ -88,7 +88,7 @@ variants were added back after the cut for methodological reasons. Re-running
 `cut_config` overwrites it. The rationale lives in the config's own header
 (`pyspi/configs/benchmarked_p90.yaml`, lines 6-16) — read it before regenerating.
 
-## Analyse + forecast
+## Analyse
 
 ```bash
 # Cross-cell analysis (anchor stability, scaling fits, cumulative cost).
@@ -102,15 +102,13 @@ python -m bench.analyse_cells \
     --output-dir bench/results/analysis
 
 # Predict cell wall time at a target (M, T) from the scaling fits
-python -m bench.forecast_cell --config benchmarked_p90 --M 64 --T 3200
 ```
 
 `analyse_cells` writes into `bench/results/analysis/`. Only the small
 human-readable summaries are committed — `report.md`, `scaling.csv`,
 `cell_summary.csv` (and `dropped_spi_comparison.md`). The bulk artefacts
-(`long_costs.csv`, `extrapolations_M*_T*.csv`, `jaccard_p*.csv`, `plot_*.png`)
+(`long_costs.csv`, `jaccard_p*.csv`, `plot_*.png`)
 are gitignored and regenerate in seconds; the Jaccard matrices are also
-embedded verbatim in `report.md`. `forecast_cell` and `benchmark.ipynb` both
 read `long_costs.csv`, so run `analyse_cells` once before either.
 
 `benchmark.ipynb` is committed **without outputs** (its Plotly payloads were
@@ -118,42 +116,44 @@ read `long_costs.csv`, so run `analyse_cells` once before either.
 
 ## Cluster (PBS)
 
-Five PBS Pro scripts. None sets `#PBS -M`/`#PBS -m` — qsub does not expand
-shell variables inside `#PBS` directives, so pass mail options at submit time
-(`qsub -m bea -M you@example.org ...`). The venv is `${VENV:-<repo>/.venv}` in
-every script; override with `-v VENV=/path/to/venv`.
+One generic PBS Pro script, `bench/run_benchmark.pbs`, plus a worked site
+example. To run it anywhere:
 
-**Generic (`bench/`)** — parameterised via `-v`:
+1. Clone the repo on the cluster and create a venv with pyspi installed
+   editable (default location `<repo>/.venv`, override with `-v VENV=/path`;
+   set `VENV=` empty if python already comes from a module or conda).
+2. Edit the two `#PBS -l` lines at the top of `run_benchmark.pbs` to size
+   walltime/cpus/mem for the largest `(M,T)` cell you plan to run. They are
+   the only site-specific values in the file.
+3. Submit from the repo root, passing your account/queue/storage/mail on the
+   qsub command line — `#PBS` directives are never shell-expanded, so nothing
+   site-specific can come from an env var there.
 
 ```bash
-# config-cutting grid as a PBS array — one (M,T) cell per task, n_jobs=1:
-M=32,64 T=1000,4000 CONFIG=full qsub -J 1-4 -v M,T,CONFIG bench/run_benchmark.pbs
+# one (M,T) cell per array task, n_jobs=1 (the config-cutting regime):
+M=32 T=200,400,800,1600,3200 CONFIG=full REPEATS=1 \
+  qsub -J 1-5 -v M,T,CONFIG,REPEATS bench/run_benchmark.pbs
 
-# a single (M,T) cell:
-M=64 T=2000 CONFIG=full qsub -v M,T,CONFIG bench/run_benchmark.pbs
+# a single cell, on a named project/queue, with mail and a longer walltime:
+M=64 T=3200 CONFIG=full \
+  qsub -P myproj -q normal -l storage=scratch/myproj -l walltime=168:00:00 \
+       -m bea -M you@example.org -v M,T,CONFIG bench/run_benchmark.pbs
 
-# a bundled preset:
+# a bundled preset, walked sequentially in one job:
 qsub -v PRESET=parallel,CONFIG=benchmarked_p90 bench/run_benchmark.pbs
 ```
 
-`run_benchmark.pbs` targets NCI Gadi (`#PBS -P`, `-l storage`, `module load
-python3`); `run_benchmark_physics.pbs` targets a plain PBS Pro queue. Note
-`qsub -v` splits on commas, so comma-containing values (`M`, `T`) must be
-exported in the shell and passed by name, as above.
+`qsub -v` splits on commas, so comma-valued vars (`M`, `T`) must be exported in
+the shell and passed by name, as above. Other env vars: `NJOBS`, `PRESET`,
+`CONFIG`, `REPEATS`, `LABEL`, `PYSPI_DIR`, `VENV`, `MODULES` (space-separated
+modules to load) — all documented in the script header. Every run is
+`--resume`, so resubmitting skips cells that already have a JSON.
 
-**Fixed grids (`bench/physics/`)** — the three scripts that actually produced
-the committed cells, hardcoding the exact grid so the run is reproducible with
-no arguments:
-
-| script                | grid                                | form |
-|-----------------------|-------------------------------------|------|
-| `run_bench_light.pbs` | M={4,8,16} x T={200..3200}, 15 cells | one sequential job |
-| `run_bench_m32.pbs`   | M=32 x T={200..3200}, 5 cells        | array `-J 1-5` |
-| `run_bench_m64.pbs`   | M=64 x T={200..3200}, 5 cells        | array `-J 1-5`, 168 h walltime |
-
-All three use `--config full --repeats 1 --output-dir bench/results/cells
---label physics_config --resume`, which is where the `physics_config_M*_T*_n1.json`
-filenames come from. Submit from the repo root: `qsub bench/physics/run_bench_m64.pbs`.
+**`bench/physics/run_bench.pbs`** is a worked example to copy and adapt: the
+USYD Physics queue configuration that produced the committed
+`physics_config_M*_T*_n1.json` cells (full config, `repeats=1`, `n_jobs=1`,
+M={4,8,16,32,64} x T={200,400,800,1600,3200}, one cell per array task). It
+pins those defaults and delegates to `run_benchmark.pbs`.
 
 ## Notes
 
