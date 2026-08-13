@@ -11,7 +11,7 @@ skips cells whose JSON already exists with ``repeats >= --repeats``.
 
 Usage:
     python -m bench.bench_compute --m 8,16 --t 200,800 --n-jobs 1,4 --config fast
-    python -m bench.bench_compute --preset amortized --config config.yaml
+    python -m bench.bench_compute --preset amortized --config full
     python -m bench.bench_compute --preset parallel --array-index $PBS_ARRAY_INDEX
 
 Presets (each fixes an M/T/n_jobs grid; --config still applies):
@@ -44,13 +44,12 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np
 import psutil
 
-from pyspi.calculator import Calculator, load_spis_from_yaml
+from pyspi.calculator import Calculator, bundled_configs, resolve_config
 
 CATEGORY_PREFIX = ".statistics."  # python module suffix becomes the category field
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BUNDLED_CONFIG_DIR = REPO_ROOT / "pyspi"
-DEFAULT_OUTPUT_DIR = REPO_ROOT / "bench" / "results"
+DEFAULT_OUTPUT_DIR = REPO_ROOT / "bench" / "results" / "cells"
 
 PRESETS = {
     "headline": {"points": [(10, 500), (20, 1000)], "n_jobs": [1]},
@@ -83,14 +82,14 @@ def parse_args(argv=None):
     p.add_argument("--preset", choices=list(PRESETS), default=None,
                    help="Predefined M/T/n_jobs grid; overrides --m/--t/--n-jobs.")
     p.add_argument("--config", default="fabfour",
-                   help="Bundled subset name (all/fast/sonnet/fabfour), a bundled "
-                        "config filename (e.g. benchmarked90_config.yaml), or a path.")
+                   help=f"Bundled config name ({'/'.join(bundled_configs())}) "
+                        "or a path to your own YAML.")
     p.add_argument("--mp-context", choices=["spawn", "fork", "forkserver"], default="spawn",
                    help="Multiprocessing start method for n_jobs>1 (default: spawn).")
     p.add_argument("--repeats", type=int, default=2, help="Repeats per cell (default: 2).")
     p.add_argument("--seed", type=int, default=0, help="Base RNG seed (default: 0).")
     p.add_argument("--output-dir", type=Path, default=None,
-                   help="Directory for per-cell result JSONs (default: bench/results/).")
+                   help="Directory for per-cell result JSONs (default: bench/results/cells/).")
     p.add_argument("--label", default=None,
                    help="Filename prefix; default = stem of --config.")
     p.add_argument("--resume", action="store_true",
@@ -100,23 +99,8 @@ def parse_args(argv=None):
     return p.parse_args(argv)
 
 
-def resolve_config(arg: str) -> str:
-    if arg in {"all", "fast", "sonnet", "fabfour"}:
-        return arg
-    p = Path(arg).expanduser()
-    if p.is_file():
-        return str(p.resolve())
-    bundled = BUNDLED_CONFIG_DIR / arg
-    if bundled.is_file():
-        return str(bundled.resolve())
-    raise FileNotFoundError(
-        f"--config '{arg}' is not a subset name, a bundled config, or a file path.")
-
-
 def make_calculator(config: str, dataset: np.ndarray) -> Calculator:
-    if config in {"all", "fast", "sonnet", "fabfour"}:
-        return Calculator(dataset=dataset, subset=config, normalise=False, verbose=False)
-    return Calculator(dataset=dataset, configfile=config, normalise=False, verbose=False)
+    return Calculator(dataset=dataset, config=config, zscore=False, verbose=False)
 
 
 def spi_metadata(calc: Calculator) -> dict[str, dict]:

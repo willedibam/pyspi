@@ -1,31 +1,30 @@
 #!/usr/bin/env python
 """Analyse a directory of per-cell bench JSONs to choose the anchor + percentile
-recipe for the benchmarked<N>[_amortized]_config.yaml cuts.
+recipe for the pyspi/configs/benchmarked_p<N>.yaml cuts.
 
-Produces four artefacts in --output-dir:
-  long_costs.csv        (M, T, identifier, raw_s, amortized_s, cache_namespace)
+Writes into --output-dir. Committed (small, human-readable):
   cell_summary.csv      (M, T, n_spis, n_failed, cell_wall_s, sum_amortized_s)
-  jaccard_p{N}.csv      kept-set Jaccard between cells at percentile N
   scaling.csv           per-SPI fit  log t = a + p*log M + q*log T  (amortized)
   report.md             human-readable summary with elbow / drift / recommendation
+Gitignored (bulk / derived, regenerate in seconds):
+  long_costs.csv        (M, T, identifier, raw_s, amortized_s, cache_namespace)
+  jaccard_p{N}.csv      kept-set Jaccard between cells at percentile N (also in report.md)
+  extrapolations_M*_T*.csv  scaling fits evaluated at the target cell
   plot_cumulative.png   cumulative amortized cost vs kept-fraction, one line per cell
-  plot_kept_drift.png   binary heatmap: SPI x cell  (1 = kept @ percentile, 0 = dropped)
+  plot_kept_drift_p{N}.png  binary heatmap: SPI x cell (1 = kept @ percentile, 0 = dropped)
 
 Usage:
+    python -m bench.analyse_cells                      # defaults: all committed cells
     python -m bench.analyse_cells \
         --results-glob 'bench/results/cells/physics_config_M*_T*_n1.json' \
-        --config pyspi/config.yaml \
+        --config full \
         --percentiles 80,90,95 \
         --output-dir bench/results/analysis
-
-Workaround: pyspi/config.yaml has per-config ``labels:`` annotations that
-``cut_config.walk_spis`` would pass as constructor kwargs. We strip them here.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import sys
 from collections import defaultdict
@@ -37,46 +36,22 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
-import yaml  # noqa: E402
 
-from pyspi.calculator import _expand_lagged_correlation_configs  # noqa: E402
+from bench._config_walk import cache_bucket, walk_spis  # noqa: E402
+from pyspi.calculator import bundled_configs, resolve_config  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-CONSTRUCTOR_DROP = {"labels", "dependencies"}  # annotations not accepted by SPI __init__
+DEFAULT_RESULTS_GLOB = "bench/results/cells/*.json"
 
 
-def _strip(params):
-    if params is None:
-        return None
-    return {k: v for k, v in params.items() if k not in CONSTRUCTOR_DROP}
-
-
-def cache_namespace_map(configfile: Path) -> dict[str, tuple | None]:
+def cache_namespace_map(configfile) -> dict[str, tuple | None]:
     """Return {identifier: bucket_key} for every SPI in the config.
 
     The bucket key is ``(namespace, *cache_subkey_values)`` if the class
-    declares ``_cache_namespace``, else ``None``. ``_cache_subkey`` is an
-    optional per-instance tuple that splits a namespace into independent
-    caches (e.g. Barycenter caches per ``mode``).
+    declares ``_cache_namespace``, else ``None``.
     """
-    source = yaml.safe_load(configfile.read_text())
-    out: dict[str, tuple | None] = {}
-    for module_name, module_spis in source.items():
-        module = importlib.import_module(module_name, "pyspi")
-        for class_name, entry in (module_spis or {}).items():
-            cls = getattr(module, class_name)
-            ns = getattr(cls, "_cache_namespace", None)
-            configs = entry.get("configs")
-            if class_name == "LaggedCorrelation" and configs is not None:
-                configs = _expand_lagged_correlation_configs(configs)
-            for params in [None] if configs is None else configs:
-                spi = cls() if params is None else cls(**_strip(params))
-                if ns is None:
-                    out[spi.identifier] = None
-                else:
-                    subkey = tuple(getattr(spi, "_cache_subkey", ()))
-                    out[spi.identifier] = (ns, *subkey)
-    return out
+    return {ident: cache_bucket(spi)
+            for _, _, _, ident, spi in walk_spis(configfile)}
 
 
 def amortized(raw: dict[str, float], ns_map: dict[str, str | None]) -> dict[str, float]:
@@ -324,10 +299,13 @@ def write_report(out: Path, summary: pd.DataFrame, jac: dict[int, pd.DataFrame],
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--results-glob", required=True,
-                   help="Glob for per-cell bench JSONs (relative to repo root).")
-    p.add_argument("--config", type=Path, default=REPO_ROOT / "pyspi" / "config.yaml",
-                   help="Source config (for cache-namespace map and SPI list).")
+    p.add_argument("--results-glob", default=DEFAULT_RESULTS_GLOB,
+                   help=f"Glob for per-cell bench JSONs, relative to repo root "
+                        f"(default: {DEFAULT_RESULTS_GLOB}).")
+    p.add_argument("--config", default="full",
+                   help=f"Source config for the cache-namespace map and SPI list: "
+                        f"a bundled name ({'/'.join(bundled_configs())}) or a path "
+                        f"(default: full).")
     p.add_argument("--percentiles", default="80,90,95",
                    help="Comma-separated percentiles to evaluate kept-set Jaccard at.")
     p.add_argument("--output-dir", type=Path, default=REPO_ROOT / "bench" / "results" / "analysis")
@@ -347,7 +325,7 @@ def main(argv=None) -> int:
         raise SystemExit(f"no JSONs match {args.results_glob}")
     print(f"[analyse] {len(paths)} cells matched", file=sys.stderr)
 
-    ns_map = cache_namespace_map(args.config)
+    ns_map = cache_namespace_map(resolve_config(args.config))
     print(f"[analyse] cache-namespace map: {len(ns_map)} SPIs", file=sys.stderr)
 
     cells = load_cells(paths)

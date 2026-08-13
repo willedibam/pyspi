@@ -9,49 +9,52 @@
 #PBS -l storage=scratch/ql44+gdata/ql44
 #PBS -l wd
 #PBS -j oe
-#PBS -m bea
-#PBS -M wedi0306@uni.sydney.edu.au
 
 # Benchmark pyspi Calculator.compute() on Gadi.
 #
-# Output: one JSON per (M,T,n_jobs) cell in bench/results/, named
+# Output: one JSON per (M,T,n_jobs) cell in bench/results/cells/, named
 #         "<label>_M<M>_T<T>_n<n>.json" (label defaults to gadi_<config-stem>).
 # Logs:   one file per PBS job/task in bench/logs/.
+#
+# Mail: qsub does NOT expand shell variables inside #PBS directives, so pass
+#       your address at submit time instead:
+#         qsub -m bea -M you@example.org ... bench/run_benchmark.pbs
 #
 # Submit examples (qsub -v parses commas as separators — env-pass for
 # comma-containing values):
 #
 #   # config-cutting grid as a 4-cell array (one (M,T) cell per task):
-#   M=32,80 T=500,2000 CONFIG=config.yaml REPEATS=2 \
+#   M=32,80 T=500,2000 CONFIG=full REPEATS=2 \
 #     qsub -J 1-4 -v M,T,CONFIG,REPEATS bench/run_benchmark.pbs
 #
 #   # single (M,T) cell:
-#   M=64 T=2000 CONFIG=config.yaml REPEATS=2 \
+#   M=64 T=2000 CONFIG=full REPEATS=2 \
 #     qsub -v M,T,CONFIG,REPEATS bench/run_benchmark.pbs
 #
 #   # bundled preset (parallel speedup curve):
-#   qsub -v PRESET=parallel,CONFIG=benchmarked90_amortized_config.yaml bench/run_benchmark.pbs
+#   qsub -v PRESET=parallel,CONFIG=benchmarked_p90 bench/run_benchmark.pbs
 #
 # Env (-v), with defaults:
 #   M, T      comma-separated grid axes. If BOTH set, they override PRESET.
 #   NJOBS     Calculator.compute n_jobs (default 1).
 #   PRESET    bundled grid: headline | scaling | parallel | amortized [amortized]
-#   CONFIG    pyspi config: subset name, bundled filename, or path [config.yaml]
-#   REPEATS   repeats per cell                                     [2]
+#   CONFIG    pyspi config: bundled name (full/fast/benchmarked_p90/...) or a
+#             path to your own YAML                                 [full]
+#   REPEATS   repeats per cell                                      [2]
 #   LABEL     filename prefix     [gadi_<config-stem>]
-#   PYSPI_DIR pyspi-fork checkout  [/scratch/ql44/<user>/pyspi-fork]
-#   VENV      venv with pyspi editable [$PYSPI_DIR/../mts-spi-study-cluster/.venv]
+#   PYSPI_DIR pyspi-fork checkout       [/scratch/ql44/<user>/pyspi-fork]
+#   VENV      venv with pyspi installed editable        [$PYSPI_DIR/.venv]
 
 set -euo pipefail
 
 PRESET="${PRESET:-amortized}"
-CONFIG="${CONFIG:-config.yaml}"
+CONFIG="${CONFIG:-full}"
 REPEATS="${REPEATS:-2}"
 M="${M:-}"
 T="${T:-}"
 NJOBS="${NJOBS:-1}"
 PYSPI_DIR="${PYSPI_DIR:-/scratch/ql44/${USER}/pyspi-fork}"
-VENV="${VENV:-${PYSPI_DIR}/../mts-spi-study-cluster/.venv}"
+VENV="${VENV:-${PYSPI_DIR}/.venv}"
 LABEL_DEFAULT="gadi_$(basename "${CONFIG}" .yaml)"
 LABEL="${LABEL:-$LABEL_DEFAULT}"
 
@@ -94,13 +97,13 @@ fi
 
 echo "[bench] host=$(hostname) start=$(date)"
 echo "[bench] config=${CONFIG}  grid=${GRID[*]} ${ARRAY[*]}  repeats=${REPEATS}"
-echo "[bench] label=${LABEL}  output_dir=bench/results/"
+echo "[bench] label=${LABEL}  output_dir=bench/results/cells/"
 
 python -m bench.bench_compute \
     "${GRID[@]}" "${ARRAY[@]}" \
     --config "${CONFIG}" \
     --repeats "${REPEATS}" \
-    --output-dir bench/results \
+    --output-dir bench/results/cells \
     --label "${LABEL}" \
     --resume
 

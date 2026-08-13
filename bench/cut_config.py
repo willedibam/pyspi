@@ -2,7 +2,7 @@
 """Cut a benchmarked SPI subset config from a bench_compute.py per-cell JSON.
 
 Reads ONE per-cell JSON (``<label>_M<M>_T<T>_n<n>.json``), ranks SPIs by cost,
-and emits a ``benchmarked<keep>[_amortized]_config.yaml`` containing only the
+and emits a ``pyspi/configs/benchmarked_p<keep>.yaml`` containing only the
 fastest ``--keep`` percent. (M, T, n_jobs) are read from the JSON itself, not
 parsed from the filename.
 
@@ -17,14 +17,13 @@ Cost model — two modes:
              full cost to one variant overcounts. Ungrouped SPIs use raw time.
 
 Usage:
-    python -m bench.cut_config --bench-json bench/results/cells/physics_config_M64_T3200_n1.json --keep 90
+    python -m bench.cut_config --bench-json bench/results/cells/physics_config_M16_T800_n1.json --keep 90
     python -m bench.cut_config --bench-json <path> --keep 80 --mode raw
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import sys
 from collections import defaultdict
@@ -33,10 +32,23 @@ from pathlib import Path
 
 import yaml
 
-from pyspi.calculator import _expand_lagged_correlation_configs, _split_config_params
+from bench._config_walk import cache_bucket, walk_spis
+from pyspi.calculator import CONFIG_DIR, bundled_configs, resolve_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-BUNDLED_CONFIG_DIR = REPO_ROOT / "pyspi"
+
+
+def _rel(path: Path) -> str:
+    """Render a path relative to the repo root when possible.
+
+    Generated config headers are committed, so they must not carry the
+    absolute path of whichever checkout produced them.
+    """
+    path = Path(path)
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path)
 
 
 def parse_args(argv=None):
@@ -44,49 +56,30 @@ def parse_args(argv=None):
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--bench-json", type=Path, required=True,
                    help="Per-cell timing JSON from bench_compute.py.")
-    p.add_argument("--config", type=Path, default=BUNDLED_CONFIG_DIR / "config.yaml",
-                   help="Source config to cut from (default: bundled config.yaml).")
+    p.add_argument("--config", default="full",
+                   help=f"Source config to cut from: a bundled name "
+                        f"({'/'.join(bundled_configs())}) or a path (default: full).")
     p.add_argument("--keep", type=int, default=90,
                    help="Percent of SPIs to keep, fastest-first (default: 90).")
     p.add_argument("--mode", choices=["amortized", "raw"], default="amortized",
                    help="Cost model (default: amortized).")
     p.add_argument("-o", "--output", type=Path, default=None,
-                   help="Output config path (default: pyspi/benchmarked<keep>[_amortized]_config.yaml).")
+                   help="Output config path (default: pyspi/configs/benchmarked_p<keep>.yaml, "
+                        "suffixed _raw under --mode raw).")
     p.add_argument("--no-preserve-dropped", action="store_true",
                    help="Delete dropped variants/classes from the output instead of "
                         "commenting them out (default: preserve as comments).")
     return p.parse_args(argv)
 
 
-def walk_spis(configfile: Path):
-    """Yield (module_name, class_name, params, identifier, spi) for every SPI in
-    the config — mirrors load_spis_from_yaml, including LaggedCorrelation expansion."""
-    source = yaml.safe_load(configfile.read_text())
-    for module_name, module_spis in source.items():
-        module = importlib.import_module(module_name, "pyspi")
-        for class_name, entry in (module_spis or {}).items():
-            configs = entry.get("configs")
-            if class_name == "LaggedCorrelation" and configs is not None:
-                configs = _expand_lagged_correlation_configs(configs)
-            for params in ([None] if configs is None else configs):
-                if params is None:
-                    spi = getattr(module, class_name)()
-                    ctor_params = None
-                else:
-                    ctor_params, _ = _split_config_params(params)
-                    spi = getattr(module, class_name)(**ctor_params)
-                yield module_name, class_name, params, spi.identifier, spi
-
-
 def _cache_buckets(records: list) -> dict[tuple, list[str]]:
     """Return {(namespace, *subkey): [identifiers]} for all cache-grouped SPIs."""
     buckets: dict = defaultdict(list)
     for _, _, _, identifier, spi in records:
-        ns = getattr(type(spi), "_cache_namespace", None)
-        if ns is None:
+        bucket = cache_bucket(spi)
+        if bucket is None:
             continue
-        subkey = tuple(getattr(spi, "_cache_subkey", ()))
-        buckets[(ns, *subkey)].append(identifier)
+        buckets[bucket].append(identifier)
     return buckets
 
 
@@ -126,12 +119,7 @@ def amortized_costs(records: list, raw: dict[str, float]) -> dict[str, float]:
     """
     groups: dict = defaultdict(list)
     for _, _, _, identifier, spi in records:
-        ns = getattr(type(spi), "_cache_namespace", None)
-        if ns is None:
-            groups[None].append(identifier)
-            continue
-        subkey = tuple(getattr(spi, "_cache_subkey", ()))
-        groups[(ns, *subkey)].append(identifier)
+        groups[cache_bucket(spi)].append(identifier)
     cost: dict[str, float] = {}
     for key, ids in groups.items():
         if key is None:
@@ -264,7 +252,8 @@ def main(argv=None) -> int:
     raw_cell = {spi: v["mean"] for spi, v in cell["spi_seconds"].items()}
     M, T, n_jobs = cell.get("M"), cell.get("T"), cell.get("n_jobs")
 
-    records = list(walk_spis(args.config))
+    source_config = Path(resolve_config(args.config))
+    records = list(walk_spis(source_config))
     ids = [r[3] for r in records]
     missing = sorted(i for i in ids if i not in raw_cell)
     if missing:
@@ -288,14 +277,17 @@ def main(argv=None) -> int:
         promoted = []
     dropped = [i for i in ranked if i not in kept]
 
+    output = args.output or (
+        CONFIG_DIR / f"benchmarked_p{args.keep}{'_raw' if args.mode == 'raw' else ''}.yaml")
+
     env = cell.get("environment") or {}
     sha = env.get("pyspi_git_sha") or "?"
     snap_note = (f"; +{len(promoted)} snapped from partial cache buckets"
                  if promoted else "")
     header = (
-        f"# benchmarked{args.keep}{'_amortized' if args.mode == 'amortized' else ''}_config.yaml\n"
+        f"# {Path(output).name}\n"
         f"# Generated by bench/cut_config.py on {datetime.now():%Y-%m-%d}.\n"
-        f"# Source config : {args.config}\n"
+        f"# Source config : {_rel(source_config)}\n"
         f"# Bench JSON    : {args.bench_json.name} (pyspi {sha[:12]}, "
         f"M={M} T={T} n_jobs={n_jobs})\n"
         f"# Cost model    : {args.mode}\n"
@@ -304,16 +296,13 @@ def main(argv=None) -> int:
         f"# Cutoff        : fastest kept <= {kept_max:.3f}s ; slowest dropped >= "
         f"{drop_min:.3f}s.\n#\n"
     )
-    text = emit_config(args.config, records, kept, header,
+    text = emit_config(source_config, records, kept, header,
                        preserve_dropped=not args.no_preserve_dropped)
     if dropped:
         text += "\n# --- DROPPED (slowest %d, %s cost) ---\n" % (len(dropped), args.mode)
         text += "".join(f"#   {cost[i]:9.3f}s  {i}\n" for i in reversed(dropped))
 
-    output = args.output or (
-        BUNDLED_CONFIG_DIR
-        / f"benchmarked{args.keep}{'_amortized' if args.mode == 'amortized' else ''}_config.yaml")
-    output.write_text(text)
+    Path(output).write_text(text)
     print(f"[cut] {len(kept)}/{len(ranked)} SPIs kept ({args.mode}, M={M} T={T}) -> {output}",
           file=sys.stderr)
     return 0

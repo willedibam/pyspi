@@ -12,51 +12,29 @@ cell), uses their median amortized cost across the analysed cells, or 0 if
 absent everywhere.
 
 Usage:
-    python -m bench.forecast_cell --config pyspi/benchmarked90_amortized_config.yaml \
-                                  --M 64 --T 3200
-    python -m bench.forecast_cell --config pyspi/config.yaml --M 50 --T 3000 \
+    python -m bench.forecast_cell --config benchmarked_p90 --M 64 --T 3200
+    python -m bench.forecast_cell --config full --M 50 --T 3000 \
                                   --top 20  # also list 20 worst-offender SPIs
+
+``long_costs.csv`` is a derived artefact and is not committed; run
+``python -m bench.analyse_cells`` once to produce it (and ``scaling.csv``).
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import yaml
 
-from pyspi.calculator import _expand_lagged_correlation_configs, _split_config_params
+from bench._config_walk import walk_spis
+from pyspi.calculator import bundled_configs, resolve_config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_SCALING = REPO_ROOT / "bench" / "results" / "analysis" / "scaling.csv"
 DEFAULT_LONG = REPO_ROOT / "bench" / "results" / "analysis" / "long_costs.csv"
-
-
-def walk_identifiers(configfile: Path) -> list[str]:
-    """Return list of SPI identifiers loaded by this config (mirrors load_spis_from_yaml)."""
-    source = yaml.safe_load(configfile.read_text())
-    ids = []
-    for module_name, module_spis in source.items():
-        module = importlib.import_module(module_name, "pyspi")
-        for class_name, entry in (module_spis or {}).items():
-            if entry is None:
-                continue
-            configs = entry.get("configs")
-            if class_name == "LaggedCorrelation" and configs is not None:
-                configs = _expand_lagged_correlation_configs(configs)
-            cls = getattr(module, class_name)
-            for params in [None] if configs is None else configs:
-                if params is None:
-                    spi = cls()
-                else:
-                    ctor_params, _ = _split_config_params(params)
-                    spi = cls(**ctor_params)
-                ids.append(spi.identifier)
-    return ids
 
 
 def predict_amortized(scaling: pd.DataFrame, long: pd.DataFrame,
@@ -80,8 +58,9 @@ def predict_amortized(scaling: pd.DataFrame, long: pd.DataFrame,
 def parse_args(argv=None):
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--config", type=Path, required=True,
-                   help="Path to the config YAML to forecast (bundled or custom).")
+    p.add_argument("--config", required=True,
+                   help=f"Config to forecast: a bundled name "
+                        f"({'/'.join(bundled_configs())}) or a path to your own YAML.")
     p.add_argument("--M", type=int, required=True)
     p.add_argument("--T", type=int, required=True)
     p.add_argument("--scaling", type=Path, default=DEFAULT_SCALING)
@@ -94,14 +73,15 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    if not args.scaling.exists():
-        raise SystemExit(f"missing {args.scaling}; run bench.analyse_cells first.")
-    if not args.long_costs.exists():
-        raise SystemExit(f"missing {args.long_costs}; run bench.analyse_cells first.")
+    for path in (args.scaling, args.long_costs):
+        if not path.exists():
+            raise SystemExit(
+                f"missing {path}; run `python -m bench.analyse_cells` first.")
     scaling = pd.read_csv(args.scaling)
     long = pd.read_csv(args.long_costs)
 
-    idents = walk_identifiers(args.config)
+    config = resolve_config(args.config)
+    idents = [r[3] for r in walk_spis(config)]
     rows = []
     for ident in idents:
         pred, sigma = predict_amortized(scaling, long, ident, args.M, args.T)
@@ -115,7 +95,7 @@ def main(argv=None) -> int:
     weighted_sigma = (float(np.sqrt(np.sum((weights * sigmas) ** 2)) / total)
                       if total > 0 else 0.0)
 
-    print(f"\nForecast for config: {args.config}")
+    print(f"\nForecast for config: {config}")
     print(f"  Target cell      : M={args.M} T={args.T}")
     print(f"  N SPIs in config : {len(idents)}")
     print(f"  Fitted / unfitted: {len(fitted)} / {len(idents) - len(fitted)}")
