@@ -4,7 +4,7 @@
 
 ```bash
 pytest                      # fast suite (default: -m 'not slow'), ~2 min
-pytest -m slow              # baseline drift suite only, ~8-12 min
+pytest -m slow              # baseline drift suite only, ~3.5 min
 pytest -m ''                # everything
 ```
 
@@ -22,24 +22,30 @@ corrupt baseline can never break collection of unrelated tests.
 | `test_smoke.py` | Cheap shape / finiteness / sign checks across SPI families. Sanity, not correctness. |
 | `test_parallel.py` | `Calculator.compute()` parallel path, checkpointing, per-SPI failure isolation. |
 | `test_phi_native.py` | Native (non-JIDT) integrated-information implementation. |
-| `test_baseline_drift.py` | `slow`. Every SPI on three frozen datasets vs a stored baseline. |
+| `test_baseline_drift.py` | `slow`. Every SPI on three frozen fixtures (M=3/5/7) vs a stored baseline. |
 
 Log base matters when reading these: `gaussian`, `kraskov` and `kozachenko`
 report **nats**; `kernel` and `symbolic` report **bits** (inherited from JIDT).
 
 ## Baselines
 
-`tests/data/baselines/{cml7,var1,kuramoto}.npz` — one `MxM` matrix per SPI
-identifier, plus `__dataset__` / `__config__` / `__seed__` provenance entries.
-Regenerate with:
+`tests/data/baselines/{var1_M3_T100,cml_M5_T100,kuramoto_M7_T100}.npz` — one
+`MxM` matrix per SPI identifier, plus `__dataset__` / `__config__` / `__seed__`
+provenance entries. Regenerate with:
 
 ```bash
-python tests/tools/generate_benchmark_tables.py            # all three
-python tests/tools/generate_benchmark_tables.py -d cml7
+python tests/tools/generate_benchmark_tables.py                 # all three
+python tests/tools/generate_benchmark_tables.py -d cml_M5_T100
 ```
 
-The frozen `var1` and `kuramoto` `.npy` fixtures themselves come from
-`tests/tools/generate_benchmark_datasets.py`.
+The frozen `.npy` fixtures themselves live in `tests/data/fixtures/` and come
+from `tests/tools/generate_fixtures.py`. They are **test inputs, not shipped
+data**: they are deliberately outside `pyspi/data/`, so they are not in the
+wheel and not reachable via `pyspi.data.load_dataset` (which now exposes only
+the three demo datasets `forex`, `cml`, `standard_normal`). Three generating
+processes at three widths — VAR(1) at `M=3`, coupled map lattice at `M=5`,
+Kuramoto at `M=7`, all `T=100` — so the SPI set is exercised across a range of
+`M` rather than at a single width.
 
 These baselines are generated from **this fork's current code**, not from
 upstream pyspi 2.0.1. The fork deliberately rewrote every information-theoretic

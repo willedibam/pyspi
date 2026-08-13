@@ -78,6 +78,30 @@ class NonparametricSpectral(Unsigned):
         raise NotImplementedError
 
 
+def _to_source_target(spi, adj):
+    """Put a spectral adjacency matrix into pyspi's (source, target) convention.
+
+    pyspi's convention is set by ``base.Directed.multivariate``, which fills
+    ``A[i, j] = bivariate(i, j)`` -- row is the source, column the target. The
+    spectral backends (spectral_connectivity, nitime) instead follow the
+    DTF/PDC literature, where element ``[i, j]`` is the flow *into* i *from* j
+    (Kaminski & Blinowska 1991; the library normalises "by inflow"). Passing
+    their output through unchanged left every directed spectral SPI transposed
+    relative to every other directed SPI in the library.
+
+    Only directed SPIs are transposed. The undirected spectral measures share
+    this code path, and several of them (PhaseLagIndex, WeightedPhaseLagIndex,
+    PhaseSlopeIndex) are antisymmetric rather than symmetric, so transposing
+    them would silently negate their values.
+
+    Note the test is ``not isinstance(spi, Undirected)``, not
+    ``isinstance(spi, Directed)``: ``Undirected`` subclasses ``Directed`` (it
+    reuses its multivariate loop and then mirrors), so the latter is true for
+    every SPI here.
+    """
+    return adj if isinstance(spi, Undirected) else adj.T
+
+
 class NonparametricSpectralMultivariate(NonparametricSpectral):
     _cache_namespace = "spectral_mv"
 
@@ -125,6 +149,7 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
                 if self._statistic == s
             ][0]
             adj = adj_freq[stat_id][0]
+        adj = _to_source_target(self, adj)
         np.fill_diagonal(adj, np.nan)
         return adj
 
@@ -182,7 +207,10 @@ class NonparametricSpectralBivariate(NonparametricSpectral):
         bv_freq, freq = self._get_cache(data, i, j)
         freq_id = np.where((freq > self._fmin) * (freq < self._fmax))[0]
 
-        return self._statfn(bv_freq[0, freq_id, 0, 1])
+        # [1, 0] not [0, 1]: the sub-system is built as [i, j] (local 0 = i,
+        # local 1 = j) and the backend indexes [target, source], so the i->j
+        # flow is at [1, 0]. See _to_source_target.
+        return self._statfn(bv_freq[0, freq_id, 1, 0])
 
 
 class CoherenceMagnitude(NonparametricSpectralMultivariate, Undirected):
@@ -481,7 +509,7 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
             cache, freq = self._get_cache(data)
             freq_id = np.where((freq >= self._fmin) * (freq <= self._fmax))[0]
 
-            result = self._statfn(cache[0, freq_id, :, :], axis=0)
+            result = _to_source_target(self, self._statfn(cache[0, freq_id, :, :], axis=0))
 
             nan_pct = np.isnan(cache[0, freq_id, :, :]).mean(axis=0)
             np.fill_diagonal(nan_pct, 0.0)

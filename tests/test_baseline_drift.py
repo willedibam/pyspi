@@ -24,8 +24,11 @@ information-theoretic estimators, so upstream pyspi 2.0.1 values are the wrong
 reference for exactly the code that most needs one. Independent correctness
 lives in ``test_infotheory_analytic.py``.
 
-Frozen datasets: cml7 (coupled map lattice), var1 (linear VAR), kuramoto
-(phase oscillators) — all 7 processes x 100 observations.
+Frozen fixtures live in ``tests/data/fixtures/`` (not in ``pyspi/data/``: they
+are test inputs, not shipped demo data) and are built by
+``tests/tools/generate_fixtures.py``. Three generating processes at three widths
+— VAR(1) at M=3, coupled map lattice at M=5, Kuramoto at M=7, all T=100 — so the
+SPI set is exercised across a range of M.
 """
 import os
 
@@ -33,18 +36,19 @@ import numpy as np
 import pytest
 
 from pyspi.calculator import Calculator
-from pyspi.data import load_dataset
+from pyspi.data import Data
 
-# Whole-file marker: this suite takes ~12 minutes. Skipped by default; run with
+# Whole-file marker: this suite takes ~3.5 minutes. Skipped by default; run with
 #   pytest -m slow tests/test_baseline_drift.py
 # or
 #   pytest -m '' tests/
 pytestmark = pytest.mark.slow
 
-DATASETS = ("cml7", "var1", "kuramoto")
+DATASETS = ("var1_M3_T100", "cml_M5_T100", "kuramoto_M7_T100")
 
-BASELINE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                            "data", "baselines")
+_DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+BASELINE_DIR = os.path.join(_DATA_DIR, "baselines")
+FIXTURE_DIR = os.path.join(_DATA_DIR, "fixtures")
 
 # Seed used when the baselines were generated; must match the generator's
 # default so the RNG-consuming SPIs land in the same place.
@@ -72,6 +76,16 @@ LOOSE_MODULES = {"causal", "misc"}
 
 def _baseline_path(dataset_name):
     return os.path.join(BASELINE_DIR, f"{dataset_name}.npz")
+
+
+def _load_fixture(dataset_name):
+    """Load a frozen fixture; stored (observations, processes) -> 'sp'.
+
+    Must stay in step with ``tests/tools/generate_benchmark_tables.load_fixture``,
+    or the baselines and the test would be reading different data.
+    """
+    return Data(data=os.path.join(FIXTURE_DIR, f"{dataset_name}.npy"),
+                dim_order="sp", name=dataset_name)
 
 
 def _baseline_keys(dataset_name):
@@ -138,7 +152,7 @@ def current_tables():
     def get(dataset_name):
         if dataset_name not in cache:
             np.random.seed(SEED)
-            calc = Calculator(dataset=load_dataset(dataset_name))
+            calc = Calculator(dataset=_load_fixture(dataset_name))
             calc.compute()
             cache[dataset_name] = (
                 {spi: calc.table[spi].to_numpy() for spi in calc.spis},

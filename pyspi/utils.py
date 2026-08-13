@@ -132,6 +132,27 @@ def filter_spis(keywords, output_name = None, configfile= None):
 `Calculator(config='{output_file}')`
 """)
 
+def _print_timing_summary(calc, n_slowest=5):
+    """Print total compute time and the slowest SPIs.
+
+    Per-SPI timings are always available as ``calc.timings``; this surfaces the
+    part that actually informs a decision -- which SPIs dominate the run, and
+    are therefore what a cheaper ``config=`` drops.
+    """
+    timings = {k: v for k, v in calc.timings.items() if v}
+    if not timings:
+        # Every SPI was restored from a checkpoint, so nothing was timed.
+        return
+    total = sum(timings.values())
+    print(f"Total compute time: {total:.2f}s across {len(timings)} timed SPI(s)")
+    slowest = sorted(timings.items(), key=lambda kv: kv[1], reverse=True)[:n_slowest]
+    width = max(len(k) for k, _ in slowest)
+    print(f"Slowest {len(slowest)}:")
+    for key, secs in slowest:
+        print(f"  {key:<{width}}  {secs:7.2f}s  ({secs / total * 100:5.1f}%)")
+    print("-" * 60)
+
+
 def inspect_calc_results(calc):
     """
     Display a summary of the computed SPI results, including counts of successful computations,
@@ -158,6 +179,7 @@ def inspect_calc_results(calc):
     print(f"\nTotal number of SPIs attempted: {total_num_spis}")
     print(f"Number of SPIs successfully computed: {len(spi_results['Successful'])} ({len(spi_results['Successful']) / total_num_spis * 100:.2f}%)")
     print(single_line_60)
+    _print_timing_summary(calc)
     print("Category       | Count | Percentage")
     print(single_line_60)
     for category, spis in spi_results.items():

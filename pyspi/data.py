@@ -94,11 +94,13 @@ class Data:
                 n_processes=n_processes,
                 n_observations=n_observations,
             )
-            if procnames is not None and len(procnames) != self.n_processes:
-                raise ValueError(
-                    f"procnames length ({len(procnames)}) does not match "
-                    f"n_processes ({self.n_processes})."
-                )
+            if procnames is not None:
+                if len(procnames) != self.n_processes:
+                    raise ValueError(
+                        f"procnames length ({len(procnames)}) does not match "
+                        f"n_processes ({self.n_processes})."
+                    )
+                self._procnames = list(procnames)
 
     @property
     def name(self):
@@ -303,9 +305,6 @@ class Data:
 _DATASETS = {
     "forex":           ("forex.npy",           "sp", "Foreign-exchange rates (250 obs, 7 processes)."),
     "cml":             ("cml.npy",             "sp", "Coupled map lattice (500 obs, 10 processes)."),
-    "cml7":            ("cml7.npy",            "sp", "7-process coupled map lattice (100 obs)."),
-    "kuramoto":        ("kuramoto_7.npy",      "sp", "7-oscillator Kuramoto model (100 obs)."),
-    "var1":            ("var1_7.npy",          "sp", "7-process VAR(1) process (100 obs)."),
     "standard_normal": ("standard_normal.npy", "sp", "i.i.d. standard normal null model (200 obs, 5 processes)."),
 }
 

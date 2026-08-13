@@ -94,7 +94,7 @@ Try it on a bundled example dataset:
 ```python
 from pyspi.data import load_dataset, available_datasets
 
-available_datasets()                   # forex, cml, cml7, kuramoto, var1, standard_normal
+available_datasets()                   # forex, cml, standard_normal
 calc = Calculator(dataset=load_dataset("forex"), config="fabfour")
 calc.compute()
 ```

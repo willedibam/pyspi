@@ -1,6 +1,7 @@
 """Regenerate the baseline SPI tables used by ``tests/test_baseline_drift.py``.
 
-For each bundled benchmark dataset this runs the full Calculator (all 328 SPIs)
+For each frozen test fixture in ``tests/data/fixtures/`` this runs the full
+Calculator (all 328 SPIs)
 once and stores the resulting MxM matrix per SPI in a single compressed
 ``.npz`` file under ``tests/data/baselines/``.
 
@@ -20,7 +21,7 @@ handful of estimator-based SPIs that consume the global RNG are pinned by
 Usage
 -----
     python tests/tools/generate_benchmark_tables.py                # all three
-    python tests/tools/generate_benchmark_tables.py -d cml7
+    python tests/tools/generate_benchmark_tables.py -d cml_M5_T100
     python tests/tools/generate_benchmark_tables.py --out /tmp/baselines
 """
 import argparse
@@ -30,15 +31,23 @@ import time
 import numpy as np
 
 from pyspi.calculator import Calculator
-from pyspi.data import load_dataset
+from pyspi.data import Data
 
-# Datasets that the drift suite tracks. All are 7-process / 100-observation
-# frozen fixtures (see generate_benchmark_datasets.py for var1 and kuramoto).
-DATASETS = ("cml7", "var1", "kuramoto")
+# Datasets that the drift suite tracks. These are test fixtures, not shipped
+# data: they live under tests/data/fixtures/ and are built by
+# tests/tools/generate_fixtures.py. Their names encode (M processes, T obs).
+DATASETS = ("var1_M3_T100", "cml_M5_T100", "kuramoto_M7_T100")
 
-# <repo>/tests/tools/this_file.py -> <repo>/tests/data/baselines
+# <repo>/tests/tools/this_file.py -> <repo>/tests/data/{baselines,fixtures}
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_OUT = os.path.join(os.path.dirname(_HERE), "data", "baselines")
+FIXTURE_DIR = os.path.join(os.path.dirname(_HERE), "data", "fixtures")
+
+
+def load_fixture(dataset_name):
+    """Load a frozen test fixture; stored (observations, processes) -> 'sp'."""
+    return Data(data=os.path.join(FIXTURE_DIR, f"{dataset_name}.npy"),
+                dim_order="sp", name=dataset_name)
 
 # Reserved npz keys for provenance; the loader ignores anything dunder-wrapped.
 META_PREFIX = "__"
@@ -47,7 +56,7 @@ META_PREFIX = "__"
 def build_tables(dataset_name, config="full", seed=42):
     """Compute every SPI on ``dataset_name`` and return ``{spi_key: MxM array}``."""
     np.random.seed(seed)
-    calc = Calculator(dataset=load_dataset(dataset_name), config=config)
+    calc = Calculator(dataset=load_fixture(dataset_name), config=config)
     calc.compute()
     return {spi: calc.table[spi].to_numpy() for spi in calc.spis}
 
