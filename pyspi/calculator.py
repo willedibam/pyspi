@@ -388,6 +388,7 @@ class Calculator:
 
         if n_jobs is None:
             n_jobs = int(os.getenv("PYSPI_N_JOBS", "1"))
+        _parallel.guard_oversubscription(n_jobs)
 
         spi_keys = list(self.spis.keys())
         M = self.dataset.n_processes

@@ -32,6 +32,10 @@ from typing import Optional
 
 import numpy as np
 
+from ._logging import get_logger
+
+logger = get_logger("pyspi.parallel")
+
 
 def default_mp_context() -> str:
     """Best start method for the current platform.
@@ -92,6 +96,76 @@ def _pin_blas_env() -> None:
     """
     for var in _BLAS_ENV_VARS:
         os.environ[var] = "1"
+
+
+def available_cores() -> int:
+    """Cores this process may actually use.
+
+    ``sched_getaffinity`` honours cgroup/cpuset pinning, so under PBS or Slurm
+    this returns the cores the scheduler actually granted -- not the machine's
+    physical core count. That distinction is the whole point of the check in
+    :func:`guard_oversubscription`.
+    """
+    try:
+        return len(os.sched_getaffinity(0))  # Linux
+    except AttributeError:
+        return os.cpu_count() or 1
+
+
+def _requested_threads() -> int:
+    """Largest thread count any BLAS/OpenMP backend has been told to use."""
+    counts = [1]
+    for var in _BLAS_ENV_VARS:
+        try:
+            counts.append(int(os.environ.get(var, "1") or 1))
+        except ValueError:
+            pass
+    return max(counts)
+
+
+def guard_oversubscription(n_jobs: int) -> None:
+    """Warn -- or intervene -- when threads x processes exceeds the cores we hold.
+
+    The dangerous case is dataset-level parallelism on a cluster: many
+    single-core pyspi processes, each inheriting a site-wide
+    ``OMP_NUM_THREADS=8``, so a 48-core node runs 384 threads and thrashes.
+    ``pyspi/__init__`` only *defaults* the variable to 1, so an inherited value
+    survives by design -- a user who sets it deliberately should keep it.
+
+    When the scheduler granted exactly one core, more than one thread is never
+    right, so that case is pinned outright. Anything else only warns, since
+    pyspi cannot see how many sibling processes the scheduler started.
+    """
+    threads = _requested_threads()
+    cores = available_cores()
+    requested = n_jobs * threads
+    if requested <= cores:
+        return
+
+    if cores == 1 and threads > 1:
+        _pin_blas_env()
+        try:
+            from threadpoolctl import threadpool_limits
+            global _THREADPOOL_LIMITER
+            _THREADPOOL_LIMITER = threadpool_limits(limits=1)
+        except ImportError:
+            pass
+        logger.warning(
+            "Only 1 core is available to this process but the BLAS thread count "
+            "is %d; pinned it to 1. This is the usual symptom of a scheduler "
+            "array job inheriting a site-wide OMP_NUM_THREADS -- set "
+            "OMP_NUM_THREADS=1 in your job script to silence this.",
+            threads,
+        )
+        return
+
+    logger.warning(
+        "Oversubscription: n_jobs=%d x %d BLAS thread(s) = %d workers for %d "
+        "available core(s). If you are running one dataset per process, set "
+        "OMP_NUM_THREADS=1; if you meant to parallelise within this dataset, "
+        "lower n_jobs.",
+        n_jobs, threads, requested, cores,
+    )
 
 
 _THREADPOOL_LIMITER = None  # module-global so the limiter is never GC'd
