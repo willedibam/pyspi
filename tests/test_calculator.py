@@ -1,4 +1,4 @@
-from pyspi.calculator import (Calculator, Data, CalculatorFrame,
+from pyspi.calculator import (Calculator, Data, CalculatorFrame, CorrelationFrame,
                               load_spis_from_yaml, resolve_config, bundled_configs)
 from pyspi.data import available_datasets, load_dataset
 import numpy as np 
@@ -323,6 +323,33 @@ def test_correlation_frame_normal_operation():
     cf = calc_frame.get_correlation_df()
 
     assert not(cf[0].empty), "Correlation frame is empty."
+
+
+def test_correlation_frame_with_labels():
+    """The with_labels=True path was silently broken by a stale method name.
+
+    It called Calculator.getstatlabels(), which does not exist (the method is
+    get_stat_labels). Nothing exercised it, so it never surfaced.
+    """
+    datasets = [Data(data=np.random.randn(3, 100)) for _ in range(3)]
+    frame = CalculatorFrame(datasets=datasets, names=['d1', 'd2', 'd3'],
+                            labels=['a', 'b', 'c'], config='fabfour')
+    frame.compute()
+    mdf, shapes, mlabels, dlabels = frame.get_correlation_df(with_labels=True)
+    assert not mdf.empty
+    assert mlabels and dlabels
+
+
+def test_correlation_frame_constructs():
+    """CorrelationFrame itself, which no test previously instantiated."""
+    datasets = [Data(data=np.random.randn(3, 100)) for _ in range(3)]
+    frame = CalculatorFrame(datasets=datasets, names=['d1', 'd2', 'd3'],
+                            labels=['a', 'b', 'c'], config='fabfour')
+    frame.compute()
+    corr = CorrelationFrame(frame)
+    assert corr.n_datasets == 3
+    assert corr.n_spis == 4
+    assert not corr.mdf.empty
 
 def test_normalisation_flag():
     """Test whether the normalisation flag when instantiating

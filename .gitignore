@@ -18,3 +18,11 @@ dist/
 # Editor / OS
 .DS_Store
 .vscode/
+
+# Exploratory notebooks: regenerable from bench/results/cells + analyse_cells,
+# and they carry large non-rendering outputs. report.md is the tracked summary.
+bench/results/analysis/*.ipynb
+
+# Local assistant instructions
+CLAUDE.md
+.claude/

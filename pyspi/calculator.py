@@ -563,7 +563,7 @@ class Calculator:
         cf.columns.name = "SPI-2"
 
         if with_labels:
-            return cf, self.getstatlabels()
+            return cf, self.get_stat_labels()
         else:
             return cf
 
