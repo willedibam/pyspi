@@ -29,7 +29,7 @@ JIDT at T=1600:
 Gaussian/kernel MI, kernel entropy and symbolic TE agree to machine precision.
 The gaussian-entropy offset is a deterministic ridge term (the analogue of
 JIDT's stochastic `NOISE_LEVEL_TO_ADD`). The k-NN estimators differ at their
-finite-sample noise floor, shrinking as O(1/sqrt(N)).
+finite-sample noise floor, shrinking as $\mathcal{O}(1/\sqrt{N})$.
 
 The harness itself is preserved at tag `jidt-parity-final`:
 `git checkout jidt-parity-final -- bench/jidt_parity/`.
