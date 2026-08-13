@@ -266,9 +266,9 @@ class Data:
         try:
             self._data = np.delete(self._data, procs, axis=0)
         except IndexError:
-            print(
-                f"Process {procs} is out of bounds of multivariate"
-                f" time-series data with size {self.data.n_processes}"
+            logger.error(
+                "Process %s is out of bounds of multivariate time-series data "
+                "with %d process(es)", procs, self.n_processes,
             )
 
         self._reset_data_size()

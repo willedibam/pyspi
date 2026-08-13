@@ -63,10 +63,6 @@ testing = [
 tsfile = [
     "aeon>=1.0",
 ]
-# Optional: write the results table as parquet from the CLI (--output x.parquet).
-parquet = [
-    "pyarrow>=14",
-]
 # Optional: the compute-cost benchmark suite and its analysis notebook (bench/).
 # Not needed to use pyspi.
 bench = [

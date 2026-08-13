@@ -81,8 +81,19 @@ The harness itself is preserved at tag `jidt-parity-final`:
   fixtures moved to `tests/` and no longer ship in the wheel.
 - Per-SPI timings are printed after `compute()` (total and slowest five).
   `calc.timings` was always populated but never surfaced.
-- The CLI writes `.pkl` by default; output format follows the file extension
-  (`.pkl`, `.csv`, `.parquet`). Parquet needs `pip install 'pyspi[parquet]'`.
+- **New `Calculator.save()` and `pyspi.load_table()`.** Results had no
+  documented persistence path from the Python API at all -- only the CLI wrote
+  files. `.npz` is now the canonical format: it stores the results in their
+  natural `(n_spis, M, M)` shape plus names, round-trips exactly, and needs
+  nothing beyond numpy. `.csv` remains as a one-way human-readable export.
+- **Dropped pickle and parquet output.** Pickle is version-fragile and executes
+  arbitrary code on load, which is wrong for an archival scientific artifact.
+  Parquet is columnar and built for heterogeneous tabular data; for a dense
+  float tensor it bought nothing over `.npz` while costing a ~40 MB pyarrow
+  dependency. The `parquet` extra is gone.
+- A config that keeps only part of a shared-cache group now warns, since the
+  cache is built regardless and the remaining members are close to free. Only
+  applies to user-written configs and to caches expensive enough to matter.
 - `JIDTBase` renamed to `InfoTheoryBase`. Config files are unaffected.
 
 ### Dependencies
@@ -96,7 +107,7 @@ The harness itself is preserved at tag `jidt-parity-final`:
   and modern setuptools is usable.
 - `pandas>=2.1` for `DataFrame.stack(future_stack=True)`, the pandas 3
   semantics.
-- New extras: `parquet`, `bench`. `testing` is unchanged.
+- New extra: `bench`. `testing` is unchanged.
 
 ### Testing
 

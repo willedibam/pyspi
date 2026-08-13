@@ -139,6 +139,16 @@ def guard_oversubscription(n_jobs: int) -> None:
     threads = _requested_threads()
     cores = available_cores()
     requested = n_jobs * threads
+
+    # pyEDM (ConvergentCrossMapping) self-parallelises over *processes*, so no
+    # BLAS thread count covers it. It is otherwise pinned only inside parallel
+    # workers, which leaves the one-dataset-per-core cluster pattern
+    # (n_jobs=1 on a 1-core allocation) free to fan out to cpu_count() from
+    # every one of them. Checked before the arithmetic below, because with
+    # threads=1 that case is not oversubscribed on the thread axis at all.
+    if cores <= n_jobs:
+        os.environ.setdefault("PYSPI_PIN_BACKENDS", "1")
+
     if requested <= cores:
         return
 

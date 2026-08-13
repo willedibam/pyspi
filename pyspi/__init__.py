@@ -16,3 +16,8 @@ logging.getLogger("pyspi").addHandler(logging.NullHandler())
 # NumPy 2 removed np.NaN; some legacy code paths still reference it.
 if not hasattr(np, "NaN"):
     np.NaN = np.nan
+
+
+from .calculator import Calculator, load_table  # noqa: E402
+
+__all__ = ["Calculator", "load_table"]

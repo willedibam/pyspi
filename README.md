@@ -85,12 +85,19 @@ calc.compute()                         # compute every SPI
 
 calc.table                             # rows = processes, columns = (SPI, process)
 calc.table["cov_EmpiricalCovariance"]  # one SPI's 5x5 matrix
+
+calc.save("results.npz")               # canonical on-disk format
+pyspi.load_table("results.npz")        # round-trips exactly
 ```
+
+Results are stored as an `(n_spis, M, M)` array plus the SPI and process names,
+which is the data's natural shape. `.csv` is also accepted for eyeballing small
+results, but it is one-way and impractical for the full SPI set.
 
 Or from the command line, writing a results table next to your data:
 
 ```bash
-python -m pyspi compute --data ts.npy --config fast --n-jobs 4
+python -m pyspi compute --data ts.npy --config fast --n-jobs 4 --output results.npz
 ```
 
 Try it on a bundled example dataset:

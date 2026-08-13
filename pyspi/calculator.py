@@ -98,7 +98,98 @@ def resolve_config(config):
     return str(path)
 
 
-def load_spis_from_yaml(configfile):
+def warn_partial_cache_buckets(spis):
+    """Warn when a config keeps only part of a shared-cache group.
+
+    Several SPI families build one expensive cached intermediate on the Data
+    object and then derive cheap variants from it (``ccm``, ``spectral_mv``,
+    ``barycenter``, ...). The cache is built as soon as *any* member runs, so
+    keeping a strict subset pays the full cache cost for fewer SPIs -- the
+    remaining members are close to free. ``bench/cut_config.py`` already snaps
+    generated configs up to whole buckets; this gives a hand-written config
+    the same nudge.
+    """
+    # Only caches expensive enough for the advice to matter. Amortized cost per
+    # SPI at the M=16, T=800 anchor cell (bench/results/analysis/report.md):
+    #   ccm 292.7s | barycenter 11.1s | spectral_bv 1.6s | spectral_mv, coint,
+    #   covariance all <0.3s.
+    # Warning on the cheap ones is noise: fabfour deliberately keeps 1 of 32
+    # covariance SPIs, and the whole covariance cache is 0.6s.
+    EXPENSIVE = {"ccm", "barycenter"}
+
+    from collections import defaultdict
+
+    def bucket(spi):
+        """``(namespace, *cache_subkey)`` -- the key that actually shares a cache.
+
+        Namespace alone is too coarse: ``_cache_subkey`` splits one namespace
+        into independent caches (Barycenter caches per mode, so bary_dtw and
+        bary_softdtw share nothing).
+        """
+        ns = getattr(type(spi), "_cache_namespace", None)
+        if ns is None:
+            return None
+        return (ns, *tuple(getattr(spi, "_cache_subkey", ())))
+
+    # Keyed by identifier, not class: a bucket is a set of *variants* (ccm is
+    # one class with nine configs), and it is the variants that share the cache.
+    kept = defaultdict(set)
+    for key, spi in spis.items():
+        b = bucket(spi)
+        if b is not None:
+            kept[b].add(key)
+    if not kept:
+        return
+    try:
+        full = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    except Exception:  # never let an advisory check break a run
+        return
+    available = defaultdict(set)
+    for key, spi in full.items():
+        b = bucket(spi)
+        if b is not None:
+            available[b].add(key)
+    for bkey, have in sorted(kept.items(), key=lambda kv: str(kv[0])):
+        ns = bkey[0]
+        if ns not in EXPENSIVE:
+            continue
+        missing = sorted(available.get(bkey, set()) - have)
+        if not missing:
+            continue
+        shown = ", ".join(missing[:3]) + (f", +{len(missing) - 3} more" if len(missing) > 3 else "")
+        logger.warning(
+            "Config keeps %d of %d SPIs sharing the '%s' cache. That cache is "
+            "built regardless, so the other %d (%s) are close to free -- "
+            "keeping a strict subset pays the full cache cost for fewer SPIs.",
+            len(have), len(have) + len(missing), ns, len(missing), shown,
+        )
+
+
+def load_table(path):
+    """Load a results table written by :meth:`Calculator.save`.
+
+    Returns the same DataFrame ``Calculator.table`` returns: rows are
+    processes, columns are a ``(spi, process)`` MultiIndex. Only ``.npz``
+    round-trips exactly -- ``.csv`` is a one-way human-readable export.
+    """
+    path = Path(path)
+    if path.suffix != ".npz":
+        raise ValueError(
+            f"Can only load '.npz' (got '{path.suffix}'). CSV export is one-way; "
+            f"re-run the calculation or save as .npz."
+        )
+    with np.load(path, allow_pickle=True) as f:
+        values, spis, procs = f["values"], list(f["spis"]), list(f["processes"])
+    table = pd.DataFrame(
+        data=np.concatenate(list(values), axis=1),
+        columns=pd.MultiIndex.from_product([spis, procs], names=["spi", "process"]),
+        index=procs,
+    )
+    table.columns.name = "process"
+    return table
+
+
+def load_spis_from_yaml(configfile, quiet=False):
     """Instantiate all SPIs from a configfile.
 
     Returns a dict mapping identifier to SPI instance.
@@ -109,11 +200,12 @@ def load_spis_from_yaml(configfile):
     emitted via the ``pyspi.calculator`` logger at INFO level.
     """
     spis = {}
-    logger.info("Loading configuration file: %s", configfile)
+    log = (lambda *a, **k: None) if quiet else logger.info
+    log("Loading configuration file: %s", configfile)
     with open(configfile) as f:
         yf = yaml.load(f, Loader=yaml.FullLoader)
     for module_name, module_spis in yf.items():
-        logger.info("Importing module %s", module_name)
+        log("Importing module %s", module_name)
         module = importlib.import_module(module_name, __package__)
         for fcn, entry in (module_spis or {}).items():
             family_labels = entry.get("labels")
@@ -124,14 +216,14 @@ def load_spis_from_yaml(configfile):
                 spi = getattr(module, fcn)()
                 _merge_spi_labels(spi, family_labels)
                 spis[spi.identifier] = spi
-                logger.info('[%d] %s.%s(x,y) -> "%s"', len(spis), module_name, fcn, spi.identifier)
+                log('[%d] %s.%s(x,y) -> "%s"', len(spis), module_name, fcn, spi.identifier)
                 continue
             for params in configs:
                 params, config_labels = _split_config_params(params)
                 spi = getattr(module, fcn)(**params)
                 _merge_spi_labels(spi, family_labels, config_labels)
                 spis[spi.identifier] = spi
-                logger.info('[%d] %s.%s(x,y,%s) -> "%s"', len(spis), module_name, fcn, params, spi.identifier)
+                log('[%d] %s.%s(x,y,%s) -> "%s"', len(spis), module_name, fcn, params, spi.identifier)
     return spis
 
 
@@ -226,6 +318,11 @@ class Calculator:
         self._labels = labels
 
         logger.info("%d SPI(s) were successfully initialised.", len(self.spis))
+        # Bundled configs are curated deliberately -- sonnet, for instance, is
+        # one representative SPI per module, not a cost-optimised set -- so the
+        # advice only applies to configs the user wrote.
+        if Path(configfile).parent != CONFIG_DIR:
+            warn_partial_cache_buckets(self._spis)
 
         if dataset is not None:
             self.load_dataset(dataset)
@@ -348,6 +445,34 @@ class Calculator:
             index=self._dataset.procnames,
         )
         self._table.columns.name = "process"
+
+    def save(self, path):
+        """Write the results table to ``path``; the format follows the suffix.
+
+        ``.npz`` (recommended) stores the results in their natural shape -- an
+        ``(n_spis, M, M)`` float array plus the SPI and process names -- and
+        round-trips exactly through :func:`pyspi.load_table`. ``.csv`` is for
+        eyeballing small results; it is impractical for the full SPI set.
+        """
+        path = Path(path)
+        M = self.dataset.n_processes
+        if path.suffix == ".csv":
+            self.table.to_csv(path)
+        elif path.suffix == ".npz":
+            keys = list(self.spis)
+            values = np.stack([self.table[k].to_numpy(dtype=float) for k in keys])
+            np.savez_compressed(
+                path, values=values,
+                spis=np.array(keys, dtype=object),
+                processes=np.array(self.dataset.procnames, dtype=object),
+            )
+        else:
+            raise ValueError(
+                f"Unsupported suffix '{path.suffix}'. Use '.npz' (recommended) "
+                f"or '.csv'."
+            )
+        logger.info("Wrote %d SPI(s) x %dx%d -> %s", self.n_spis, M, M, path)
+        return path
 
     def compute(
         self,
@@ -939,7 +1064,7 @@ class CorrelationFrame:
                 index=pvals.columns,
             )
             for f1 in pvals.columns:
-                print(f"Computing significance for {f1}...")
+                logger.info("Computing significance for %s...", f1)
                 for f2 in [
                     f
                     for f in pvals.columns
@@ -1007,8 +1132,9 @@ class CorrelationFrame:
         # Iterate through all
         if np.count_nonzero(matches) > 1:
             if verbose:
-                print(
-                    f"More than one match in for {instance} whilst searching for {classes} within {labels}). Choosing first one."
+                logger.warning(
+                    "More than one match for %s whilst searching for %s within "
+                    "%s. Choosing the first.", instance, classes, labels,
                 )
 
         try:
@@ -1016,7 +1142,8 @@ class CorrelationFrame:
             return myid
         except (TypeError, IndexError):
             if verbose:
-                print(f"{instance} has no match in {classes}. Options are {labels}")
+                logger.warning("%s has no match in %s. Options are %s",
+                               instance, classes, labels)
             return -1
 
     @staticmethod

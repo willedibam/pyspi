@@ -360,3 +360,34 @@ def test_normalisation_flag():
     
     assert (calc_loaded_dataset == data).all(), f"Calculator zscore=False not producing the correct output." 
     
+
+
+def test_save_load_npz_roundtrip(tmp_path):
+    """.npz is the canonical on-disk format and must round-trip exactly."""
+    import pyspi
+    d = Data(np.random.randn(4, 120), procnames=['w', 'x', 'y', 'z'])
+    calc = Calculator(dataset=d, config='fabfour')
+    calc.compute()
+
+    path = calc.save(tmp_path / "r.npz")
+    back = pyspi.load_table(path)
+    assert back.equals(calc.table)
+    assert list(back.index) == ['w', 'x', 'y', 'z']
+
+
+def test_save_csv_and_rejects_unknown_suffix(tmp_path):
+    d = Data(np.random.randn(3, 100))
+    calc = Calculator(dataset=d, config='fabfour')
+    calc.compute()
+
+    assert calc.save(tmp_path / "r.csv").exists()
+    with pytest.raises(ValueError, match="Unsupported suffix"):
+        calc.save(tmp_path / "r.pkl")
+
+
+def test_load_table_rejects_non_npz(tmp_path):
+    import pyspi
+    p = tmp_path / "r.csv"
+    p.write_text("not npz")
+    with pytest.raises(ValueError, match="Can only load"):
+        pyspi.load_table(p)
