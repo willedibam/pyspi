@@ -954,14 +954,16 @@
       statistic: max
 
   DebiasedSquaredPhaseLagIndex:
-    # Disabled: over a WIDE band the max saturates. Debiased squared PLI
-    # attains 1 whenever the sign of the imaginary coherency is consistent
-    # across tapers at any single frequency, and a wide band almost always
-    # contains such a bin -- measured constant at 1.000000 for every pair on
-    # white/AR/coupled data at T=100, 500 and 2000. This is a property of the
-    # BAND, not the statistic: over a narrow band (e.g. fmin 0.2, fmax 0.25)
-    # it discriminates normally (range 0.2-1.0 at T<=500). Re-enable with a
-    # narrow band, or keep the `mean` variants, which are unaffected.
+    # Disabled: the `max` band statistic is an indicator, not a graded measure.
+    # Debiased squared PLI reaches exactly 1 whenever the sign of the imaginary
+    # coherency is consistent across tapers at any one frequency, and the band
+    # maximum then pins there for nearly every pair. Measured over M in {3,5,8},
+    # T in {100,250,500,2000}, white/AR/coupled data and all three bundled
+    # bands: constant at 1.000000 for T >= 500, and at shorter T it takes only
+    # 2-3 distinct values with ~90% of pairs still at exactly 1 (e.g. M=8,
+    # T=100: 52 of 56 pairs at 1.0, 4 at 0.2). The `mean` variant on the same
+    # data gives 17 distinct values spanning -0.108 to 0.104 and is kept.
+    # Re-enable only with evidence that some regime makes the maximum graded.
     labels:
       - undirected
       - linear
@@ -992,8 +994,8 @@
 #      statistic: max
 
   DebiasedSquaredWeightedPhaseLagIndex:
-    # Disabled: same wide-band saturation as DebiasedSquaredPhaseLagIndex
-    # above. Narrow bands are fine; the `mean` variants are unaffected.
+    # Disabled: same indicator behaviour as DebiasedSquaredPhaseLagIndex above
+    # (M=8, T=100: 52 of 56 pairs at exactly 1.0). The `mean` variant is kept.
     labels:
       - undirected
       - linear

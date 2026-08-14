@@ -135,8 +135,8 @@ Disabled variants are **commented out in the shipped configs rather than deleted
 | `te_symbolic_k-10_kt-1_l-1_lt-1` | `10!` symbols against ~91 samples at `T=100`: every count is 0 or 1, so the value reflects the sample size, not dependence. Still constructible for long series. |
 | `di_kernel_W-0.5` | ~3.8-4.4 on independent data at every `T` from 100 to 8000. |
 | `di_kozachenko` | Negative values, for a nonnegative quantity. |
-| `dspli_multitaper_max_*` (3) | Degenerate **at the bundled bands**, which are all wide. Debiased squared PLI reaches 1 whenever the sign of the imaginary coherency is consistent across tapers at any single frequency, and a wide band almost always contains such a bin: measured constant at 1.000000 for every pair on white/AR/coupled data at T=100, 500 and 2000. Over a *narrow* band it discriminates normally (range 0.2–1.0), so this is a property of the band, not the statistic. The `mean` variants are unaffected. |
-| `dswpli_multitaper_max_*` (3) | Same wide-band saturation, weighted form. |
+| `dspli_multitaper_max_*` (3) | The `max` band statistic is an indicator, not a graded measure: it pins at exactly 1.000000 for nearly every pair. Measured over M ∈ {3,5,8}, T ∈ {100,250,500,2000}, white/AR/coupled data and all three bundled bands — constant for T ≥ 500, and at shorter T only 2–3 distinct values with ~90% of pairs still at 1 (M=8, T=100: 52 of 56 pairs at 1.0). The `mean` variant on the same data gives 17 distinct values over −0.108 to 0.104 and is kept. |
+| `dswpli_multitaper_max_*` (3) | Same indicator behaviour, weighted form. |
 
 **Added (1)**
 
