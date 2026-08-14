@@ -89,23 +89,58 @@ def filter_spis(keywords, output_name = None, configfile= None):
         # handle all other exceptions
         raise IOError(f"An error occurred while trying to read '{configfile}': {e}")
 
-    # new dictionary to be converted to final YAML
+    # Filter on the labels each SPI *actually* carries once instantiated, not on
+    # the family labels written in the YAML. Several traits are set per variant
+    # in __init__ -- 'antisymmetric' for phase measures whose band statistic is
+    # the mean, 'directed' for cointegration's aeg method -- and are invisible
+    # in the raw file. Matching families also selected every config in them,
+    # so a family could not be filtered down to the variants that qualified.
+    import importlib
+    from pyspi.calculator import (
+        _merge_spi_labels,
+        _split_config_params,
+        _expand_lagged_correlation_configs,
+    )
+
     filtered_subset = {}
     spis_found = 0
+    keywords = set(keywords)
 
-    for module in yf:
+    for module_name in yf:
+        module = importlib.import_module(module_name, "pyspi")
         module_spis = {}
-        for spi in yf[module]:
-            spi_labels = yf[module][spi].get('labels') or []
-            if all(keyword in spi_labels for keyword in keywords):
-                module_spis[spi] = yf[module][spi]
-                if yf[module][spi].get('configs'):
-                    spis_found += len(yf[module][spi].get('configs'))
-                else:
+        for spi_name, entry in (yf[module_name] or {}).items():
+            entry = dict(entry or {})
+            family_labels = entry.get("labels")
+            configs = entry.get("configs")
+            # Same expansion the loader applies, so max_tau reaches the
+            # constructor as the tau values it stands for.
+            if spi_name == "LaggedCorrelation" and configs is not None:
+                configs = _expand_lagged_correlation_configs(configs)
+
+            if configs is None:
+                spi = getattr(module, spi_name)()
+                _merge_spi_labels(spi, family_labels)
+                if keywords <= set(spi.labels or []):
+                    module_spis[spi_name] = entry
                     spis_found += 1
+                continue
+
+            kept = []
+            for params in configs:
+                clean, config_labels = _split_config_params(params)
+                spi = getattr(module, spi_name)(**clean)
+                _merge_spi_labels(spi, family_labels, config_labels)
+                if keywords <= set(spi.labels or []):
+                    kept.append(params)
+            if kept:
+                kept_entry = dict(entry)
+                kept_entry["configs"] = kept
+                module_spis[spi_name] = kept_entry
+                spis_found += len(kept)
 
         if module_spis:
-            filtered_subset[module] = module_spis
+            filtered_subset[module_name] = module_spis
 
     # check that > 0 SPIs found
     if spis_found == 0:

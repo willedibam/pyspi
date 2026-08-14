@@ -89,6 +89,33 @@ scientifically material ones:
   digest and errors, and are validated on load. Tables written by pyspi < 3.0.0
   will not load — re-save them from a `Calculator`.
 
+- **`DirectedInfo` did not implement directed information.** It summed
+  `H(Y^i)/i` minus causal entropy, so with a source statistically independent of
+  the target it returned 0.007 at target autocorrelation 0 and 1.53 at 0.95 --
+  it measured target self-predictability. It now implements Massey's
+  `sum_i [H(Y_i|Y^{i-1}) - H(Y_i|Y^{i-1},X^i)]`, validated against the closed
+  form `0.5*ln(1+c^2)`. Only the Gaussian variant is validated, so the kernel and
+  kozachenko variants are no longer bundled. `n` now reaches the identifier for
+  `DirectedInfo` and `CausalEntropy`, renaming those SPIs.
+
+- **Wavelet phase-slope index negated after reducing the band.** Only a
+  statistic commuting with negation may be applied first: `max_f(-v) = -min_f(v)`.
+  The fill now happens per frequency. `mean` is antisymmetric, `max` asymmetric.
+
+- **Importing pyspi reseeded NumPy's global RNG.** `pyspi.lib.ids` called
+  `np.random.seed(1717)` at import, silently overriding the caller's seed --
+  stochastic SPIs looked reproducible but ignored it. Removed.
+
+- **`filter_spis` matched raw YAML family labels**, so per-variant traits set in
+  `__init__` were invisible (`filter_spis(["antisymmetric"])` returned nothing
+  despite 18 matching SPIs) and a matching family selected all of its configs.
+  It now resolves each config and matches on the labels the SPI actually carries.
+
+- **Gaussian joint/conditional entropy used two different regularisations.**
+  The vectorised multivariate path clipped `r^2` while the scalar path applied a
+  ridge, so `bivariate()` and `multivariate()` disagreed by 8.4 nats on singular
+  data. Both now share one primitive.
+
 New: `Calculator.errors`, `Calculator.run_spec`, `Calculator.run_digest`; an
 `antisymmetric` structural label for measures satisfying `A[i,j] == -A[j,i]`.
 

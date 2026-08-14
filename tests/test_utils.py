@@ -13,13 +13,30 @@ def config_file(tmp_path, mock_yaml_content):
 
 @pytest.fixture
 def mock_yaml_content():
+    """Real modules, classes and config params.
+
+    filter_spis now instantiates each config and matches on the labels the SPI
+    actually carries, because several traits are only set in __init__ and are
+    invisible in the raw YAML. That means the fixture has to be loadable: fake
+    module names and integer configs cannot be instantiated.
+    """
     return {
-        "module1": {
-            "spi1": {"labels": ["keyword1", "keyword2"], "configs": [1, 2]},
-            "spi2": {"labels": ["keyword1"], "configs": [3]},
+        ".statistics.basic": {
+            "Covariance": {
+                "labels": ["keyword1", "keyword2"],
+                "configs": [{"estimator": "EmpiricalCovariance"},
+                            {"estimator": "LedoitWolf"}],
+            },
+            "SpearmanR": {
+                "labels": ["keyword1"],
+                "configs": [{"squared": True}],
+            },
         },
-        "module2": {
-            "spi3": {"labels": ["keyword3"], "configs": [1, 2, 3]},
+        ".statistics.misc": {
+            "PowerEnvelopeCorrelation": {
+                "labels": ["keyword3"],
+                "configs": [{"orth": False, "log": False, "absolute": False}],
+            },
         },
     }
 
@@ -56,8 +73,15 @@ def test_filter_spis_normal_operation(config_file, tmp_path, monkeypatch):
                 configfile=str(config_file))
 
     written = yaml.safe_load((tmp_path / "mock_filtered_config.yaml").read_text())
-    assert written == {"module1": {"spi1": {"labels": ["keyword1", "keyword2"], "configs": [1, 2]}}}, \
-        "Expected filtered YAML does not match actual filtered YAML."
+    assert written == {
+        ".statistics.basic": {
+            "Covariance": {
+                "labels": ["keyword1", "keyword2"],
+                "configs": [{"estimator": "EmpiricalCovariance"},
+                            {"estimator": "LedoitWolf"}],
+            }
+        }
+    }, "Expected filtered YAML does not match actual filtered YAML."
 
 
 def test_filter_spis_io_error_on_read():
@@ -98,7 +122,14 @@ def test_loads_default_config_if_no_config_specified(tmp_path, monkeypatch):
 
     written = yaml.safe_load((tmp_path / "from_default.yaml").read_text())
     assert written, "Filtering the default config produced an empty result."
-    assert all(
-        "nonlinear" in entry["labels"]
-        for module in written.values() for entry in module.values()
-    ), "Default-config filtering returned SPIs missing the requested label."
+
+    # Assert on the labels the SPIs actually carry, not on the family block in
+    # the YAML: filtering resolves each config, and several labels are only
+    # added in __init__ (estimator-dependent 'nonlinear', 'antisymmetric' for
+    # mean-reduced phase measures), so a matching SPI's family labels need not
+    # list the keyword.
+    from pyspi.calculator import load_spis_from_yaml
+    spis = load_spis_from_yaml(str(tmp_path / "from_default.yaml"), quiet=True)
+    assert spis, "Filtered config instantiated no SPIs."
+    missing = [k for k, v in spis.items() if "nonlinear" not in (v.labels or [])]
+    assert not missing, f"Filtered config contains SPIs without the label: {missing}"

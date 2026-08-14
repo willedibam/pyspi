@@ -23,7 +23,13 @@ known rho of the generating process, never from ``np.corrcoef`` of the sample â€
 comparing against the sample correlation would reduce the Gaussian test to an
 implementation identity that cannot detect a wrong rho or a wrong log base.
 Whitening also removes the O(1/sqrt(N)) sampling noise in rho, which is what
-lets the Gaussian tolerance be 1e-9 rather than 1e-2.
+lets the Gaussian tolerance be 1e-7 rather than 1e-2. Not tighter:
+the Gaussian path ridge-regularises the covariance at 1e-8 relative
+(the deterministic analogue of JIDT's NOISE_LEVEL_TO_ADD), so identities
+assembled from several entropies cannot cancel below that order. The
+previous 1e-9 passed only because the vectorised multivariate path
+skipped the ridge, which is exactly the inconsistency that made
+bivariate() and multivariate() disagree by 8.4 nats on singular data.
 """
 import numpy as np
 import pytest
@@ -55,7 +61,7 @@ N_SMALL = 3000
 # carry genuine O(1e-2) finite-sample bias at N=20000 (KSG k=4; box kernel at
 # fixed bandwidth 0.25) â€” these are estimator properties, not slack chosen to
 # make the test pass; the measured errors are ~0.009.
-MI_ATOL = {"gaussian": 1e-9, "kraskov": 0.02, "kernel": 0.02, "kozachenko": 0.02}
+MI_ATOL = {"gaussian": 1e-7, "kraskov": 0.02, "kernel": 0.02, "kozachenko": 0.02}
 
 _ESTIMATOR_KWARGS = {"kraskov": {"prop_k": 4}, "kernel": {"kernel_width": 0.25}}
 
@@ -248,7 +254,7 @@ def test_nonnegativity_of_mi_and_te(estimator):
 # gaussian is a closed form (exact). The others are held to a bias/variance
 # budget measured over seeds: KL k=1 marginal+joint errors compound to ~0.04
 # nats at N=20000; the box kernel to ~0.03 bits.
-ENTROPY_MI_ATOL = {"gaussian": 1e-9, "kozachenko": 0.08, "kernel": 0.05}
+ENTROPY_MI_ATOL = {"gaussian": 1e-7, "kozachenko": 0.08, "kernel": 0.05}
 
 
 @pytest.mark.parametrize("estimator", ["gaussian", "kozachenko", "kernel"])
@@ -302,7 +308,7 @@ def test_mutual_info_chain_rule_gaussian():
     je = JointEntropy(estimator="gaussian").multivariate(data)[0, 1]
     ce = ConditionalEntropy(estimator="gaussian").multivariate(data)
 
-    assert mi == pytest.approx(je - ce[0, 1] - ce[1, 0], abs=1e-9)
+    assert mi == pytest.approx(je - ce[0, 1] - ce[1, 0], abs=1e-7)
     assert mi == pytest.approx(-0.5 * np.log(1 - 0.6 ** 2), abs=1e-9)
 
 

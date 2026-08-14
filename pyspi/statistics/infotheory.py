@@ -22,6 +22,24 @@ from pyspi.base import Undirected, Directed, Unsigned, parse_univariate, parse_b
 # Pure-numpy entropy calculators (drop-in replacements for JIDT)
 # ---------------------------------------------------------------------------
 
+def _gaussian_pairwise_joint_entropy(Z):
+    """Vectorised pairwise Gaussian joint entropy, matching the scalar path.
+
+    The scalar primitive (_gaussian_entropy_from_data -> _gaussian_log_det)
+    regularises with a ridge eps = 1e-8 * mean(diag(Sigma)). The vectorised
+    path used to clip r^2 to 1 - 1e-15 instead, so on singular data the two
+    disagreed by 8.406 nats -- bivariate() and multivariate() returned
+    different numbers for the same SPI. Both now apply the same ridge.
+    """
+    R = np.corrcoef(Z)
+    V = np.var(Z, axis=1, ddof=1)
+    eps = 1e-8 * (V[:, None] + V[None, :]) / 2.0
+    det = (V[:, None] + eps) * (V[None, :] + eps) - (R ** 2) * V[:, None] * V[None, :]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        JE = np.log(2 * np.pi * np.e) + 0.5 * np.log(det)
+    return np.where(det > 0, JE, np.nan)
+
+
 def _gaussian_log_det(cov, ridge_rel=1e-8):
     """log|Σ + εI| with ε = ridge_rel * mean(diag(Σ)).
 
@@ -1153,16 +1171,7 @@ class JointEntropy(InfoTheoryBase, Undirected):
     @parse_multivariate
     def multivariate(self, data):
         if self._estimator == 'gaussian':
-            Z = data.to_numpy(squeeze=True)
-            M = Z.shape[0]
-            R = np.corrcoef(Z)
-            variances = np.var(Z, axis=1, ddof=1)
-            log_var = np.log(np.maximum(variances, 1e-300))
-            r2 = np.clip(R ** 2, 0, 1 - 1e-15)
-            JE = (np.log(2 * np.pi * np.e)
-                  + 0.5 * log_var[:, None]
-                  + 0.5 * log_var[None, :]
-                  + 0.5 * np.log(1 - r2))
+            JE = _gaussian_pairwise_joint_entropy(data.to_numpy(squeeze=True))
             np.fill_diagonal(JE, np.nan)
             return JE
         return super().multivariate(data)
@@ -1187,16 +1196,10 @@ class ConditionalEntropy(InfoTheoryBase, Directed):
     def multivariate(self, data):
         if self._estimator == 'gaussian':
             Z = data.to_numpy(squeeze=True)
-            M = Z.shape[0]
-            R = np.corrcoef(Z)
             variances = np.var(Z, axis=1, ddof=1)
-            log_var = np.log(np.maximum(variances, 1e-300))
-            r2 = np.clip(R ** 2, 0, 1 - 1e-15)
-            H_marginal = 0.5 * np.log(2 * np.pi * np.e * np.maximum(variances, 1e-300))
-            JE = (np.log(2 * np.pi * np.e)
-                  + 0.5 * log_var[:, None]
-                  + 0.5 * log_var[None, :]
-                  + 0.5 * np.log(1 - r2))
+            # Marginal entropy uses the same ridge as the scalar path.
+            H_marginal = 0.5 * np.log(2 * np.pi * np.e * (variances + 1e-8 * variances))
+            JE = _gaussian_pairwise_joint_entropy(Z)
             CE = JE - H_marginal[:, None]
             np.fill_diagonal(CE, np.nan)
             return CE
