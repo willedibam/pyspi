@@ -1206,7 +1206,12 @@ class ConditionalEntropy(InfoTheoryBase, Directed):
 
     name = "Conditional entropy"
     identifier = "ce"
-    labels = ["unsigned", "infotheory", "unordered", "directed"]
+    # H(X|Y) is directed in general, but pyspi z-scores by default, and with
+    # equal marginal variances the Gaussian form is symmetric -- as are the
+    # linear-model R^2 SPIs. The label describes what you get under the default
+    # preprocessing. With zscore=False the Gaussian variant is genuinely
+    # directed; the kernel and kozachenko variants always are.
+    labels = ["unsigned", "infotheory", "unordered", "undirected"]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

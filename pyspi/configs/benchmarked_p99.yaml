@@ -567,7 +567,7 @@
 
   ConditionalEntropy:
     labels:
-      - directed
+      - undirected
       - nonlinear
       - unsigned
       - bivariate
@@ -945,15 +945,6 @@
       fmax: 0.5
       labels:
       - M12
-    - fs: 1
-      statistic: max
-    - fmin: 0
-      fmax: 0.25
-      statistic: max
-    - fmin: 0.25
-      fmax: 0.5
-      statistic: max
-
   DebiasedSquaredWeightedPhaseLagIndex:
     labels:
       - undirected
@@ -975,15 +966,6 @@
       fmax: 0.5
       labels:
       - M12
-    - fs: 1
-      statistic: max
-    - fmin: 0
-      fmax: 0.25
-      statistic: max
-    - fmin: 0.25
-      fmax: 0.5
-      statistic: max
-
   PairwisePhaseConsistency:
     labels:
       - undirected

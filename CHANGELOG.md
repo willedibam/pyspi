@@ -56,7 +56,9 @@ The kernel and kozachenko variants are dropped. Composing DI from four separatel
 
 - **Gaussian joint/conditional entropy used two different regularisations.** The vectorised multivariate path clipped `r^2` while the scalar path applied a ridge, so `bivariate()` and `multivariate()` disagreed by 8.4 nats on singular data. Both now share one primitive.
 
-New: `Calculator.errors`, `Calculator.run_spec`, `Calculator.run_digest`; an `antisymmetric` structural label for measures satisfying `A[i,j] == -A[j,i]`.
+New: `Calculator.errors`, `Calculator.run_spec`, `Calculator.run_digest`, `Calculator.to_frame()` (long-form results, one row per `(spi, source, target)`) and `Calculator.summary()`; an `antisymmetric` structural label for measures satisfying `A[i,j] == -A[j,i]`; and a useful `repr` — a computed `Calculator` previously displayed as `<pyspi.calculator.Calculator at 0x...>`.
+
+`ConditionalEntropy` is labelled `undirected`. `H(X|Y)` is directed in general, but pyspi z-scores by default and the Gaussian form is symmetric when the marginal variances are equal. The label describes behaviour under the default preprocessing; with `zscore=False` the Gaussian variant is genuinely directed, and the kernel and kozachenko variants always are.
 
 Three group-delay SPIs that shipped as silent all-NaN columns are now recorded failures (values unchanged).
 
@@ -121,9 +123,9 @@ Three group-delay SPIs that shipped as silent all-NaN columns are now recorded f
 
 ### SPI set changes
 
-`full` goes from **328 SPIs to 325**. Every change below is deliberate; nothing else moved on the frozen test fixtures.
+`full` goes from **328 SPIs to 319**. Every change below is deliberate; nothing else moved on the frozen test fixtures.
 
-**Removed (4)**
+**Removed (10)**
 
 | SPI | Why |
 |:----|:----|
@@ -131,6 +133,8 @@ Three group-delay SPIs that shipped as silent all-NaN columns are now recorded f
 | `te_symbolic_k-10_kt-1_l-1_lt-1` | `10!` symbols against ~91 samples at `T=100`: every count is 0 or 1, so the value reflects the sample size, not dependence. Still constructible for long series. |
 | `di_kernel_W-0.5` | ~3.8-4.4 on independent data at every `T` from 100 to 8000. |
 | `di_kozachenko` | Negative values, for a nonnegative quantity. |
+| `dspli_multitaper_max_*` (3) | Debiased *squared* PLI is bounded by 1, so the band maximum is exactly 1.000000 for every pair — measured at both M3/T100 and M8/T500. It cannot discriminate anything. The `mean` variants are unaffected. |
+| `dswpli_multitaper_max_*` (3) | As above, for the weighted form. |
 
 **Added (1)**
 

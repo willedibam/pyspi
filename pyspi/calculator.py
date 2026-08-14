@@ -507,6 +507,37 @@ class Calculator:
             "Do not set this property externally. Use the compute() method."
         )
 
+    def __repr__(self):
+        ds = getattr(self, "_dataset", None)
+        shape = f"{ds.n_processes}x{ds.n_observations}" if ds is not None else "no dataset"
+        done = len(self._timings)
+        state = "not computed" if not done else f"{done}/{self.n_spis} computed"
+        failed = f", {len(self._errors)} failed" if self._errors else ""
+        return f"<Calculator config={self._config!r} {shape} {state}{failed}>"
+
+    def _repr_html_(self):
+        """Rendered by Jupyter in place of the default object repr.
+
+        The bare `<Calculator at 0x...>` told you nothing about whether the run
+        had happened or how it went, which is the first thing you want after
+        calling compute().
+        """
+        s = self.summary()
+        rows = [
+            ("config", s["config"]),
+            ("dataset", f'{s["n_processes"]} x {s["n_observations"]}'),
+            ("SPIs", f'{s["n_computed"]}/{s["n_spis"]} computed'),
+            ("failed", ", ".join(s["failed"]) if s["failed"] else "none"),
+            ("time", f'{s["total_seconds"]}s'),
+            ("slowest", ", ".join(f"{k} ({v}s)" for k, v in s["slowest"][:3]) or "-"),
+        ]
+        body = "".join(
+            f'<tr><td style="text-align:left;padding-right:1em;'
+            f'color:#666">{k}</td><td style="text-align:left">{v}</td></tr>'
+            for k, v in rows
+        )
+        return f'<table><tbody>{body}</tbody></table>'
+
     def to_frame(self, dropna=True):
         """Results in long form: one row per ``(spi, source, target)``.
 

@@ -335,6 +335,11 @@ NEVER_COMPUTED = [
                          ids=[c.__name__ for c, _, _ in NEVER_COMPUTED])
 @pytest.mark.parametrize("estimator", ["gaussian", "kozachenko", "kernel"])
 def test_coupling_increases_directed_measures(cls, kwargs, sign, estimator):
+    # TimeLaggedMutualInfo is estimated directly, not from marginal entropies,
+    # so it has no Kozachenko-Leonenko path and rejects the estimator at
+    # construction (pinned in test_smoke).
+    if estimator == "kozachenko" and cls.__name__ == "TimeLaggedMutualInfo":
+        pytest.skip("rejected at construction; see test_kozachenko_rejected_for_non_entropy")
     """Each measure must separate a coupled pair from an independent one."""
     if cls is TimeLaggedMutualInfo and estimator == "kozachenko":
         pytest.xfail("TimeLaggedMutualInfo has no kozachenko path; returns NaN")
