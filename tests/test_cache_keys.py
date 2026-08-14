@@ -1,20 +1,22 @@
-"""Red tests: parameterised statistic caches must key on every parameter.
+"""Parameterised statistic caches must key on every parameter.
 
-The spectral cache exhibits two distinct defects that compound:
+These began as red tests and are now green. The spectral cache had two
+defects that compounded:
 
-1. ``NonparametricSpectral.key`` omits ``fs``, so two SPIs differing only in
-   sampling frequency collide in the cache.
-2. ``_get_cache`` *writes* the first result under ``self.measure`` (a plain
-   string) but *reads* under ``self.key`` (a tuple). The first write is
-   therefore unreachable, and staleness only surfaces from the third call
-   onward, once a tuple-keyed entry finally exists.
+1. ``NonparametricSpectral.key`` omitted ``fs``, so two SPIs differing only in
+   sampling frequency collided in the cache.
+2. ``_get_cache`` *wrote* the first result under ``self.measure`` (a plain
+   string) but *read* under ``self.key`` (a tuple). The first write was
+   therefore unreachable, and staleness only surfaced from the third call
+   onward, once a tuple-keyed entry finally existed.
 
 Defect 2 is why a naive two-call probe reports no problem. The sequence below
 (fs=1 -> 4 -> 1 -> 4) is the minimum that exposes it, and every value is
 compared against a freshly-constructed Data rather than against its
 predecessor.
 
-See tests/test_state_integrity.py for the xfail(strict=True) rationale.
+Keep these as regression tests: both defects were invisible to the obvious
+probe, and the second would return silently wrong numbers if reintroduced.
 """
 import numpy as np
 import pytest
@@ -44,7 +46,6 @@ def _fresh_value(fs):
     return _spi(fs).multivariate(_fixture_data())[0, 1]
 
 
-@pytest.mark.xfail(strict=True, reason="spectral cache key omits fs; write/read key types differ")
 def test_spectral_cache_distinguishes_sampling_frequency():
     """Alternating fs on one Data must match a fresh Data at every step."""
     data = _fixture_data()
@@ -65,7 +66,6 @@ def test_spectral_cache_distinguishes_sampling_frequency():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="cache written under a str key, read under a tuple key")
 def test_spectral_cache_uses_one_key_type():
     """The written and read cache keys must be the same type."""
     data = _fixture_data()
@@ -84,7 +84,6 @@ def test_spectral_cache_uses_one_key_type():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="fs absent from key, so identifier and cache key disagree")
 def test_cache_key_covers_every_identifier_parameter():
     """Any parameter that changes the identifier must change the cache key."""
     a, b = _spi(1), _spi(4)

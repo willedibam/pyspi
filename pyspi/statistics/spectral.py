@@ -62,10 +62,24 @@ class NonparametricSpectral(Unsigned):
 
     @property
     def key(self):
-        if isinstance(self, GroupDelay) or isinstance(self, PhaseSlopeIndex):
-            return (self.measure, self._fmin, self._fmax)
-        else:
-            return (self.measure,)
+        """Cache key: every parameter that changes the cached result.
+
+        ``fs`` is part of the key because it is passed to ``sc.Multitaper`` and
+        therefore changes both the connectivity estimate and the frequency grid.
+        Omitting it let two SPIs differing only in sampling frequency collide.
+
+        GroupDelay and PhaseSlopeIndex additionally cache a band-dependent
+        statistic, so their key carries fmin/fmax as well.
+        """
+        base = (self.measure, self._fs)
+        if isinstance(self, (GroupDelay, PhaseSlopeIndex)):
+            return base + (self._fmin, self._fmax)
+        return base
+
+    @property
+    def _freq_key(self):
+        """Frequency grid depends on fs, so it cannot live under a bare 'freq'."""
+        return ("freq", self._fs)
 
     @property
     def measure(self):
@@ -107,30 +121,37 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
 
     @property
     def _cache_subkey(self):
-        # Default: cache key is (measure,), one per class. GroupDelay and
+        # Default: one cache entry per (class, fs). GroupDelay and
         # PhaseSlopeIndex override this — their cache also keys on fmin/fmax.
-        return (type(self).__name__,)
+        # fs mirrors `key`: SPIs at different sampling frequencies do not share
+        # a cache entry, so they must not share an amortization bucket either.
+        return (type(self).__name__, self._fs)
 
     def _get_cache(self, data):
+        # One key type throughout. The previous version created the dict with a
+        # *string* key (self.measure) but read with a *tuple* key (self.key), so
+        # the first write was unreachable, the second call recomputed and stored
+        # under the tuple, and only from the third call did the cache hit --
+        # which is why a two-call probe showed no problem.
+        cache = getattr(data, "spectral_mv", None)
+        if cache is None:
+            cache = data.spectral_mv = {}
+
+        if self.key in cache:
+            return cache[self.key], cache[self._freq_key]
+
+        z = np.transpose(data.to_numpy(squeeze=True))
+        z = _ensure_time_series_3d(z)
+        m = sc.Multitaper(z, sampling_frequency=self._fs)
+        conn = sc.Connectivity.from_multitaper(m)
         try:
-            res = data.spectral_mv[self.key]
-            freq = data.spectral_mv["freq"]
-        except (AttributeError, KeyError):
-            z = np.transpose(data.to_numpy(squeeze=True))
-            z = _ensure_time_series_3d(z)
-            m = sc.Multitaper(z, sampling_frequency=self._fs)
-            conn = sc.Connectivity.from_multitaper(m)
-            try:
-                res = getattr(conn, self.measure)()
-            except TypeError:
-                res = self._get_statistic(conn)
+            res = getattr(conn, self.measure)()
+        except TypeError:
+            res = self._get_statistic(conn)
 
-            freq = conn.frequencies
-            try:
-                data.spectral_mv[self.key] = res
-            except AttributeError:
-                data.spectral_mv = {"freq": freq, self.measure: res}
-
+        freq = conn.frequencies
+        cache[self.key] = res
+        cache[self._freq_key] = freq
         return res, freq
 
     @parse_multivariate
@@ -163,8 +184,8 @@ class NonparametricSpectralBivariate(NonparametricSpectral):
         # measure extraction (DTF, dDTF, dCoh, etc.) dominates in practice
         # (~10s per class at M=16,T=800 vs <1s for the shared Multitaper).
         # Bucket amortization by class so variants of one measure share, but
-        # different measures don't get cross-amortized.
-        return (type(self).__name__,)
+        # different measures don't get cross-amortized. fs mirrors `key`.
+        return (type(self).__name__, self._fs)
 
     def _get_cache(self, data, i, j):
         """Cache Connectivity object per (i,j) pair, not per (measure,i,j).
@@ -173,33 +194,36 @@ class NonparametricSpectralBivariate(NonparametricSpectral):
         etc.) share the same Multitaper+Connectivity for a given (i,j). The expensive
         part is building the Multitaper — each measure extraction is cheap.
         """
-        measure_key = (self.measure, i, j)
+        # fs belongs in both keys: it is passed to Multitaper, so it changes the
+        # Connectivity object and the frequency grid as well as the measure.
+        measure_key = (self.measure, self._fs, i, j)
+        cache = getattr(data, "spectral_bv", None)
+        if cache is None:
+            cache = data.spectral_bv = {}
+
+        if measure_key in cache:
+            return cache[measure_key], cache[self._freq_key]
+
+        conn_key = (self._fs, i, j)
+        conns = getattr(data, "_spectral_bv_conn", None)
+        if conns is None:
+            conns = data._spectral_bv_conn = {}
+        conn = conns.get(conn_key)
+        if conn is None:
+            z = np.transpose(data.to_numpy(squeeze=True)[[i, j]])
+            z = _ensure_time_series_3d(z)
+            m = sc.Multitaper(z, sampling_frequency=self._fs)
+            conn = sc.Connectivity.from_multitaper(m)
+            conns[conn_key] = conn
+
         try:
-            res = data.spectral_bv[measure_key]
-            freq = data.spectral_bv["freq"]
-        except (KeyError, AttributeError):
-            # Check if Connectivity object already cached for this (i,j)
-            conn_key = (i, j)
-            if not hasattr(data, '_spectral_bv_conn'):
-                data._spectral_bv_conn = {}
-            conn = data._spectral_bv_conn.get(conn_key)
-            if conn is None:
-                z = np.transpose(data.to_numpy(squeeze=True)[[i, j]])
-                z = _ensure_time_series_3d(z)
-                m = sc.Multitaper(z, sampling_frequency=self._fs)
-                conn = sc.Connectivity.from_multitaper(m)
-                data._spectral_bv_conn[conn_key] = conn
+            res = getattr(conn, self.measure)()
+        except TypeError:
+            res = self._get_statistic(conn)
 
-            try:
-                res = getattr(conn, self.measure)()
-            except TypeError:
-                res = self._get_statistic(conn)
-
-            freq = conn.frequencies
-            try:
-                data.spectral_bv[measure_key] = res
-            except AttributeError:
-                data.spectral_bv = {"freq": freq, measure_key: res}
+        freq = conn.frequencies
+        cache[measure_key] = res
+        cache[self._freq_key] = freq
         return res, freq
 
     @parse_bivariate
@@ -375,8 +399,8 @@ class PhaseSlopeIndex(NonparametricSpectralMultivariate, Undirected):
 
     @property
     def _cache_subkey(self):
-        # Narrower cache: (class, fmin, fmax) per the key property override.
-        return (type(self).__name__, self._fmin, self._fmax)
+        # Narrower cache: (class, fs, fmin, fmax) per the key property override.
+        return (type(self).__name__, self._fs, self._fmin, self._fmax)
 
     def _get_statistic(self, C):
         return C.phase_slope_index(
@@ -396,8 +420,8 @@ class GroupDelay(NonparametricSpectralMultivariate, Directed):
 
     @property
     def _cache_subkey(self):
-        # Narrower cache: (class, fmin, fmax) per the key property override.
-        return (type(self).__name__, self._fmin, self._fmax)
+        # Narrower cache: (class, fs, fmin, fmax) per the key property override.
+        return (type(self).__name__, self._fs, self._fmin, self._fmax)
 
     def _get_statistic(self, C):
         return C.group_delay(
