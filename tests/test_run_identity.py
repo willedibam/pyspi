@@ -104,7 +104,6 @@ def test_checkpoint_rejects_permuted_processes(tmp_path):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="failed .error checkpoints are treated as complete")
 def test_failed_checkpoints_are_retried_by_default(tmp_path):
     """An SPI that failed previously must be recomputed, not resumed as NaN."""
     dataset = _data(seed=4)

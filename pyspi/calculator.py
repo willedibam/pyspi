@@ -295,6 +295,7 @@ class Calculator:
         self._zscore = zscore
         self._detrend = detrend
         self._timings = {}
+        self._errors = {}
         self._verbose = verbose
 
         # verbose maps to a process-global pyspi logger level (INFO vs WARNING).
@@ -338,6 +339,41 @@ class Calculator:
     @spis.setter
     def spis(self, s):
         raise Exception("Do not set this property externally.")
+
+    @property
+    def errors(self):
+        """``{identifier: "ExcType: message"}`` for every SPI that failed.
+
+        A failed SPI still occupies its column in :attr:`table`, filled with
+        NaN. Consult this before interpreting a table: a NaN column is
+        otherwise indistinguishable from a legitimately undefined statistic.
+        """
+        return dict(self._errors)
+
+    @property
+    def run_spec(self):
+        """The resolved specification of what this Calculator computes.
+
+        One canonical description of the run — the config actually resolved to,
+        the preprocessing actually applied, the dataset shape and process names
+        actually loaded, and the SPI set actually instantiated. Recorded so a
+        result can be tied back to the run that produced it rather than being
+        identified by SPI name and matrix width alone.
+        """
+        dataset = getattr(self, "_dataset", None)
+        return {
+            "config": str(self._config),
+            "configfile": str(self._configfile),
+            "zscore": bool(self._zscore),
+            "detrend": bool(self._detrend),
+            "n_processes": int(dataset.n_processes) if dataset is not None else None,
+            "n_observations": (
+                int(dataset.n_observations) if dataset is not None else None
+            ),
+            "procnames": list(dataset.procnames) if dataset is not None else None,
+            "dataset_name": dataset.name if dataset is not None else None,
+            "spi_identifiers": sorted(self._spis),
+        }
 
     @property
     def n_spis(self):
@@ -479,6 +515,7 @@ class Calculator:
         n_jobs=None,
         checkpoint_dir=None,
         resume=True,
+        retry_failed=True,
         mp_context=None,
         progress=True,
     ):
@@ -492,6 +529,9 @@ class Calculator:
                 written to ``<dir>/<identifier>.npy`` atomically. Enables resume.
             resume (bool): If True (default) and ``checkpoint_dir`` contains
                 results from a prior run, those SPIs are loaded and skipped.
+            retry_failed (bool): If True (default), checkpoints carrying an
+                ``.error`` sidecar are recomputed rather than resumed. Set
+                False to inherit a prior run's failures as-is.
             mp_context (str, optional): Multiprocessing start method when
                 ``n_jobs>1``. Default (``None``): ``"fork"`` on Linux (workers
                 inherit imported state via copy-on-write — ~2x faster startup),
@@ -523,12 +563,11 @@ class Calculator:
 
         # Resume: skip SPIs whose checkpoint exists.
         if cp_dir is not None and resume:
-            done, spi_keys = _parallel.load_checkpoints(cp_dir, spi_keys, M)
-            for key, (S, err, _t) in done.items():
-                self._table[key] = S
-                self._timings[key] = 0.0
-                if err is not None:
-                    warnings.warn(f'Checkpoint contains prior error for "{key}": {err}')
+            done, spi_keys = _parallel.load_checkpoints(
+                cp_dir, spi_keys, M, retry_failed=retry_failed
+            )
+            for key, (S, err, warns, _t) in done.items():
+                self._record(key, S, err, warns, 0.0)
             if done:
                 logger.info("Resumed %d SPI(s) from %s", len(done), cp_dir)
 
@@ -553,11 +592,8 @@ class Calculator:
                 checkpoint_dir=cp_dir, progress=progress,
                 configfile=self._configfile,
             )
-            for key, (S, err, elapsed) in results.items():
-                if err is not None:
-                    warnings.warn(f'Caught error for SPI "{key}": {err}')
-                self._table[key] = S
-                self._timings[key] = elapsed
+            for key, (S, err, warns, elapsed) in results.items():
+                self._record(key, S, err, warns, elapsed)
 
         elapsed = time.perf_counter() - t_start
         logger.info("Calculation complete. Time taken: %.4fs", elapsed)
@@ -569,25 +605,23 @@ class Calculator:
         for key in iterable:
             if progress:
                 iterable.set_description(f"Processing [{self._name}: {key}]")
-            t0 = time.perf_counter()
-            err = None
-            try:
-                S = self._spis[key].multivariate(self.dataset)
-                S = np.array(S, dtype=float, copy=True)
-                np.fill_diagonal(S, np.nan)
-            except Exception as e:
-                warnings.warn(f'Caught {type(e).__name__} for SPI "{key}": {e}')
-                S = np.full((M, M), np.nan)
-                err = f"{type(e).__name__}: {e}"
-            self._table[key] = S
-            self._timings[key] = time.perf_counter() - t0
-            if cp_dir is not None:
-                _parallel._atomic_npy_write(cp_dir / f"{key}.npy", S)
-                err_path = cp_dir / f"{key}.error"
-                if err is not None:
-                    err_path.write_text(err)
-                elif err_path.exists():
-                    err_path.unlink()
+            # Same primitive the workers use, so both paths agree on what
+            # counts as a failure and on what the caller is shown.
+            S, err, warns, elapsed = _parallel.run_spi(
+                self._spis[key], self.dataset, key, M
+            )
+            self._record(key, S, err, warns, elapsed)
+            _parallel.write_checkpoint(cp_dir, key, S, err)
+
+    def _record(self, key, S, err, warns, elapsed):
+        """Commit one SPI result, its error, and its warnings."""
+        self._table[key] = S
+        self._timings[key] = elapsed
+        for w in warns:
+            warnings.warn(f'SPI "{key}": {w}')
+        if err is not None:
+            self._errors[key] = err
+            warnings.warn(f'Caught error for SPI "{key}": {err}')
 
     def _rmmin(self):
         """Iterate through all spis and remove the minimum (fixes absolute value errors when correlating)"""

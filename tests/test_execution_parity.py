@@ -1,4 +1,4 @@
-"""Red tests: serial and parallel must agree on more than the numbers.
+"""Serial and parallel must agree on more than the numbers.
 
 ``test_parallel.py`` already pins numerical parity. What is unpinned is
 *failure* parity: whether an exception, a warning, a wrong-shaped return, or a
@@ -6,10 +6,13 @@ non-finite value is reported the same way in both paths, and whether the
 failure survives into a structured, inspectable place rather than only a
 transient ``warnings.warn``.
 
+These began as red tests and are now green: both paths route through
+``_parallel.run_spi``, failures land in ``calc.errors``, worker-side warnings
+are returned to the parent and re-emitted there, and ``calc.run_spec`` records
+the resolved run.
+
 The misbehaving SPIs live in ``tests/failing_spis.py``; ``tests/`` is put on
 PYTHONPATH so spawned workers can import them too.
-
-See tests/test_state_integrity.py for the xfail(strict=True) rationale.
 """
 import os
 import sys
@@ -55,7 +58,6 @@ def _run(n_jobs):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("mode,n_jobs", MODES)
-@pytest.mark.xfail(strict=True, reason="failures are only warned about; calc.errors does not exist")
 def test_failures_are_recorded_structurally(mode, n_jobs):
     """A failed SPI must be inspectable after the run, not just warned about."""
     calc, _ = _run(n_jobs)
@@ -68,7 +70,6 @@ def test_failures_are_recorded_structurally(mode, n_jobs):
     assert "deliberate test failure" in str(errors["always_raises"])
 
 
-@pytest.mark.xfail(strict=True, reason="serial and parallel do not report failures identically")
 def test_serial_and_parallel_report_the_same_failures():
     serial, _ = _run(1)
     parallel, _ = _run(2)
@@ -80,7 +81,6 @@ def test_serial_and_parallel_report_the_same_failures():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="worker-side warnings are not propagated to the parent")
 def test_warnings_survive_the_parallel_boundary():
     """A warning raised inside an SPI must reach the caller in both paths."""
     _, serial_warns = _run(1)
@@ -99,7 +99,6 @@ def test_warnings_survive_the_parallel_boundary():
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("mode,n_jobs", MODES)
-@pytest.mark.xfail(strict=True, reason="wrong-shaped SPI output is not validated")
 def test_wrong_shape_is_a_recorded_failure(mode, n_jobs):
     calc, _ = _run(n_jobs)
     errors = getattr(calc, "errors", {}) or {}
@@ -110,7 +109,6 @@ def test_wrong_shape_is_a_recorded_failure(mode, n_jobs):
 
 
 @pytest.mark.parametrize("mode,n_jobs", MODES)
-@pytest.mark.xfail(strict=True, reason="non-finite SPI output passes through unflagged")
 def test_non_finite_output_is_flagged(mode, n_jobs):
     calc, _ = _run(n_jobs)
     errors = getattr(calc, "errors", {}) or {}
@@ -124,7 +122,6 @@ def test_non_finite_output_is_flagged(mode, n_jobs):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("mode,n_jobs", MODES)
-@pytest.mark.xfail(strict=True, reason="no resolved run specification is recorded")
 def test_run_records_its_resolved_specification(mode, n_jobs):
     """One canonical, immutable description of what was actually run."""
     calc, _ = _run(n_jobs)
