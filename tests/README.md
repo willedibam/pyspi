@@ -23,6 +23,38 @@ corrupt baseline can never break collection of unrelated tests.
 | `test_parallel.py` | `Calculator.compute()` parallel path, checkpointing, per-SPI failure isolation. |
 | `test_phi_native.py` | Native (non-JIDT) integrated-information implementation. |
 | `test_baseline_drift.py` | `slow`. Every SPI on three frozen fixtures (M=3/5/7) vs a stored baseline. |
+| `test_state_integrity.py` | **Red.** `Data` ownership, read-only exposure, cache invalidation on mutation, builder path, process-name lifecycle, `dim_order` validation. |
+| `test_cache_keys.py` | **Red.** Parameterised statistic caches must key on every parameter that reaches the identifier. |
+| `test_run_identity.py` | **Red.** Checkpoints must identify the run that produced them; identifier collisions must be rejected at insertion. |
+| `test_execution_parity.py` | **Red.** Serial and parallel must agree on *failure* semantics, not only on numbers. Uses `failing_spis.py` + `parity_failure_config.yaml`. |
+| `test_estimator_contracts.py` | **Red.** An SPI must compute the estimator it advertises, or refuse. Symbolic/KSG preconditions. |
+| `test_structural_traits.py` | **Red.** Declared symmetry labels vs observed baseline matrices; AEG process-order dependence. |
+
+### Red tests
+
+The files marked **Red** encode *desired* behaviour that the package does not
+yet have. Every test in them is `@pytest.mark.xfail(strict=True, reason=...)`,
+which means:
+
+* the suite stays green while the fixes are outstanding, so these can be merged
+  before the fixes without breaking CI;
+* `strict=True` turns an *unexpected pass* into a failure. When a fix lands, the
+  test fails until the marker is deleted — so a marker cannot silently outlive
+  the bug it describes.
+
+Two rules when working on these:
+
+1. **Never relax an assertion to make one pass.** Delete the marker instead.
+2. **Check the failure reason, not just the xfail count.** Several of these
+   initially "failed" for reasons unrelated to the bug under test — a vacuous
+   comparison, a wrong keyword, a config name passed where a path was wanted. An
+   xfail proves nothing until you have seen the message. Run with `--runxfail`
+   to see it.
+
+One trap worth naming: `parse_bivariate`'s signature is
+`(self, data, data2=None, i=None, j=None)`, so `spi.bivariate(data, 0, 1)` binds
+`data2=0, i=1` and dies with an unrelated dimension error. Always pass `i=`/`j=`
+by keyword.
 
 Log base matters when reading these: `gaussian`, `kraskov` and `kozachenko`
 report **nats**; `kernel` and `symbolic` report **bits** (inherited from JIDT).
