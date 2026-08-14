@@ -68,11 +68,6 @@ scientifically material ones:
   value depended on process order. `aeg` is now `directed`; `johansen`, which is
   symmetric to ~3e-14, is unchanged.
 
-- **Wavelet phase-slope index had its sign inverted for half of every matrix.**
-  `mne_connectivity` returns a lower-triangular matrix; pyspi filled the upper
-  triangle without negating. PSI is antisymmetric, and the sign is its entire
-  lead/lag content. Magnitudes are unchanged.
-
 - **KSG accepted `k` >= sample size.** `k=30` on `N=20` returned 0.414 and
   `k=100` returned 1.63. Effective-sample and zero-radius checks added.
 
@@ -98,9 +93,14 @@ scientifically material ones:
   kozachenko variants are no longer bundled. `n` now reaches the identifier for
   `DirectedInfo` and `CausalEntropy`, renaming those SPIs.
 
-- **Wavelet phase-slope index negated after reducing the band.** Only a
-  statistic commuting with negation may be applied first: `max_f(-v) = -min_f(v)`.
-  The fill now happens per frequency. `mean` is antisymmetric, `max` asymmetric.
+- **Wavelet phase-slope index lost its direction.** `mne_connectivity` returns
+  a lower-triangular matrix and pyspi filled the upper triangle *without*
+  negating, so `psi[i,j] == psi[j,i]` — the sign is PSI's entire lead/lag
+  content. The fill must also happen per frequency, *before* the band statistic:
+  only a statistic commuting with negation may be applied first, and
+  `max_f(-v) = -min_f(v)`, not `-max_f(v)`. `mean` is antisymmetric, `max`
+  asymmetric. Its `fmin` is now resolved against the five-cycle floor rather
+  than passing `fmin=0`, which MNE reports as an unreliable spectrum.
 
 - **Importing pyspi reseeded NumPy's global RNG.** `pyspi.lib.ids` called
   `np.random.seed(1717)` at import, silently overriding the caller's seed --
