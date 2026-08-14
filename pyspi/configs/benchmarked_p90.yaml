@@ -962,16 +962,15 @@
       statistic: max
 
   DebiasedSquaredPhaseLagIndex:
-    # Disabled: the `max` band statistic is an indicator, not a graded measure.
-    # Debiased squared PLI reaches exactly 1 whenever the sign of the imaginary
-    # coherency is consistent across tapers at any one frequency, and the band
-    # maximum then pins there for nearly every pair. Measured over M in {3,5,8},
-    # T in {100,250,500,2000}, white/AR/coupled data and all three bundled
-    # bands: constant at 1.000000 for T >= 500, and at shorter T it takes only
-    # 2-3 distinct values with ~90% of pairs still at exactly 1 (e.g. M=8,
-    # T=100: 52 of 56 pairs at 1.0, 4 at 0.2). The `mean` variant on the same
-    # data gives 17 distinct values spanning -0.108 to 0.104 and is kept.
-    # Re-enable only with evidence that some regime makes the maximum graded.
+    # NOTE: the `max` band statistic behaves as a near-indicator on the data
+    # tested. It reaches exactly 1 whenever the sign of the imaginary coherency
+    # is consistent across tapers at any one frequency, and pins there for most
+    # pairs: measured over M in {3,5,8}, T in {100,250,500,2000}, white/AR/
+    # coupled data, it is constant at 1.0 for T >= 500, and at shorter T takes
+    # 2-3 distinct values with ~90% of pairs at 1 (M=8, T=100: 52 of 56). The
+    # `mean` variant on the same data gives 17 distinct values over -0.108 to
+    # 0.104. Kept enabled: this is evidence from the regimes tested, not a
+    # proof. Read `max` values near 1 with that in mind.
     labels:
       - undirected
       - linear
@@ -992,18 +991,18 @@
       fmax: 0.5
       labels:
       - M12
-#    - fs: 1
-#      statistic: max
-#    - fmin: 0
-#      fmax: 0.25
-#      statistic: max
-#    - fmin: 0.25
-#      fmax: 0.5
-#      statistic: max
+    - fs: 1
+      statistic: max
+    - fmin: 0
+      fmax: 0.25
+      statistic: max
+    - fmin: 0.25
+      fmax: 0.5
+      statistic: max
 
   DebiasedSquaredWeightedPhaseLagIndex:
-    # Disabled: same indicator behaviour as DebiasedSquaredPhaseLagIndex above
-    # (M=8, T=100: 52 of 56 pairs at exactly 1.0). The `mean` variant is kept.
+    # NOTE: same near-indicator behaviour as DebiasedSquaredPhaseLagIndex
+    # above (M=8, T=100: 52 of 56 pairs at exactly 1.0). See that note.
     labels:
       - undirected
       - linear
@@ -1024,14 +1023,14 @@
       fmax: 0.5
       labels:
       - M12
-#    - fs: 1
-#      statistic: max
-#    - fmin: 0
-#      fmax: 0.25
-#      statistic: max
-#    - fmin: 0.25
-#      fmax: 0.5
-#      statistic: max
+    - fs: 1
+      statistic: max
+    - fmin: 0
+      fmax: 0.25
+      statistic: max
+    - fmin: 0.25
+      fmax: 0.5
+      statistic: max
 
   PairwisePhaseConsistency:
     labels:
