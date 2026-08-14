@@ -61,7 +61,7 @@ N_SMALL = 3000
 # carry genuine O(1e-2) finite-sample bias at N=20000 (KSG k=4; box kernel at
 # fixed bandwidth 0.25) — these are estimator properties, not slack chosen to
 # make the test pass; the measured errors are ~0.009.
-MI_ATOL = {"gaussian": 1e-7, "kraskov": 0.02, "kernel": 0.02, "kozachenko": 0.02}
+MI_ATOL = {"gaussian": 1e-9, "kraskov": 0.02, "kernel": 0.02, "kozachenko": 0.02}
 
 _ESTIMATOR_KWARGS = {"kraskov": {"prop_k": 4}, "kernel": {"kernel_width": 0.25}}
 

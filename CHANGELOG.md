@@ -236,4 +236,4 @@ failures (values unchanged).
 | `MutualInfo(estimator="kozachenko")` | raises; use `estimator="kraskov"` |
 
 Values for the six directed spectral SPIs listed under **Fixed** are
-transposed relative to 2.x. No other SPI values changed.
+transposed relative to 2.x. Other SPI values are unchanged on the frozen test fixtures.

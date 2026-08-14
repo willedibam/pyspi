@@ -233,3 +233,51 @@ def test_ksg_validation_reaches_the_transfer_entropy_path():
     small = _data(m=2, t=20)
     with pytest.raises(ValueError):
         it.TransferEntropy(estimator="kraskov", prop_k=30).bivariate(small, i=0, j=1)
+
+
+def test_ksg_rejects_negative_theiler_window():
+    from pyspi.statistics.infotheory import _validate_ksg_sample
+    with pytest.raises(ValueError, match="Theiler"):
+        _validate_ksg_sample(200, 4, -5)
+
+
+def test_ksg_rejects_tied_inputs():
+    """Quantised/constant inputs give a zero k-th radius and a bogus negative CMI.
+
+    Binary series previously returned TE = -2.36, for a quantity bounded below
+    by zero.
+    """
+    const = np.zeros((2, 200))
+    const[1] = np.arange(200)
+    data = Data(data=const, dim_order="ps", zscore=False)
+    with pytest.raises(ValueError):
+        it.TransferEntropy(estimator="kraskov").bivariate(data, i=0, j=1)
+
+
+def test_directed_info_kraskov_matches_the_analytic_value():
+    """The direct CMI estimator must hit the same closed form as Gaussian.
+
+    DI composed from separate entropies cannot: kernel sat near +4 on
+    independent data at every T tested (100 to 8000), because a fixed-bandwidth
+    estimator's bias in ~11 dimensions does not shrink with sample size.
+    """
+    c = 1.0
+    r = np.random.default_rng(1)
+    T = 4000
+    x = r.standard_normal(T)
+    e = r.standard_normal(T)
+    y = np.zeros(T)
+    y[1:] = c * x[:-1] + e[1:]
+    d = Data(data=np.vstack([x, y]), dim_order="ps", zscore=True)
+
+    got = it.DirectedInfo(estimator="kraskov", n=2).bivariate(d, i=0, j=1)
+    expected = 0.5 * np.log(1 + c ** 2)
+    assert abs(got - expected) < 0.05, f"kraskov DI={got:.4f} vs analytic {expected:.4f}"
+
+
+@pytest.mark.parametrize("T", [200, 1000])
+def test_directed_info_kraskov_is_zero_for_independent_source(T):
+    r = np.random.default_rng(0)
+    d = Data(data=r.standard_normal((2, T)), dim_order="ps", zscore=True)
+    di = it.DirectedInfo(estimator="kraskov").bivariate(d, i=0, j=1)
+    assert abs(di) < 0.15, f"kraskov DI={di:.4f} on independent data at T={T}"

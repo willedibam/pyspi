@@ -58,9 +58,12 @@ def test_imports():
     # implementation. The composed measures used to accept it and run the
     # Gaussian estimator while advertising kraskov_NN-<k>.
     # See tests/test_estimator_contracts.py.
+    # DirectedInfo estimates each I(X^i; Y_i | Y^{i-1}) term with a direct
+    # KSG/Frenzel-Pompe CMI, so it supports kraskov; the others are composed
+    # from marginal entropies and do not.
     composed = (JointEntropy, ConditionalEntropy, CrossmapEntropy,
-                CausalEntropy, DirectedInfo, StochasticInteraction)
-    direct = (MutualInfo, TimeLaggedMutualInfo, TransferEntropy)
+                CausalEntropy, StochasticInteraction)
+    direct = (MutualInfo, TimeLaggedMutualInfo, TransferEntropy, DirectedInfo)
 
     for est in ('gaussian', 'kraskov', 'kernel', 'kozachenko'):
         if est != 'kraskov':
@@ -76,7 +79,7 @@ def test_imports():
 
 @pytest.mark.parametrize("cls_name", [
     "JointEntropy", "ConditionalEntropy", "CrossmapEntropy",
-    "CausalEntropy", "DirectedInfo", "StochasticInteraction",
+    "CausalEntropy", "StochasticInteraction",
 ])
 def test_kraskov_rejected_for_composed_measures(cls_name):
     """kraskov must fail loudly where no KSG estimator exists.

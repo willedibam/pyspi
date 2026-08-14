@@ -31,6 +31,16 @@ def _run(dataset, cp_dir, config=CONFIG, **kw):
     return calc
 
 
+def _assert_foreign_directory_refused(dataset, cp_dir, config=CONFIG):
+    """A checkpoint directory owned by another run must be refused, not reused.
+
+    Deleting its contents to make room would be destructive, and if interrupted
+    partway would relabel whatever survived as the new run.
+    """
+    with pytest.raises(ValueError, match="different run"):
+        _run(dataset, cp_dir, config=config)
+
+
 def _first_spi_values(calc):
     key = sorted(calc.spis)[0]
     return key, np.asarray(calc.table[key].to_numpy(dtype=float))
@@ -42,35 +52,14 @@ def _first_spi_values(calc):
 
 def test_checkpoint_rejects_a_different_dataset(tmp_path):
     """A different dataset of the same width must not reuse checkpoints."""
-    first = _run(_data(seed=1), tmp_path)
-    key, v1 = _first_spi_values(first)
-
-    second = _run(_data(seed=2), tmp_path)
-    _, v2 = _first_spi_values(second)
-
-    reference = _run(_data(seed=2), tmp_path / "clean")
-    _, ref = _first_spi_values(reference)
-
-    assert np.allclose(v2, ref, equal_nan=True), (
-        f"'{key}' resumed the first dataset's result for a different dataset "
-        f"(got {np.nanmean(v2):.6g}, correct value {np.nanmean(ref):.6g})."
-    )
-    assert not np.allclose(v1, v2, equal_nan=True)
+    _run(_data(seed=1), tmp_path)
+    _assert_foreign_directory_refused(_data(seed=2), tmp_path)
 
 
 def test_checkpoint_rejects_a_different_config(tmp_path):
     dataset = _data(seed=3)
     _run(dataset, tmp_path, config="fabfour")
-
-    calc = Calculator(dataset=dataset, config="fast", verbose=False)
-    calc.compute(checkpoint_dir=tmp_path, progress=False)
-
-    shared = set(calc.spis) & {"cov_EmpiricalCovariance"}
-    assert shared, "Precondition: the two configs must share at least one SPI."
-    # A config change must be detected even when identifiers overlap.
-    assert getattr(calc, "_resume_rejected", False), (
-        "Resume accepted checkpoints written under a different config."
-    )
+    _assert_foreign_directory_refused(dataset, tmp_path, config="fast")
 
 
 def test_checkpoint_rejects_permuted_processes(tmp_path):
@@ -81,22 +70,10 @@ def test_checkpoint_rejects_permuted_processes(tmp_path):
          tmp_path)
 
     perm = [2, 0, 1]
-    permuted = _run(
+    _assert_foreign_directory_refused(
         Data(data=arr[perm], dim_order="ps", zscore=False,
              procnames=["c", "a", "b"]),
         tmp_path,
-    )
-    key, got = _first_spi_values(permuted)
-
-    ref_calc = _run(
-        Data(data=arr[perm], dim_order="ps", zscore=False,
-             procnames=["c", "a", "b"]),
-        tmp_path / "clean",
-    )
-    _, ref = _first_spi_values(ref_calc)
-
-    assert np.allclose(got, ref, equal_nan=True), (
-        f"'{key}' resumed a checkpoint computed under a different process order."
     )
 
 
@@ -106,8 +83,11 @@ def test_failed_checkpoints_are_retried_by_default(tmp_path):
     calc = Calculator(dataset=dataset, config=CONFIG, verbose=False)
     key = sorted(calc.spis)[0]
 
-    # Simulate a prior run in which `key` failed.
+    # Simulate a prior run of *this* calculator in which `key` failed, manifest
+    # included -- otherwise the directory reads as foreign and is refused.
     tmp_path.mkdir(parents=True, exist_ok=True)
+    from pyspi import _parallel
+    _parallel.write_manifest(tmp_path, calc.run_digest, calc.run_spec)
     np.save(tmp_path / f"{key}.npy", np.full((3, 3), np.nan))
     (tmp_path / f"{key}.error").write_text("RuntimeError: simulated prior failure")
 
@@ -219,3 +199,46 @@ def test_non_pyspi_npz_is_rejected(tmp_path):
     np.savez_compressed(bad, something_else=np.zeros(3))
     with pytest.raises(ValueError, match="not a pyspi results table"):
         load_table(bad)
+
+
+def test_invalid_checkpoint_is_retried_not_kept(tmp_path):
+    """A non-finite checkpoint must be recomputed, not resumed.
+
+    The validation used to run *after* the retry decision, so an inf-filled
+    matrix was marked failed and then kept.
+    """
+    from pyspi import _parallel
+
+    dataset = _data(seed=21)
+    calc = Calculator(dataset=dataset, config=CONFIG, verbose=False)
+    key = sorted(calc.spis)[0]
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    _parallel.write_manifest(tmp_path, calc.run_digest, calc.run_spec)
+    np.save(tmp_path / f"{key}.npy", np.full((3, 3), np.inf))
+
+    calc.compute(checkpoint_dir=tmp_path, progress=False)
+    got = np.asarray(calc.table[key].to_numpy(dtype=float))
+    assert np.isfinite(got[~np.eye(3, dtype=bool)]).any(), (
+        f"'{key}' kept an infinite checkpoint instead of recomputing it."
+    )
+
+
+def test_checkpoint_rejects_a_different_computation_version(tmp_path):
+    """Checkpoints must not outlive the algorithm that produced them."""
+    from pyspi import _parallel
+
+    dataset = _data(seed=22)
+    calc = Calculator(dataset=dataset, config=CONFIG, verbose=False)
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    _parallel.write_manifest(tmp_path, calc.run_digest, calc.run_spec)
+
+    manifest = tmp_path / _parallel.MANIFEST_NAME
+    import json
+    payload = json.loads(manifest.read_text())
+    payload["computation"] = "0.0.0-ancient"
+    manifest.write_text(json.dumps(payload))
+    np.save(tmp_path / f"{sorted(calc.spis)[0]}.npy", np.zeros((3, 3)))
+
+    with pytest.raises(ValueError, match="different run"):
+        calc.compute(checkpoint_dir=tmp_path, progress=False)

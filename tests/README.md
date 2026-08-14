@@ -23,18 +23,19 @@ corrupt baseline can never break collection of unrelated tests.
 | `test_parallel.py` | `Calculator.compute()` parallel path, checkpointing, per-SPI failure isolation. |
 | `test_phi_native.py` | Native (non-JIDT) integrated-information implementation. |
 | `test_baseline_drift.py` | `slow`. Every SPI on three frozen fixtures (M=3/5/7) vs a stored baseline. |
-| `test_state_integrity.py` | **Red.** `Data` ownership, read-only exposure, cache invalidation on mutation, builder path, process-name lifecycle, `dim_order` validation. |
-| `test_cache_keys.py` | **Red.** Parameterised statistic caches must key on every parameter that reaches the identifier. |
-| `test_run_identity.py` | **Red.** Checkpoints must identify the run that produced them; identifier collisions must be rejected at insertion. |
-| `test_execution_parity.py` | **Red.** Serial and parallel must agree on *failure* semantics, not only on numbers. Uses `failing_spis.py` + `parity_failure_config.yaml`. |
-| `test_estimator_contracts.py` | **Red.** An SPI must compute the estimator it advertises, or refuse. Symbolic/KSG preconditions. |
-| `test_structural_traits.py` | **Red.** Declared symmetry labels vs observed baseline matrices; AEG process-order dependence. |
+| `test_state_integrity.py` | `Data` ownership, read-only exposure, cache invalidation on mutation, builder path, process-name lifecycle, `dim_order` validation. |
+| `test_cache_keys.py` | Parameterised statistic caches must key on every parameter that reaches the identifier. |
+| `test_run_identity.py` | Checkpoints must identify the run that produced them; identifier collisions must be rejected at insertion. |
+| `test_execution_parity.py` | Serial and parallel must agree on *failure* semantics, not only on numbers. Uses `failing_spis.py` + `parity_failure_config.yaml`. |
+| `test_estimator_contracts.py` | An SPI must compute the estimator it advertises, or refuse. Symbolic/KSG preconditions. |
+| `test_structural_traits.py` | Declared symmetry labels vs observed baseline matrices; AEG process-order dependence. |
 
-### Red tests
+### Contract tests (originally red)
 
-The files marked **Red** encode *desired* behaviour that the package does not
-yet have. Every test in them is `@pytest.mark.xfail(strict=True, reason=...)`,
-which means:
+These files began as *red* tests: assertions for behaviour the package did not
+yet have. Nearly all are now green, and the handful that remain are marked
+`@pytest.mark.xfail(strict=True, reason=...)` with their reasoning in the
+marker. Strict xfail means:
 
 * the suite stays green while the fixes are outstanding, so these can be merged
   before the fixes without breaking CI;

@@ -551,6 +551,8 @@ def _validate_ksg_sample(N, k, w, context=""):
         raise ValueError(f"KSG needs at least 2 observations, got {N}{where}.")
     if k < 1:
         raise ValueError(f"KSG needs k >= 1, got k={k}{where}.")
+    if w < 0:
+        raise ValueError(f"Theiler window must be >= 0, got w={w}{where}.")
     if k > effective:
         raise ValueError(
             f"KSG k={k} exceeds the {effective} usable neighbour(s) for "
@@ -808,79 +810,89 @@ def _gaussian_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau):
     return float(te)
 
 
-def _kraskov_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau, k_nn, w):
-    """Kraskov TE via Frenzel-Pompe CMI estimator."""
-    Y_f, Y_p, X_p = _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau)
-    # Same precondition as the MI path, applied to the *embedded* sample count
-    # rather than the raw series length: embedding consumes the lookback, so
-    # the usable N here is smaller than len(targ). Validating only inside
-    # _ksg_mi_pair left this path unguarded, and TE with k=30 on T=20 returned
-    # a finite 0.467.
-    _validate_ksg_sample(Y_f.shape[0], k_nn, w, context="transfer entropy")
-    if Y_f is None:
-        return np.nan
+def _ksg_cmi(A, B, C, k_nn, w=0):
+    """KSG conditional mutual information I(A; B | C), Frenzel-Pompe estimator.
 
-    N = len(Y_f)
+    Estimates the CMI *directly* rather than as a sum of four separately
+    estimated entropies. That distinction is the whole point: the neighbour
+    radius is fixed once in the joint space [A,B,C] and reused in every
+    marginal count, so the dimension-dependent biases cancel by construction.
+    Composing the same quantity from marginal entropies leaves each one with
+    its own bias in its own dimensionality, and those do not cancel.
 
-    joint = np.concatenate([Y_f, X_p, Y_p], axis=1)
+    ``C`` may have zero columns, in which case this reduces to plain MI: the
+    conditioning count becomes N-1 for every point, which is exactly what the
+    digamma expression needs.
+    """
+    A = np.atleast_2d(A)
+    B = np.atleast_2d(B)
+    N = A.shape[0]
+    # Tied/quantised inputs give a zero k-th neighbour radius, which makes the
+    # digamma counts saturate and returns a large negative "CMI" -- binary
+    # inputs produced -2.36. Reject rather than report it.
+    for name, arr in (("A", A), ("B", B)):
+        if np.ptp(arr, axis=0).min() == 0:
+            raise ValueError(f"KSG cannot estimate: {name} has a constant column.")
+    has_C = C is not None and np.asarray(C).size and np.asarray(C).shape[1] > 0
+
+    joint = np.concatenate([A, B, C], axis=1) if has_C else np.concatenate([A, B], axis=1)
+    AC = np.concatenate([A, C], axis=1) if has_C else A
+    BC = np.concatenate([B, C], axis=1) if has_C else B
+
     tree_joint = cKDTree(joint)
-
-    YfYp = np.concatenate([Y_f, Y_p], axis=1)
-    XpYp = np.concatenate([X_p, Y_p], axis=1)
-
-    tree_YfYp = cKDTree(YfYp)
-    tree_XpYp = cKDTree(XpYp)
-    tree_Yp = cKDTree(Y_p)
+    tree_AC = cKDTree(AC)
+    tree_BC = cKDTree(BC)
+    tree_C = cKDTree(C) if has_C else None
 
     if w == 0:
         dists, _ = tree_joint.query(joint, k=k_nn + 1, p=np.inf)
         eps = dists[:, k_nn]
         eps_strict = eps * (1.0 - 1e-10)
 
-        n_YfYp = np.array([len(lst) - 1 for lst in
-                           tree_YfYp.query_ball_point(YfYp, eps_strict, p=np.inf)],
-                          dtype=np.float64)
-        n_XpYp = np.array([len(lst) - 1 for lst in
-                           tree_XpYp.query_ball_point(XpYp, eps_strict, p=np.inf)],
-                          dtype=np.float64)
-        n_Yp = np.array([len(lst) - 1 for lst in
-                         tree_Yp.query_ball_point(Y_p, eps_strict, p=np.inf)],
-                        dtype=np.float64)
+        n_AC = np.array([len(l) - 1 for l in
+                         tree_AC.query_ball_point(AC, eps_strict, p=np.inf)], dtype=np.float64)
+        n_BC = np.array([len(l) - 1 for l in
+                         tree_BC.query_ball_point(BC, eps_strict, p=np.inf)], dtype=np.float64)
+        if has_C:
+            n_C = np.array([len(l) - 1 for l in
+                            tree_C.query_ball_point(C, eps_strict, p=np.inf)], dtype=np.float64)
+        else:
+            n_C = np.full(N, N - 1, dtype=np.float64)
     else:
         n_query = min(k_nn + 2 * w + 2, N)
         dists_all, idx_all = tree_joint.query(joint, k=n_query, p=np.inf)
-
-        n_YfYp = np.empty(N)
-        n_XpYp = np.empty(N)
-        n_Yp = np.empty(N)
-
+        n_AC = np.empty(N); n_BC = np.empty(N); n_C = np.empty(N)
         for i in range(N):
             valid = np.abs(idx_all[i] - i) > w
             valid[0] = False
             d_valid = dists_all[i][valid]
-
-            if len(d_valid) < k_nn:
-                all_dists = np.max(np.abs(joint - joint[i]), axis=1)
-                all_dists[max(0, i - w): i + w + 1] = np.inf
-                all_dists[i] = np.inf
-                d_valid = np.sort(all_dists)
-                d_valid = d_valid[np.isfinite(d_valid)]
-
             e = d_valid[k_nn - 1] if len(d_valid) >= k_nn else np.inf
             e_strict = e * (1.0 - 1e-10)
+            n_AC[i] = sum(1 for j in tree_AC.query_ball_point(AC[i], e_strict, p=np.inf)
+                          if abs(j - i) > w and j != i)
+            n_BC[i] = sum(1 for j in tree_BC.query_ball_point(BC[i], e_strict, p=np.inf)
+                          if abs(j - i) > w and j != i)
+            if has_C:
+                n_C[i] = sum(1 for j in tree_C.query_ball_point(C[i], e_strict, p=np.inf)
+                             if abs(j - i) > w and j != i)
+            else:
+                n_C[i] = max(N - (2 * w + 1), 1)
 
-            lsts_YfYp = tree_YfYp.query_ball_point(YfYp[i], e_strict, p=np.inf)
-            lsts_XpYp = tree_XpYp.query_ball_point(XpYp[i], e_strict, p=np.inf)
-            lsts_Yp = tree_Yp.query_ball_point(Y_p[i], e_strict, p=np.inf)
-
-            n_YfYp[i] = sum(1 for j in lsts_YfYp if abs(j - i) > w and j != i)
-            n_XpYp[i] = sum(1 for j in lsts_XpYp if abs(j - i) > w and j != i)
-            n_Yp[i] = sum(1 for j in lsts_Yp if abs(j - i) > w and j != i)
-
-    te = float(digamma(k_nn) + np.mean(
-        digamma(n_Yp + 1) - digamma(n_YfYp + 1) - digamma(n_XpYp + 1)
+    return float(digamma(k_nn) + np.mean(
+        digamma(n_C + 1) - digamma(n_AC + 1) - digamma(n_BC + 1)
     ))
-    return te
+
+
+def _kraskov_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau, k_nn, w):
+    """Kraskov TE via the Frenzel-Pompe CMI estimator: I(Y_f; X_p | Y_p)."""
+    Y_f, Y_p, X_p = _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau)
+    if Y_f is None:
+        return np.nan
+    # Same precondition as the MI path, applied to the *embedded* sample count
+    # rather than the raw series length: embedding consumes the lookback, so
+    # the usable N here is smaller than len(targ).
+    _validate_ksg_sample(Y_f.shape[0], k_nn, w, context="transfer entropy")
+    return _ksg_cmi(Y_f, X_p, Y_p, k_nn, w)
 
 
 # ---------------------------------------------------------------------------
@@ -954,7 +966,8 @@ class InfoTheoryBase(Unsigned):
             # "kraskov" -- so they returned exactly the Gaussian result while
             # advertising kraskov_NN-<k> in the identifier. Reporting a k-NN
             # estimate that was never computed is worse than refusing.
-            if not isinstance(self, (MutualInfo, TimeLaggedMutualInfo, TransferEntropy)):
+            if not isinstance(self, (MutualInfo, TimeLaggedMutualInfo,
+                                     TransferEntropy, DirectedInfo)):
                 raise NotImplementedError(
                     f"The kraskov estimator is not implemented for "
                     f"{type(self).__name__}: it is composed from marginal "
@@ -1637,6 +1650,20 @@ class DirectedInfo(CausalEntropy, Directed):
         for order in range(1, n + 1):
             Ypast = np.hstack(y_lags[: order - 1]) if order > 1 else y_now[:, :0]
             Xpast = np.hstack(x_lags[:order])
+
+            if self._estimator == "kraskov":
+                # Estimate I(X^i; Y_i | Y^{i-1}) directly. The KSG/Frenzel-Pompe
+                # estimator fixes one neighbour radius in the joint space and
+                # reuses it in every marginal count, so the dimension-dependent
+                # biases cancel. Composing the same term from four separate
+                # entropies does not: each is biased in its own dimensionality,
+                # which is why the kernel and kozachenko compositions are unusable
+                # here (kernel sat near +4 on independent data at every T).
+                w = self._resolve_theiler(data, i, j) if self._dyn_corr_excl else 0
+                _validate_ksg_sample(y_now.shape[0], int(self._prop_k), w,
+                                     context="directed information")
+                total += _ksg_cmi(y_now, Xpast, Ypast, int(self._prop_k), w)
+                continue
 
             # H(Y_i | Y^{i-1}) - H(Y_i | Y^{i-1}, X^i)
             h_y_given_ypast = (

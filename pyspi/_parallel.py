@@ -207,7 +207,8 @@ def _pin_worker_thread_pools():
         pass
 
 
-def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, progress_q):
+def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, progress_q,
+                 config_bytes=None):
     """ProcessPoolExecutor initializer. Runs once per worker.
 
     Re-instantiates SPIs from the configfile (some SPI classes use closures in
@@ -219,7 +220,20 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, pro
     # Direct call to the shared loader — no throwaway Calculator instantiation,
     # no stdout suppression needed.
     from pyspi.calculator import load_spis_from_yaml
-    spis = load_spis_from_yaml(configfile)
+    # Load from the parent's snapshot, not the path: the file on disk may have
+    # changed since the parent instantiated its SPIs, which would bind results
+    # to parameters that did not produce them.
+    if config_bytes is not None:
+        import tempfile, os as _os
+        fd, tmp = tempfile.mkstemp(suffix=".yaml")
+        try:
+            with _os.fdopen(fd, "wb") as fh:
+                fh.write(config_bytes)
+            spis = load_spis_from_yaml(tmp)
+        finally:
+            _os.unlink(tmp)
+    else:
+        spis = load_spis_from_yaml(configfile)
 
     # Pin nested thread pools AFTER SPI modules import (cdt autosets NJOBS to
     # cpu_count() on import; we override it back to 1 here).
@@ -347,6 +361,9 @@ def build_tasks(spi_keys, spis) -> list[list[str]]:
 
 MANIFEST_NAME = "run.json"
 SCHEMA_VERSION = 1
+# Bumped when a change alters computed values, so checkpoints cannot outlive
+# the algorithm that produced them.
+COMPUTATION_VERSION = "3.0.0"
 
 
 def read_manifest(checkpoint_dir: Path):
@@ -363,7 +380,8 @@ def read_manifest(checkpoint_dir: Path):
 def write_manifest(checkpoint_dir: Path, digest: str, spec: dict) -> None:
     """Record which run owns this checkpoint directory."""
     path = Path(checkpoint_dir) / MANIFEST_NAME
-    payload = {"schema": SCHEMA_VERSION, "digest": digest, "spec": spec}
+    payload = {"schema": SCHEMA_VERSION, "computation": COMPUTATION_VERSION,
+               "digest": digest, "spec": spec}
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(payload, indent=1, sort_keys=True, default=str))
     os.replace(tmp, path)
@@ -388,20 +406,12 @@ def checkpoint_owner_matches(checkpoint_dir: Path, digest: str):
         return False, (
             f"manifest schema {manifest.get('schema')!r} != {SCHEMA_VERSION}"
         )
+    if manifest.get("computation") != COMPUTATION_VERSION:
+        return False, (f"checkpoint computed by pyspi {manifest.get('computation')!r}, "
+                       f"not {COMPUTATION_VERSION!r}")
     if manifest.get("digest") != digest:
         return False, "checkpoint was written by a different run"
     return True, None
-
-
-def clear_checkpoints(checkpoint_dir: Path) -> None:
-    """Remove every result/error file so a new manifest cannot mislabel them."""
-    d = Path(checkpoint_dir)
-    for pattern in ("*.npy", "*.error"):
-        for f in d.glob(pattern):
-            try:
-                f.unlink()
-            except OSError:
-                pass
 
 
 def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool = True):
@@ -433,15 +443,14 @@ def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool 
             continue
         err_path = checkpoint_dir / f"{key}.error"
         err = err_path.read_text() if err_path.exists() else None
-        if err is not None and retry_failed:
-            remaining.append(key)
-            continue
-        # A resumed matrix gets the same validation as a fresh one: an all-NaN
-        # or infinite checkpoint was previously accepted silently, with nothing
-        # recorded in calc.errors.
+        # Validate *before* the retry decision, so an invalid matrix is retried
+        # rather than being marked failed and then kept.
         off = arr[~np.eye(M, dtype=bool)] if M > 1 else arr.ravel()
         if off.size and (np.isinf(off).any() or not np.isfinite(off).any()):
             err = err or "ValueError: checkpoint contains no finite values"
+        if err is not None and retry_failed:
+            remaining.append(key)
+            continue
         done[key] = (arr, err, [], 0.0)
     return done, remaining
 
@@ -455,6 +464,7 @@ def run_parallel(
     checkpoint_dir: Optional[Path],
     progress: bool,
     configfile: str,
+    config_bytes: bytes | None = None,
 ) -> dict:
     """Execute ``spi_keys`` across ``n_jobs`` workers; return dict[key] -> (S, err, elapsed)."""
     from tqdm import tqdm
@@ -489,7 +499,7 @@ def run_parallel(
             initargs=(
                 shared.name, arr.shape, str(arr.dtype),
                 list(dataset.procnames), getattr(dataset, "_name", None),
-                configfile, progress_q,
+                configfile, progress_q, config_bytes,
             ),
         ) as ex:
             future_to_task = {ex.submit(_run_task, task, cp_str): task for task in tasks}

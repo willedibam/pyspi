@@ -589,6 +589,13 @@
       - M03
     configs:
       - estimator: gaussian
+      # Direct KSG/Frenzel-Pompe conditional-MI estimate. The kernel and
+      # kozachenko variants were dropped because composing DI from separate
+      # entropies leaves each with its own dimension-dependent bias; this
+      # estimates each I(X^i; Y_i | Y^{i-1}) term directly, so the biases
+      # cancel. Not added to the benchmarked_p* sets until it has been timed.
+      - estimator: kraskov
+        prop_k: 4
 
   StochasticInteraction: # No theiler window
     labels:

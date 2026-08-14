@@ -443,8 +443,11 @@ class Calculator:
         return {
             "config": str(self._config),
             "configfile": str(self._configfile),
-            "zscore": bool(self._zscore),
-            "detrend": bool(self._detrend),
+            # The dataset's own flags: a prepared Data supplied by the caller
+            # carries its own preprocessing, and the Calculator's flags were
+            # never applied to it.
+            "zscore": bool(dataset.zscore) if dataset is not None else bool(self._zscore),
+            "detrend": bool(dataset.detrend) if dataset is not None else bool(self._detrend),
             "n_processes": int(dataset.n_processes) if dataset is not None else None,
             "n_observations": (
                 int(dataset.n_observations) if dataset is not None else None
@@ -674,14 +677,14 @@ class Calculator:
                 # a different dataset of the same width silently returned the
                 # previous run's numbers.
                 self._resume_rejected = True
-                resume = False
-                warnings.warn(
-                    f"Ignoring checkpoints in {cp_dir}: {reason}. Recomputing "
-                    f"from scratch. Use a separate directory per run."
+                # Refuse rather than delete. Deleting another run's results to
+                # make room is destructive and, if interrupted midway, relabels
+                # whatever survives as this run.
+                raise ValueError(
+                    f"Checkpoint directory {cp_dir} belongs to a different run "
+                    f"({reason}). Use a separate directory per run, or remove "
+                    f"it yourself if the old results are no longer wanted."
                 )
-                # Clear first: writing the new manifest above the old matrices
-                # would relabel another run's results as this one if interrupted.
-                _parallel.clear_checkpoints(cp_dir)
             _parallel.write_manifest(cp_dir, digest, self.run_spec)
 
         # Resume: skip SPIs whose checkpoint exists.
@@ -714,6 +717,7 @@ class Calculator:
                 n_jobs=n_workers, mp_context=ctx,
                 checkpoint_dir=cp_dir, progress=progress,
                 configfile=self._configfile,
+                config_bytes=self._config_bytes,
             )
             for key, (S, err, warns, elapsed) in results.items():
                 self._record(key, S, err, warns, elapsed)
