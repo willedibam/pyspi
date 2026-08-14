@@ -65,16 +65,17 @@ MI_ATOL = {"gaussian": 1e-9, "kraskov": 0.02, "kernel": 0.02, "kozachenko": 0.02
 
 _ESTIMATOR_KWARGS = {"kraskov": {"prop_k": 4}, "kernel": {"kernel_width": 0.25}}
 
-# MutualInfo/TimeLaggedMutualInfo have no 'kozachenko' branch: bivariate() falls
-# through to a logging.warning and returns NaN. strict xfail so this starts
-# failing the moment the gap is closed. See the note in tests/README.md.
+# kozachenko is deliberately absent: MutualInfo and TimeLaggedMutualInfo are
+# estimated directly rather than from marginal entropies, and there is no
+# Kozachenko-Leonenko path for them. The constructor now raises, so the
+# combination is rejected rather than tested -- see
+# test_smoke.test_kozachenko_rejected_for_non_entropy.
 MI_ESTIMATORS = [
     "gaussian",
     "kraskov",
     "kernel",
-    pytest.param("kozachenko", marks=pytest.mark.xfail(
-        strict=True,
-        reason="MutualInfo has no kozachenko path; bivariate() returns NaN",
+    pytest.param("_removed_kozachenko", marks=pytest.mark.skip(
+        reason="rejected at construction; see test_kozachenko_rejected_for_non_entropy",
     )),
 ]
 

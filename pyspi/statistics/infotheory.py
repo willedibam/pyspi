@@ -137,6 +137,18 @@ class KLEntropyCalculator:
         tree = cKDTree(X)
         dists, _ = tree.query(X, k=2, p=2)  # k=1 NN (index 0 = self)
         eps = dists[:, 1]
+        # Duplicated observations put a neighbour at distance 0, and log(0)
+        # sends the entropy to -inf. Quantised data does this readily: the
+        # bundled `forex` series has one process with 24 distinct values in 250
+        # samples. Fail with the cause named rather than emitting an infinity.
+        if not np.all(eps > 0):
+            n_tied = int(np.sum(eps == 0))
+            raise ValueError(
+                f"Kozachenko entropy is undefined for tied observations: "
+                f"{n_tied} of {len(eps)} points have a duplicate (zero "
+                f"nearest-neighbour distance). The data is quantised or has "
+                f"repeated values; dither it or use estimator='gaussian'."
+            )
         log_cd = (d / 2.0) * np.log(np.pi) - gammaln(d / 2.0 + 1)
         return float(
             digamma(N) - digamma(1) + log_cd + (d / N) * np.sum(np.log(eps))

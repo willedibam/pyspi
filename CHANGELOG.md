@@ -122,6 +122,12 @@ scientifically material ones:
   the data-supported floor *and* the cycle count capped so the wavelet always
   fits the signal.
 
+- **Kozachenko entropy returned `-inf` on tied data.** A duplicated observation
+  puts a nearest neighbour at distance zero, and `log(0)` sends the estimate to
+  `-inf`. Quantised series do this readily -- the bundled `forex` dataset has a
+  process with 24 distinct values in 250 samples -- so several kozachenko SPIs
+  silently produced infinities there. They now fail with the cause named.
+
 - **Importing pyspi reseeded NumPy's global RNG.** `pyspi.lib.ids` called
   `np.random.seed(1717)` at import, silently overriding the caller's seed --
   stochastic SPIs looked reproducible but ignored it. Removed.

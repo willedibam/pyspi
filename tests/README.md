@@ -109,11 +109,14 @@ Tolerances are split by the SPI's module: `1e-9` for the deterministic families
 and `1e-2` for `causal` and `misc`, whose estimators use randomly-initialised
 optimisers and permutation tests and are not bit-reproducible.
 
-## Known gap
+## Open findings
 
-`MutualInfo` and `TimeLaggedMutualInfo` accept `estimator="kozachenko"` but have
-no code path for it: `bivariate()` logs a warning and returns `NaN`. No shipped
-config uses that combination, so no SPI is affected, but the constructor should
-raise `NotImplementedError` the way the `symbolic` guard does. The analytic
-suite pins this with `strict=True` xfails so they flip to failures the moment
-the gap is closed.
+Two `xfail(strict=True)` markers remain, each recording a decision rather than a
+pending code fix; the reasoning is in the marker:
+
+* `ce_gaussian`, `lmfit_*` and `gpfit_DotProduct` declare `directed` but are
+  symmetric on z-scored data.
+* Seven `max`-statistic SPIs return a constant matrix on `var1_M3_T100`.
+
+One more marks a usability trap rather than a defect: `bivariate(data, 0, 1)`
+binds `0` to `data2`, not to `i`.
