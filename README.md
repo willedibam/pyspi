@@ -117,13 +117,13 @@ Walkthrough tutorials in the full documentation:
 
 ## Choosing an SPI set
 
-Computing all 324 SPIs is expensive, and cost grows steeply in both the number
+Computing all 325 SPIs is expensive, and cost grows steeply in both the number
 of processes *M* and the series length *T*. `config=` takes either a bundled
 name or a path to your own YAML:
 
 | `config=` | SPIs | Use when |
 |:----------|-----:|:---------|
-| `"full"` (default) | 324 | You want everything and can afford it. |
+| `"full"` (default) | 325 | You want everything and can afford it. |
 | `"fast"` | 216 | General use; drops the slowest SPIs. |
 | `"benchmarked_p99"` | 321 | Near-complete, with only the worst cost outliers removed. |
 | `"benchmarked_p95"` | 308 | Good coverage/cost trade-off. |

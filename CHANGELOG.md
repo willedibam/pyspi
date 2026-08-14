@@ -51,7 +51,11 @@ scientifically material ones:
   identifier and an `(M, M)` shape, so a different dataset, config,
   preprocessing setting, or process order silently inherited the earlier run's
   results. Checkpoints now carry a `run.json` manifest bound to
-  `Calculator.run_digest`, and failed checkpoints are retried by default.
+  `Calculator.run_digest` (config *contents*, dataset bytes in native dtype, and
+  a computation-version token). Failed or non-finite checkpoints are retried by
+  default, workers load the parent's config snapshot rather than rereading a
+  path that may have changed, and a directory belonging to another run is
+  refused rather than emptied.
 
 - **Spectral caches ignored `fs`,** and were written under a `str` key but read
   under a `tuple` key — so the first write was unreachable and staleness only
@@ -68,8 +72,12 @@ scientifically material ones:
   value depended on process order. `aeg` is now `directed`; `johansen`, which is
   symmetric to ~3e-14, is unchanged.
 
-- **KSG accepted `k` >= sample size.** `k=30` on `N=20` returned 0.414 and
-  `k=100` returned 1.63. Effective-sample and zero-radius checks added.
+- **KSG accepted inputs it cannot estimate from.** `k=30` on `N=20` returned
+  0.414 and `k=100` returned 1.63; binary/tied series returned TE = -2.36, for a
+  quantity bounded below by zero; negative Theiler windows were accepted. The
+  effective-sample, tie/zero-radius and window checks now guard the MI, TE and
+  auto-embedding paths, and the auto-embedding search skips candidates it cannot
+  support instead of ranking them and failing on the winner.
 
 - **Symbolic TE packed symbols into an integer that overflowed** at
   `k_history=10` (reaching `(k!)^3`). Now counts distinct rows directly,
@@ -77,7 +85,8 @@ scientifically material ones:
   length-1 ordinal pattern has one symbol, so TE is identically zero. Those were
   the only two symbolic variants shipped, so **symbolic TE now has no bundled
   representation** — reintroducing it needs a defensible `k` with benchmark
-  support.
+  support. `k_history=10` remains constructible for long series, where the
+  undersampling argument does not apply.
 
 - **Results tables no longer use pickle.** Names are stored as `dtype='U'` and
   loaded with `allow_pickle=False`; files carry a schema version, run spec,
@@ -89,9 +98,18 @@ scientifically material ones:
   the target it returned 0.007 at target autocorrelation 0 and 1.53 at 0.95 --
   it measured target self-predictability. It now implements Massey's
   `sum_i [H(Y_i|Y^{i-1}) - H(Y_i|Y^{i-1},X^i)]`, validated against the closed
-  form `0.5*ln(1+c^2)`. Only the Gaussian variant is validated, so the kernel and
-  kozachenko variants are no longer bundled. `n` now reaches the identifier for
-  `DirectedInfo` and `CausalEntropy`, renaming those SPIs.
+  form `0.5*ln(1+c^2)`.
+
+  The kernel and kozachenko variants are dropped. Composing DI from four
+  separately-estimated entropies leaves each with its own dimension-dependent
+  bias, and those do not cancel: on independent data kernel sat at 3.8-4.4 for
+  every `T` from 100 to 8000 (a fixed bandwidth in ~11 dimensions does not
+  improve with sample size), and kozachenko returned negatives. In their place
+  `di_kraskov` estimates each `I(X^i; Y_i | Y^{i-1})` term *directly* with the
+  KSG/Frenzel-Pompe conditional-MI estimator, which fixes one neighbour radius
+  in the joint space and reuses it across marginals so the biases cancel by
+  construction. It matches the closed form as closely as the Gaussian variant.
+  `n` now reaches the identifier for `DirectedInfo` and `CausalEntropy`.
 
 - **Wavelet phase-slope index lost its direction.** `mne_connectivity` returns
   a lower-triangular matrix and pyspi filled the upper triangle *without*
@@ -99,8 +117,10 @@ scientifically material ones:
   content. The fill must also happen per frequency, *before* the band statistic:
   only a statistic commuting with negation may be applied first, and
   `max_f(-v) = -min_f(v)`, not `-max_f(v)`. `mean` is antisymmetric, `max`
-  asymmetric. Its `fmin` is now resolved against the five-cycle floor rather
-  than passing `fmin=0`, which MNE reports as an unreliable spectrum.
+  asymmetric. `fmin=0` also asked for an unbounded period, giving an
+  ~11.1-million-sample Morlet wavelet at `T=100`; `fmin` is now resolved against
+  the data-supported floor *and* the cycle count capped so the wavelet always
+  fits the signal.
 
 - **Importing pyspi reseeded NumPy's global RNG.** `pyspi.lib.ids` called
   `np.random.seed(1717)` at import, silently overriding the caller's seed --
@@ -235,5 +255,42 @@ failures (values unchanged).
 | `JIDTBase` | `InfoTheoryBase` |
 | `MutualInfo(estimator="kozachenko")` | raises; use `estimator="kraskov"` |
 
-Values for the six directed spectral SPIs listed under **Fixed** are
-transposed relative to 2.x. Other SPI values are unchanged on the frozen test fixtures.
+### SPI set changes
+
+`full` goes from **328 SPIs to 325**. Every change below is deliberate; nothing
+else moved on the frozen test fixtures.
+
+**Removed (4)**
+
+| SPI | Why |
+|:----|:----|
+| `te_symbolic_k-1_kt-1_l-1_lt-1` | A length-1 ordinal pattern has one symbol, so TE is identically zero. |
+| `te_symbolic_k-10_kt-1_l-1_lt-1` | `10!` symbols against ~91 samples at `T=100`: every count is 0 or 1, so the value reflects the sample size, not dependence. Still constructible for long series. |
+| `di_kernel_W-0.5` | ~3.8-4.4 on independent data at every `T` from 100 to 8000. |
+| `di_kozachenko` | Negative values, for a nonnegative quantity. |
+
+**Added (1)**
+
+| SPI | Why |
+|:----|:----|
+| `di_kraskov_NN-4_n-5` | Direct KSG/Frenzel-Pompe conditional-MI estimate of directed information; the validated nonlinear replacement for the two dropped variants. Not in the `benchmarked_p*` sets until it has been timed. |
+
+**Renamed (4)** — `n` changes the measure, so it now reaches the identifier.
+Values unchanged.
+
+`cce_gaussian` → `cce_gaussian_n-5`, and likewise `cce_kernel_W-0.5`,
+`cce_kozachenko`, `di_gaussian`.
+
+**Values changed (17)** — all from the corrections listed above.
+
+| SPIs | Cause |
+|:-----|:------|
+| `coint_aeg_*` (3) | No longer forced symmetric; each orientation is reported as computed. |
+| `psi_wavelet_*` (6) | Sign restored, negation moved before the band statistic, wavelet length bounded. |
+| `di_gaussian_n-5` | Massey's definition instead of the old entropy-rate sum. |
+| `je_gaussian`, `ce_gaussian` | One shared regularisation across both code paths (~1e-8). |
+| `bary_sgddtw_*`, `bary-sq_sgddtw_*` (4) | Stochastic; they now honour the caller's seed instead of the import-time `seed(1717)`. |
+| `te_kraskov_NN-4_DCE_k-max-10_tau-max-4` | Auto-embedding now skips embeddings the estimator cannot support. |
+
+Values for the six directed spectral SPIs listed under **Fixed** are also
+transposed relative to 2.x.
