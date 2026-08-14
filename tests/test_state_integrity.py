@@ -1,11 +1,14 @@
-"""Red tests: Data ownership, cache lifecycle, and process-name consistency.
+"""Data ownership, cache lifecycle, and process-name consistency.
 
-Every test here encodes DESIRED behaviour and currently fails. Each is marked
-``xfail(strict=True)``, so:
+These began as red tests. Most are now green: ``Data`` copies and freezes its
+input, ``to_numpy()`` hands out a read-only view, every statistic cache listed
+in ``Data._CACHE_ATTRS`` is dropped when the series change, the builder path
+works, process names track add/remove, and ``dim_order``/non-finite inputs are
+validated.
 
-  * CI stays green while the fixes are outstanding;
-  * the moment a fix lands, the strict marker turns the unexpected pass into a
-    FAILURE, forcing the marker to be deleted rather than left to rot.
+What remains red is marked ``xfail(strict=True)``: CI stays green while the fix
+is outstanding, and the strict marker turns the eventual unexpected pass into a
+failure so it cannot outlive the bug.
 
 Do not relax an assertion to make one of these pass. Delete the marker.
 """
@@ -25,7 +28,6 @@ def _mts(seed=0, m=3, t=100):
 # Input ownership and read-only exposure
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="Data does not copy its input; caller retains an alias")
 def test_data_owns_its_input_array():
     """Mutating the caller's array after construction must not change the Data."""
     arr = _mts()
@@ -44,7 +46,6 @@ def test_data_owns_its_input_array():
     assert np.allclose(data.to_numpy(squeeze=True), before)
 
 
-@pytest.mark.xfail(strict=True, reason="to_numpy() exposes mutable internal storage")
 def test_to_numpy_does_not_expose_mutable_internals():
     """to_numpy() must not hand out a writable view of internal storage."""
     data = Data(data=_mts(), dim_order="ps", zscore=False)
@@ -63,7 +64,6 @@ def test_to_numpy_does_not_expose_mutable_internals():
 # Cache invalidation on mutation
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="set_data does not invalidate statistic caches")
 def test_set_data_invalidates_caches():
     """Replacing the dataset must invalidate caches computed from the old one."""
     spi = Covariance()
@@ -80,7 +80,6 @@ def test_set_data_invalidates_caches():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="add_process/remove_process do not invalidate caches")
 def test_add_and_remove_process_invalidate_caches():
     data = Data(data=_mts(seed=3), dim_order="ps", zscore=False)
     spi = Covariance()
@@ -102,7 +101,6 @@ def test_add_and_remove_process_invalidate_caches():
 # Builder path and raw-array API
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="_data=None set eagerly; add_process guards on hasattr")
 def test_builder_path_add_process_on_empty_data():
     """Data().add_process(x) is the documented builder entry point."""
     data = Data()
@@ -114,10 +112,17 @@ def test_builder_path_add_process_on_empty_data():
     assert data.n_observations == x.size
 
 
-@pytest.mark.xfail(strict=True, reason="raw-array bivariate() fails via the broken builder path")
 def test_bivariate_accepts_raw_arrays():
+    """The two-array form routes through Data()+add_process(), i.e. the builder.
+
+    Covariance is deliberately not used here: it is multivariate-only and
+    raises NotImplementedError from bivariate() regardless of the builder, which
+    would make this pass or fail for the wrong reason.
+    """
+    from pyspi.statistics.basic import SpearmanR
+
     x, y = _mts(m=2)
-    val = Covariance().bivariate(x, y)
+    val = SpearmanR().bivariate(x, y)
     assert np.isfinite(val)
 
 
@@ -140,7 +145,6 @@ def test_bivariate_rejects_indices_passed_positionally():
 # Process-name lifecycle
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="procnames are not maintained across add/remove")
 def test_procnames_track_process_mutations():
     data = Data(data=_mts(), dim_order="ps", zscore=False,
                 procnames=["a", "b", "c"])
@@ -161,13 +165,11 @@ def test_procnames_track_process_mutations():
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("bad", ["xx", "pp", "ss", "zz"])
-@pytest.mark.xfail(strict=True, reason="dim_order accepts duplicate/unknown symbols")
 def test_dim_order_rejects_invalid_symbols(bad):
     with pytest.raises((ValueError, RuntimeError)):
         Data(data=_mts(), dim_order=bad, zscore=False)
 
 
-@pytest.mark.xfail(strict=True, reason="non-finite input accepted when zscore=False")
 def test_non_finite_input_rejected_without_zscore():
     arr = _mts()
     arr[0, 0] = np.inf

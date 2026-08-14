@@ -122,7 +122,7 @@ def test_pass_dataset_with_nan_into_calculator(nan_loc, expected_output):
         base_dataset[loc, 0] = np.nan
     with pytest.raises(ValueError) as excinfo:
         calc = Calculator(dataset=base_dataset)
-    assert f"non-numerics (NaNs) in processes: {expected_output}" in str(excinfo), "NaNs not detected in dataset when loading into Calculator!"
+    assert f"non-finite values (NaN/inf) in processes: {expected_output}" in str(excinfo), "NaNs not detected in dataset when loading into Calculator!"
 
 def test_pass_dataset_with_inf_into_calculator():
     """Check whether ValueError is raised when a dataset containing an inf/-inf value is passed into the calculator object"""
@@ -131,7 +131,7 @@ def test_pass_dataset_with_inf_into_calculator():
     base_dataset[2, 2] = -np.inf
     with pytest.raises(ValueError) as excinfo:
         calc = Calculator(dataset=base_dataset)
-    assert f"non-numerics (NaNs) in processes: [0 2]" in str(excinfo), "NaNs not detected in dataset when loading into Calculator!"
+    assert f"non-finite values (NaN/inf) in processes: [0 2]" in str(excinfo), "NaNs not detected in dataset when loading into Calculator!"
 
 @pytest.mark.parametrize("shape, n_procs_expected, n_obs_expected", [
     ((2, 23), 2, 23),

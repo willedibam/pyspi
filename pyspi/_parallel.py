@@ -64,16 +64,7 @@ def _attach_data(shm_name, shape, dtype_str, procnames, name):
 
     shared = shm.SharedMemory(name=shm_name)
     arr = np.ndarray(shape, dtype=np.dtype(dtype_str), buffer=shared.buf)
-    data = Data.__new__(Data)
-    data.zscore = False
-    data.detrend = False
-    data._data = arr
-    data.data_type = arr.dtype.type
-    data.n_processes = arr.shape[0]
-    data.n_observations = arr.shape[1]
-    data.n_replications = arr.shape[2]
-    data._procnames = list(procnames)
-    data._name = name or "N/A"
+    data = Data._from_prepared_array(arr, procnames=procnames, name=name)
     return data, shared
 
 

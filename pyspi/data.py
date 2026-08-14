@@ -62,6 +62,31 @@ class Data:
 
     """
 
+    # Every attribute a statistic may cache directly on a Data instance. This is
+    # the authoritative list: anything that writes `data.<x> = ...` from
+    # pyspi/statistics/ must appear here, or its cache will survive a mutation
+    # of the underlying series and silently serve results from the old data.
+    #
+    # Derived mechanically from the statistics package:
+    #   grep -rhoE "\bdata\.[a-z_][a-z0-9_]*\s*=" pyspi/statistics/*.py
+    _CACHE_ATTRS = (
+        "_spectral_bv_conn",
+        "barycenter",
+        "causal_entropy",
+        "ccm",
+        "coint",
+        "covariance",
+        "entropy",
+        "joint_entropy",
+        "mne",
+        "mne_psi",
+        "spectral_bv",
+        "spectral_gc",
+        "spectral_mv",
+        "theiler",
+        "xcorr",
+    )
+
     def __init__(
         self,
         data=None,
@@ -102,6 +127,38 @@ class Data:
                     )
                 self._procnames = list(procnames)
 
+    @classmethod
+    def _from_prepared_array(cls, arr, procnames=None, name=None):
+        """Build a Data around an already-preprocessed array, without copying.
+
+        Internal constructor for the parallel workers, which attach to a
+        shared-memory block holding the parent's already-detrended/z-scored
+        series. Copying would defeat the point of sharing, so ownership is
+        waived here and the array is exposed read-only instead — workers only
+        ever read it.
+
+        This replaces the previous ``Data.__new__`` + manual attribute
+        assignment in ``pyspi._parallel._attach_data``, which had to be kept in
+        sync with ``__init__`` by hand and silently skipped anything added
+        there.
+        """
+        if arr.ndim != 3:
+            raise ValueError(
+                f"Prepared array must be (processes, observations, replications); "
+                f"got shape {arr.shape}."
+            )
+        self = cls.__new__(cls)
+        self.zscore = False
+        self.detrend = False
+        self._data = arr
+        self.data_type = arr.dtype.type
+        self._name = name or "N/A"
+        if procnames is not None:
+            self._procnames = list(procnames)
+        self._reset_data_size()
+        self._sync_procnames()
+        return self
+
     @property
     def name(self):
         """Name of the data object."""
@@ -125,17 +182,49 @@ class Data:
         else:
             return [f"proc-{i}" for i in range(self.n_processes)]
 
+    def _invalidate_caches(self):
+        """Drop every statistic cache held on this instance.
+
+        Called whenever the underlying series change. Statistics cache results
+        keyed by parameters but *not* by the data, so a cache that outlives a
+        mutation returns the previous dataset's numbers with no error and no
+        warning — the most dangerous failure mode in the package.
+        """
+        for attr in self._CACHE_ATTRS:
+            self.__dict__.pop(attr, None)
+
+    def _set_internal(self, arr):
+        """Install ``arr`` as the backing store, owned and frozen.
+
+        Data takes ownership: the array is copied if it is not already private,
+        then marked read-only so neither the caller nor a statistic can mutate
+        the series behind the caches.
+        """
+        arr = np.array(arr, dtype=arr.dtype, copy=True, order="C")
+        arr.setflags(write=False)
+        self._data = arr
+        self._invalidate_caches()
+
     def to_numpy(self, realisation=None, squeeze=False):
-        """Return the numpy array."""
+        """Return the numpy array.
+
+        The result is a **read-only** view of the internal store. Copy it if you
+        need to modify it; writing through it would desynchronise the statistic
+        caches from the data they were computed on.
+        """
         if realisation is not None:
             dat = self._data[:, :, realisation]
         else:
             dat = self._data
 
         if squeeze:
-            return np.squeeze(dat)
-        else:
-            return dat
+            dat = np.squeeze(dat)
+
+        # Views inherit the base array's write flag, but be explicit: np.squeeze
+        # may return a new array object in some numpy versions.
+        if dat.flags.owndata:
+            dat.setflags(write=False)
+        return dat
 
     @staticmethod
     def convert_to_numpy(data):
@@ -195,6 +284,17 @@ class Data:
                 "Data array dimension ({0}) and length of "
                 "dim_order ({1}) are not equal.".format(data.ndim, len(dim_order))
             )
+        # Unknown or repeated symbols previously slipped through and produced
+        # 4-D/5-D internal states (e.g. 'xx', 'pp') that fail far from here.
+        unknown = set(dim_order) - set("psr")
+        if unknown:
+            raise ValueError(
+                f"dim_order contains unknown symbol(s) {sorted(unknown)}; "
+                "valid symbols are 'p' (processes), 's' (observations), "
+                "'r' (replications)."
+            )
+        if len(set(dim_order)) != len(dim_order):
+            raise ValueError(f"dim_order has repeated symbols: {dim_order!r}.")
 
         # Bring data into the order processes x observations in a pandas dataframe.
         data = self._reorder_data(data, dim_order)
@@ -219,16 +319,22 @@ class Data:
         else:
             logger.info("[2/2] Skipping normalisation of time series in the dataset.")
 
-        nans = np.isnan(data)
-        if nans.any():
+        # Check all non-finite values, not just NaNs: with zscore=False an inf
+        # passes straight through to the estimators, where it surfaces as an
+        # unrelated failure much later.
+        bad = ~np.isfinite(data)
+        if bad.any():
             raise ValueError(
-                f"Dataset {name} contains non-numerics (NaNs) in processes: {np.unique(np.where(nans)[0])}."
+                f"Dataset {name} contains non-finite values (NaN/inf) in "
+                f"processes: {np.unique(np.where(bad)[0])}."
             )
 
-        self._data = data
-        self.data_type = type(data[0, 00, 0])
+        self._set_internal(data)
+        self.data_type = self._data.dtype.type
 
         self._reset_data_size()
+        # Process names are positional, so any change in width invalidates them.
+        self._sync_procnames()
 
         if name is not None:
             self._name = name
@@ -250,28 +356,52 @@ class Data:
         if not isinstance(proc, np.ndarray) or proc.ndim != 1:
             raise TypeError("Process must be a 1D numpy array")
 
-        if hasattr(self, "_data"):
-            try:
-                self._data = np.append(
-                    self._data, np.reshape(proc, (1, self.n_observations, 1)), axis=0
-                )
-            except IndexError:
-                raise IndexError()
-        else:
+        # Guard on the value, not on hasattr: _data is now always present (set
+        # to None in __init__), so hasattr is True even for an empty Data and
+        # the builder path would reshape into a zero-width array.
+        if self._data is None:
             self.set_data(proc, dim_order="s", verbose=verbose)
+            return
 
+        if proc.size != self.n_observations:
+            raise ValueError(
+                f"Process has {proc.size} observations but the dataset has "
+                f"{self.n_observations}."
+            )
+        appended = np.append(
+            self._data, np.reshape(proc, (1, self.n_observations, 1)), axis=0
+        )
+        self._set_internal(appended)
         self._reset_data_size()
+        if hasattr(self, "_procnames"):
+            self._procnames.append(f"proc-{self.n_processes - 1}")
 
     def remove_process(self, procs):
         try:
-            self._data = np.delete(self._data, procs, axis=0)
+            reduced = np.delete(self._data, procs, axis=0)
         except IndexError:
             logger.error(
                 "Process %s is out of bounds of multivariate time-series data "
                 "with %d process(es)", procs, self.n_processes,
             )
+            return
 
+        keep = np.delete(np.arange(self.n_processes), procs)
+        self._set_internal(reduced)
         self._reset_data_size()
+        if hasattr(self, "_procnames"):
+            self._procnames = [self._procnames[i] for i in keep]
+
+    def _sync_procnames(self):
+        """Drop stale process names after a change in width.
+
+        Names are positional; once the number of processes changes under them
+        they no longer identify anything, so falling back to the generated
+        ``proc-i`` names is the only honest option.
+        """
+        names = self.__dict__.get("_procnames")
+        if names is not None and len(names) != self.n_processes:
+            del self._procnames
 
     def _reorder_data(self, data, dim_order):
         """Reorder data dimensions to processes x observations x realisations."""
