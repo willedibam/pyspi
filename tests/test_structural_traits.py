@@ -1,22 +1,29 @@
-"""Red tests: declared structural traits must match observed behaviour.
+"""Declared structural traits must match observed behaviour.
 
-Two separate problems live here.
+Symmetry is three-valued, not two. A binary directed/undirected vocabulary has
+no word for measures satisfying ``A[i,j] == -A[j,i]`` -- PLI, wPLI, PSI, and
+CCM's "diff" statistic -- and labelling them ``undirected`` (which implies
+symmetry) misdescribes them for any downstream filtering or grouping.
 
-**AEG.** ``Cointegration`` is declared ``Undirected``, but the ``aeg`` method
-computes ``statsmodels.tsa.stattools.coint(z[i], z[j])``, which is *not*
-symmetric in its arguments. The cache then writes the single computed value to
-both ``(i, j)`` and ``(j, i)``. So the reported value for a pair depends on
-which orientation happened to be computed first, i.e. on process order. That is
-a scientific-semantics question, not a rounding artifact: either AEG is
-directed and must be labelled and stored as such, or a symmetric definition
-(e.g. min/max over both orientations) must be chosen and documented.
+Resolved here:
 
-**Trait/label agreement.** Labels are used for filtering and for grouping in
-analyses, so a class declaring ``undirected`` while producing an asymmetric
-matrix silently corrupts downstream selection. The audit below reads the
-committed baseline matrices, so it costs no computation.
+* ``Cointegration`` declared ``Undirected`` while ``aeg`` computes
+  ``stattools.coint(z[i], z[j])``, which is not symmetric in its arguments
+  (measured: ~0.8 mean absolute difference between orientations, up to ~1.6).
+  The cache then wrote the one computed value to both ``(i, j)`` and
+  ``(j, i)``, so which orientation you got depended on visit order. ``aeg`` is
+  now ``directed`` and reports what it computes; ``johansen``, which is
+  symmetric to ~3e-14, keeps the alias.
+* Wavelet ``PhaseSlopeIndex`` filled its upper triangle from the lower one
+  *without negating*, inverting the lead/lag sign for half of every matrix.
+* ``hhg`` was declared directed but is exactly symmetric; ``ce``, ``dcorrx``
+  and ``mgcx`` were labelled undirected in configs but are directed.
 
-See tests/test_state_integrity.py for the xfail(strict=True) rationale.
+Two open findings remain, marked ``xfail(strict=True)`` with their reasoning in
+the marker. They are recorded rather than silently patched because each needs a
+scientific decision, not a code change.
+
+The audit reads the committed baseline matrices, so it costs no computation.
 """
 import os
 
@@ -41,7 +48,6 @@ def _offdiag(a):
 # AEG semantics
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="AEG is asymmetric but cached to both orientations")
 def test_aeg_value_is_independent_of_process_order():
     """Permuting the input processes must not change a pair's AEG value."""
     rng = np.random.default_rng(0)
@@ -64,7 +70,6 @@ def test_aeg_value_is_independent_of_process_order():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="AEG declares Undirected but coint(x,y) != coint(y,x)")
 def test_aeg_declared_symmetry_matches_the_statistic():
     """If AEG is labelled undirected, the underlying statistic must be symmetric."""
     from statsmodels.tsa import stattools
@@ -137,7 +142,18 @@ def _label_symmetry_audit():
     return disagreements
 
 
-@pytest.mark.xfail(strict=True, reason="several classes' declared symmetry contradicts their output")
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Open finding, not yet resolved. ce_gaussian, lmfit_* and "
+        "gpfit_DotProduct declare 'directed' but come out symmetric on "
+        "z-scored data: Gaussian conditional entropy is symmetric when the "
+        "marginal variances are equal, which z-scoring guarantees, and a "
+        "linear model's R^2 is symmetric on standardised inputs. Whether the "
+        "label or the preprocessing is wrong is a scientific decision, so it "
+        "is recorded rather than silently relabelled."
+    ),
+)
 def test_declared_symmetry_matches_observed_matrices():
     bad = _label_symmetry_audit()
     assert not bad, "Declared/observed symmetry disagreements:\n" + "\n".join(
@@ -145,7 +161,6 @@ def test_declared_symmetry_matches_observed_matrices():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="no 'antisymmetric' label exists; these are labelled undirected")
 def test_antisymmetric_measures_are_labelled_as_such():
     """PLI/wPLI/PSI encode lead-lag in their sign; 'undirected' misdescribes them."""
     z = np.load(BASELINE, allow_pickle=False)
@@ -167,7 +182,16 @@ def test_antisymmetric_measures_are_labelled_as_such():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="degenerate SPIs return a constant matrix and ship anyway")
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Open finding, not yet resolved. dspli_*_max, dswpli_*_max and one "
+        "phase_*_max variant return a constant matrix on var1_M3_T100, so "
+        "they carry no pairwise information on this fixture. Whether that "
+        "holds generally or is specific to M=3/T=100 needs checking before "
+        "any of them is removed from the shipped set."
+    ),
+)
 def test_no_bundled_spi_returns_a_constant_matrix():
     """A constant matrix carries no pairwise information."""
     z = np.load(BASELINE, allow_pickle=False)
@@ -183,7 +207,6 @@ def test_no_bundled_spi_returns_a_constant_matrix():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="ConditionalEntropy is implemented directed, labelled undirected")
 def test_conditional_entropy_label_matches_implementation():
     spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
     ce = {k: v for k, v in spis.items() if k.startswith("ce_")}

@@ -193,7 +193,10 @@ class debiased_weighted_squared_PhaseLagIndex(mne, Undirected):
 
 class PhaseSlopeIndex(mne, Undirected):
     name = "Phase slope index (wavelet)"
-    labels = ["unsigned", "wavelet", "undirected"]
+    # Antisymmetric, not undirected: the upper triangle is filled as the
+    # negated lower triangle (see multivariate), so A[i,j] == -A[j,i] holds by
+    # construction for every band statistic.
+    labels = ["unsigned", "wavelet", "antisymmetric"]
 
     def __init__(self, **kwargs):
         self.identifier = "psi"
@@ -238,7 +241,14 @@ class PhaseSlopeIndex(mne, Undirected):
         adj_freq = self._get_psi(data)
         adj = self._statfn(np.real(adj_freq), axis=(2, 3))
 
+        # mne_connectivity returns a *lower-triangular* dense matrix; the upper
+        # triangle is zero and must be filled in here. PSI is antisymmetric --
+        # psi[i,j] = -psi[j,i], the sign being the entire lead/lag content -- so
+        # the fill must negate. The inherited mne.multivariate mirrors with a
+        # plus sign, which is correct for the magnitude-like wavelet measures
+        # but for PSI reported psi[i,j] == psi[j,i], inverting the direction for
+        # half of every matrix.
         ui = np.triu_indices(data.n_processes, 1)
-        adj[ui] = adj.T[ui]
+        adj[ui] = -adj.T[ui]
         np.fill_diagonal(adj, np.nan)
         return adj

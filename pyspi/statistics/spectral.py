@@ -54,6 +54,24 @@ class NonparametricSpectral(Unsigned):
         else:
             self._statfn = None
         self._statistic = statistic
+
+        # Structural trait, derived from the implementation rather than assumed.
+        # PLI, wPLI, PSI and coherence phase carry a sign that encodes lead/lag:
+        # A[i,j] == -A[j,i]. That is a third category, neither "undirected"
+        # (which implies symmetry) nor "directed" (which implies the two
+        # orientations are independent quantities). Labelling them undirected
+        # misdescribes them for any downstream filtering.
+        #
+        # Only band statistics that are linear in the spectrum preserve
+        # antisymmetry: mean does, max does not (max(-x) != -max(x)), so a
+        # 'max' variant of an antisymmetric measure is genuinely neither and is
+        # left unlabelled here.
+        if getattr(self, "_antisymmetric_spectrum", False):
+            trait = "antisymmetric" if statistic == "mean" else "asymmetric"
+            self.labels = [
+                l for l in self.labels if l not in ("undirected", "directed")
+            ] + [trait]
+
         paramstr = (
             f"_multitaper_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
             f"_fmax-{fmt_param(fmax)}".replace(
@@ -250,6 +268,8 @@ class CoherenceMagnitude(NonparametricSpectralMultivariate, Undirected):
 
 
 class CoherencePhase(NonparametricSpectralMultivariate, Undirected):
+    # Antisymmetric in (i, j): phase difference: phi(i,j) = -phi(j,i).
+    _antisymmetric_spectrum = True
     name = "Coherence phase"
     labels = ["unsigned", "spectral", "undirected"]
 
@@ -283,6 +303,8 @@ class PhaseLockingValue(NonparametricSpectralMultivariate, Undirected):
 
 
 class PhaseLagIndex(NonparametricSpectralMultivariate, Undirected):
+    # Antisymmetric in (i, j): sign of the imaginary coherency.
+    _antisymmetric_spectrum = True
     name = "Phase lag index"
     labels = ["unsigned", "spectral", "undirected"]
 
@@ -293,6 +315,8 @@ class PhaseLagIndex(NonparametricSpectralMultivariate, Undirected):
 
 
 class WeightedPhaseLagIndex(NonparametricSpectralMultivariate, Undirected):
+    # Antisymmetric in (i, j): imaginary-coherency weighted sign.
+    _antisymmetric_spectrum = True
     name = "Weighted phase lag index"
     labels = ["unsigned", "spectral", "undirected"]
 
@@ -391,6 +415,8 @@ class DirectDirectedTransferFunction(NonparametricSpectralBivariate, Directed):
 
 
 class PhaseSlopeIndex(NonparametricSpectralMultivariate, Undirected):
+    # Antisymmetric in (i, j): slope of the phase spectrum.
+    _antisymmetric_spectrum = True
     name = "Phase slope index"
     labels = ["unsigned", "spectral", "undirected"]
 

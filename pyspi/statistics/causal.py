@@ -84,6 +84,13 @@ class ConvergentCrossMapping(Directed, Signed):
         self._statistic = statistic
         self._E = embedding_dimension
 
+        # The "diff" statistic is ccm(i->j) - ccm(j->i), so A[i,j] == -A[j,i]
+        # by construction. That is antisymmetric, not merely directed: the two
+        # orientations are one quantity and its negation, not independent
+        # values. "mean"/"max" remain plainly directed.
+        if statistic == "diff":
+            self.labels = [l for l in self.labels if l != "directed"] + ["antisymmetric"]
+
         self.identifier += f"_E-{embedding_dimension}_{statistic}"
 
     @property

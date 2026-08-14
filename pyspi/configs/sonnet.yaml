@@ -116,7 +116,6 @@
 
   PhaseSlopeIndex:
     labels:
-      - directed
       - linear/nonlinear
       - unsigned
       - bivariate
@@ -130,7 +129,6 @@
 
   PhaseLagIndex:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
@@ -161,7 +159,6 @@
 .statistics.wavelet:
   PhaseSlopeIndex:
     labels:
-      - directed
       - linear/nonlinear
       - unsigned
       - bivariate
@@ -176,7 +173,6 @@
   # Cointegration
   Cointegration:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate

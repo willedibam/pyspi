@@ -92,12 +92,13 @@ class HilbertSchmidtIndependenceCriterion(Undirected, Unsigned):
         return stat
 
 
-class HellerHellerGorfine(Directed, Unsigned):
+class HellerHellerGorfine(Undirected, Unsigned):
     """Heller-Heller-Gorfine independence criterion"""
 
     name = "Heller-Heller-Gorfine Independence Criterion"
     identifier = "hhg"
-    labels = ["unsigned", "distance", "unordered", "nonlinear", "directed"]
+    # Symmetric by construction: hhg(x, y) == hhg(y, x) exactly.
+    labels = ["unsigned", "distance", "unordered", "nonlinear", "undirected"]
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):

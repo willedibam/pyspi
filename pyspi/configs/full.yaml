@@ -268,7 +268,7 @@
   # Multi-scale graph correlation for time series
   CrossMultiscaleGraphCorrelation:
     labels:
-      - undirected
+      - directed
       - nonlinear
       - unsigned
       - bivariate
@@ -282,7 +282,7 @@
   # Distance correlation for time series
   CrossDistanceCorrelation:
     labels:
-      - undirected
+      - directed
       - nonlinear
       - unsigned
       - bivariate
@@ -529,7 +529,7 @@
 
   ConditionalEntropy: # No theiler window yet
     labels:
-      - undirected
+      - directed
       - nonlinear
       - unsigned
       - bivariate
@@ -750,7 +750,6 @@
 .statistics.spectral:
   CoherencePhase:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
@@ -844,7 +843,6 @@
 
   PhaseSlopeIndex:
     labels:
-      - directed
       - linear/nonlinear
       - unsigned
       - bivariate
@@ -896,7 +894,6 @@
 
   PhaseLagIndex:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
@@ -931,7 +928,6 @@
 
   WeightedPhaseLagIndex:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
@@ -1424,7 +1420,6 @@
 .statistics.wavelet:
   PhaseSlopeIndex:
     labels:
-      - undirected
       - unsigned
       - time/frequency dependent
       - bivariate
@@ -1484,7 +1479,6 @@
   # Cointegration
   Cointegration:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate

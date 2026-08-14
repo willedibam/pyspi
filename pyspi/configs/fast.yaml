@@ -258,7 +258,7 @@
 
   ConditionalEntropy: # No theiler window yet
     labels:
-      - undirected
+      - directed
       - nonlinear
       - unsigned
       - bivariate
@@ -380,7 +380,6 @@
 .statistics.spectral:
   CoherencePhase:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
@@ -474,7 +473,6 @@
 
   PhaseSlopeIndex:
     labels:
-      - directed
       - linear/nonlinear
       - unsigned
       - bivariate
@@ -526,7 +524,6 @@
 
   PhaseLagIndex:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
@@ -561,7 +558,6 @@
 
   WeightedPhaseLagIndex:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
@@ -1235,7 +1231,6 @@
 
   PhaseSlopeIndex:
     labels:
-      - undirected
       - unsigned
       - time/frequency dependent
       - bivariate
@@ -1282,7 +1277,6 @@
   # Cointegration
   Cointegration:
     labels:
-      - undirected
       - linear
       - unsigned
       - bivariate
