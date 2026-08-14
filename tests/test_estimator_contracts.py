@@ -1,4 +1,4 @@
-"""Red tests: an SPI must compute the estimator it advertises, or refuse.
+"""An SPI must compute the estimator it advertises, or refuse.
 
 Six classes accept ``estimator="kraskov"``, embed ``kraskov_NN-4`` in their
 identifier, and then run the Gaussian estimator. Nothing in the result records
@@ -39,7 +39,6 @@ def _data(seed=0, m=3, t=200):
 # --------------------------------------------------------------------------
 
 @pytest.mark.parametrize("cls_name", FALSE_KRASKOV)
-@pytest.mark.xfail(strict=True, reason="kraskov silently dispatches to the Gaussian estimator")
 def test_kraskov_is_not_silently_gaussian(cls_name):
     """Either compute a genuine k-NN estimate, or reject the argument."""
     cls = getattr(it, cls_name)
@@ -60,13 +59,11 @@ def test_kraskov_is_not_silently_gaussian(cls_name):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="unknown auto_embed_method silently falls through to a default")
 def test_invalid_auto_embed_method_is_rejected():
     with pytest.raises((ValueError, KeyError, NotImplementedError)):
         it.TransferEntropy(auto_embed_method="NOT_A_METHOD").multivariate(_data())
 
 
-@pytest.mark.xfail(strict=True, reason="unsupported estimator-specific parameters are ignored")
 def test_unsupported_parameters_are_rejected():
     """A parameter that the chosen estimator ignores must not be accepted silently."""
     with pytest.raises((ValueError, TypeError)):
@@ -78,13 +75,11 @@ def test_unsupported_parameters_are_rejected():
 # Symbolic transfer entropy
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="k_history=1 has a single ordinal symbol; TE is identically zero")
 def test_symbolic_k_history_1_is_rejected():
     with pytest.raises(ValueError):
         it.TransferEntropy(estimator="symbolic", k_history=1)
 
 
-@pytest.mark.xfail(strict=True, reason="degenerate symbolic variants still ship in bundled configs")
 def test_bundled_configs_exclude_degenerate_symbolic_variants():
     from pyspi.calculator import bundled_configs, load_spis_from_yaml, resolve_config
 
@@ -101,31 +96,55 @@ def test_bundled_configs_exclude_degenerate_symbolic_variants():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="arithmetic symbol packing overflows int64 for large k")
-def test_symbolic_encoding_is_collision_free():
-    """Joint symbol encoding must be injective, whatever k is.
+def _reference_symbolic_te(src, targ, k):
+    """Independent symbolic TE using Python tuples as histogram keys.
 
-    The current encoding multiplies by a squaring multiplier, so the packed
-    value exceeds int64 for k=10 and wraps. Wrapping is not by itself a
-    collision -- no collisions occur on the shipped fixtures -- but the
-    encoding offers no guarantee, and correctness must not rest on luck.
+    Deliberately avoids any integer packing, so it cannot share the overflow
+    failure mode of the implementation it checks.
     """
+    from collections import Counter
+    from math import log2
+
+    from pyspi.statistics.infotheory import _series_to_ordinal_symbols
+
+    s = _series_to_ordinal_symbols(np.asarray(src, dtype=float), k)
+    t = _series_to_ordinal_symbols(np.asarray(targ, dtype=float), k)
+    n = min(len(s), len(t)) - 1
+    tn, tp, sc = t[1:n + 1], t[:n], s[:n]
+
+    def H(*cols):
+        counts = Counter(zip(*(list(map(int, c)) for c in cols)))
+        total = sum(counts.values())
+        return -sum((c / total) * log2(c / total) for c in counts.values())
+
+    return H(tn, tp) - H(tp) - H(tn, tp, sc) + H(tp, sc)
+
+
+@pytest.mark.parametrize("k", [2, 5, 10])
+def test_symbolic_encoding_is_collision_free(k):
+    """Joint symbol counting must be injective at every k.
+
+    The old encoding multiplied by a multiplier that squared at each step, so
+    the packed value reached (k!)^3 and exceeded int64 at k=10, wrapping
+    silently. Wrapping is not the same as colliding -- no collisions occur on
+    the shipped fixtures -- but the encoding gave no guarantee, so this checks
+    the implementation against a reference that cannot overflow.
+    """
+    from pyspi.statistics.infotheory import SymbolicTECalculator
+
     rng = np.random.default_rng(0)
-    k = 10
-    n_symbols = int(np.math.factorial(k))
-    arrs = [rng.integers(0, n_symbols, size=500) for _ in range(3)]
+    src = rng.standard_normal(600)
+    targ = np.roll(src, 1) + 0.5 * rng.standard_normal(600)
 
-    truth = {tuple(int(a[i]) for a in arrs) for i in range(arrs[0].size)}
+    calc = SymbolicTECalculator()
+    calc.setProperty("k_HISTORY", str(k))
+    calc.setObservations(src, targ)
+    got = calc.computeAverageLocalOfObservations()
 
-    combined = arrs[0].copy()
-    multiplier = n_symbols
-    for arr in arrs[1:]:
-        combined = combined * multiplier + arr
-        multiplier *= n_symbols
-
-    assert len(np.unique(combined)) == len(truth), (
-        f"Symbol packing is not injective at k={k}: "
-        f"{len(truth)} distinct tuples collapsed to {len(np.unique(combined))}."
+    expected = _reference_symbolic_te(src, targ, k)
+    assert np.isclose(got, expected, rtol=1e-9, atol=1e-12), (
+        f"Symbolic TE at k={k} disagrees with a tuple-keyed reference: "
+        f"{got!r} vs {expected!r}."
     )
 
 
@@ -139,7 +158,6 @@ def test_symbolic_encoding_is_collision_free():
 # wrong reason. (The positional foot-gun is a usability issue in its own right.)
 
 @pytest.mark.parametrize("k", [30, 100])
-@pytest.mark.xfail(strict=True, reason="KSG accepts k >= effective N and returns a finite number")
 def test_ksg_rejects_k_at_or_above_sample_size(k):
     small = _data(m=2, t=20)
     spi = it.MutualInfo(estimator="kraskov", prop_k=k)
@@ -147,7 +165,6 @@ def test_ksg_rejects_k_at_or_above_sample_size(k):
         spi.bivariate(small, i=0, j=1)
 
 
-@pytest.mark.xfail(strict=True, reason="degenerate (zero-radius) samples are not detected")
 def test_ksg_rejects_degenerate_samples():
     const = np.zeros((2, 200))
     const[1] = np.arange(200)

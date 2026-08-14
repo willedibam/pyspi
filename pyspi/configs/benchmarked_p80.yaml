@@ -696,16 +696,6 @@
       l_history: 1
       labels:
       - M05
-    - estimator: symbolic
-      k_history: 1
-      l_history: 1
-      labels:
-      - M05
-    - estimator: symbolic
-      k_history: 10
-      l_history: 1
-      labels:
-      - M05
     # - estimator: kraskov
     #   prop_k: 4
     #   auto_embed_method: MAX_CORR_AIS

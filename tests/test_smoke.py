@@ -47,25 +47,47 @@ def test_imports():
     from pyspi.statistics.spectral import CoherenceMagnitude, DirectedCoherence
     from pyspi.statistics.misc import LinearModel, GPModel
 
-    # Info-theoretic: all estimators.
+    # Info-theoretic: all estimators. Two exclusions, in opposite directions.
+    #
     # kozachenko is entropy-only: MutualInfo, TimeLaggedMutualInfo and
     # TransferEntropy are computed directly rather than from marginal
     # entropies, so those combinations raise NotImplementedError (they used
     # to return NaN silently). See test_kozachenko_rejected_for_non_entropy.
-    for est in ('gaussian', 'kraskov', 'kernel', 'kozachenko'):
-        JointEntropy(estimator=est)
-        ConditionalEntropy(estimator=est)
-        CrossmapEntropy(estimator=est)
-        CausalEntropy(estimator=est)
-        DirectedInfo(estimator=est)
-        StochasticInteraction(estimator=est)
-        if est != 'kozachenko':
-            MutualInfo(estimator=est)
-            TimeLaggedMutualInfo(estimator=est)
-            TransferEntropy(estimator=est)
+    #
+    # kraskov is the converse: only those same three have a genuine KSG
+    # implementation. The composed measures used to accept it and run the
+    # Gaussian estimator while advertising kraskov_NN-<k>.
+    # See tests/test_estimator_contracts.py.
+    composed = (JointEntropy, ConditionalEntropy, CrossmapEntropy,
+                CausalEntropy, DirectedInfo, StochasticInteraction)
+    direct = (MutualInfo, TimeLaggedMutualInfo, TransferEntropy)
 
-    TransferEntropy(estimator='symbolic')
+    for est in ('gaussian', 'kraskov', 'kernel', 'kozachenko'):
+        if est != 'kraskov':
+            for cls in composed:
+                cls(estimator=est)
+        if est != 'kozachenko':
+            for cls in direct:
+                cls(estimator=est)
+
+    TransferEntropy(estimator='symbolic', k_history=3)
     TransferEntropy(estimator='kernel', kernel_width=0.25)
+
+
+@pytest.mark.parametrize("cls_name", [
+    "JointEntropy", "ConditionalEntropy", "CrossmapEntropy",
+    "CausalEntropy", "DirectedInfo", "StochasticInteraction",
+])
+def test_kraskov_rejected_for_composed_measures(cls_name):
+    """kraskov must fail loudly where no KSG estimator exists.
+
+    These six composed the measure from marginal entropies and were handed
+    GaussianEntropyCalculator for "kraskov", so they returned exactly the
+    Gaussian result while their identifier claimed kraskov_NN-<k>.
+    """
+    import pyspi.statistics.infotheory as it
+    with pytest.raises(NotImplementedError, match="kraskov"):
+        getattr(it, cls_name)(estimator="kraskov")
 
 
 @pytest.mark.parametrize("cls_name", ["MutualInfo", "TimeLaggedMutualInfo", "TransferEntropy"])

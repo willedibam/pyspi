@@ -724,17 +724,7 @@
         labels:
           - M05
 
-      - estimator: symbolic
-        k_history: 1
-        l_history: 1
-        labels:
-          - M05
 
-      - estimator: symbolic
-        k_history: 10
-        l_history: 1
-        labels:
-          - M05
 
   IntegratedInformation:
     labels:

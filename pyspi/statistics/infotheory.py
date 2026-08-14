@@ -477,20 +477,22 @@ class SymbolicTECalculator:
         targ_past = targ_symbols[:n]
         src_curr = src_symbols[:n]
 
-        n_symbols = int(math.factorial(k))
-
         def _discrete_entropy(*arrs):
-            """Joint entropy of integer-valued arrays using histograms."""
+            """Joint entropy of integer-valued arrays using histograms.
+
+            Counts distinct rows directly rather than packing the symbols into
+            a single integer. The previous encoding multiplied by a multiplier
+            that squared at each step, so the packed value reached (k!)^3 and
+            exceeded int64 for k >= 10, wrapping silently. Wrapping is not the
+            same as colliding -- no collisions occur on the shipped fixtures --
+            but the encoding gave no guarantee, and correctness should not rest
+            on the arithmetic happening to stay injective.
+            """
             if len(arrs) == 1:
                 _, counts = np.unique(arrs[0], return_counts=True)
             else:
-                # Multi-dimensional: combine into single key
-                combined = arrs[0].copy()
-                multiplier = n_symbols
-                for arr in arrs[1:]:
-                    combined = combined * multiplier + arr
-                    multiplier *= n_symbols
-                _, counts = np.unique(combined, return_counts=True)
+                stacked = np.column_stack(arrs)
+                _, counts = np.unique(stacked, axis=0, return_counts=True)
             probs = counts / counts.sum()
             return -np.sum(probs * np.log2(probs))
 
@@ -517,9 +519,41 @@ def _numpy_delay_embedding(x, dim):
 # KSG MI estimator
 # ---------------------------------------------------------------------------
 
+def _validate_ksg_sample(N, k, w, context=""):
+    """Reject KSG settings that cannot produce a meaningful estimate.
+
+    The estimator needs k neighbours drawn from the points that survive the
+    Theiler exclusion. Without this check, k >= N silently returned a finite
+    number that grows with k: k=30 on N=20 gave 0.414 and k=100 gave 1.63,
+    neither of which is an estimate of anything.
+    """
+    effective = N - (2 * w + 1) if w else N - 1
+    where = f" ({context})" if context else ""
+    if N < 2:
+        raise ValueError(f"KSG needs at least 2 observations, got {N}{where}.")
+    if k < 1:
+        raise ValueError(f"KSG needs k >= 1, got k={k}{where}.")
+    if k > effective:
+        raise ValueError(
+            f"KSG k={k} exceeds the {effective} usable neighbour(s) for "
+            f"N={N} observations with Theiler window w={w}{where}. Reduce k, "
+            f"lengthen the series, or narrow the Theiler window."
+        )
+
+
 def _ksg_mi_pair(x, y, k, w, tree_x, tree_y):
     """KSG Estimator 1 MI for a single pair."""
     N = len(x)
+    _validate_ksg_sample(N, k, w, context="mutual information")
+    # A constant marginal has zero radius everywhere: every neighbour distance
+    # collapses to 0, the digamma counts saturate, and the estimator returns a
+    # number that reflects the tie structure rather than any dependence.
+    for name, v in (("x", x), ("y", y)):
+        if np.ptp(v) == 0:
+            raise ValueError(
+                f"KSG cannot estimate mutual information: marginal {name} is "
+                f"constant, so all neighbour distances are zero."
+            )
     xy = np.column_stack([x, y])
     tree_xy = cKDTree(xy)
 
@@ -829,6 +863,13 @@ def _kraskov_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau, k_nn, w
 # Information-theory base class — with estimator dispatch
 # ---------------------------------------------------------------------------
 
+_ESTIMATORS = frozenset({"gaussian", "kraskov", "kernel", "kozachenko", "symbolic"})
+
+# Auto-embedding selection criteria that are actually implemented. The search
+# maximises active information storage under the destination's own estimator.
+_AUTO_EMBED_METHODS = frozenset({"MAX_CORR_AIS"})
+
+
 class InfoTheoryBase(Unsigned):
 
     _AUTO_EMBED_METHOD_PROP_NAME = "AUTO_EMBED_METHOD"
@@ -839,21 +880,68 @@ class InfoTheoryBase(Unsigned):
     _K_SEARCH_MAX_PROP_NAME = "AUTO_EMBED_K_SEARCH_MAX"
     _TAU_SEARCH_MAX_PROP_NAME = "AUTO_EMBED_TAU_SEARCH_MAX"
 
+    # Which estimator each optional parameter belongs to. A parameter supplied
+    # to an estimator that ignores it is rejected rather than silently dropped:
+    # accepting kernel_width under estimator="gaussian" told the caller a
+    # kernel width had been applied when nothing used it.
+    _PARAM_OWNER = {
+        "kernel_width": ("kernel",),
+        "prop_k": ("kraskov",),
+        "dyn_corr_excl": ("kraskov",),
+    }
+
     def __init__(
-        self, estimator="gaussian", kernel_width=0.5, prop_k=4, dyn_corr_excl=None
+        self, estimator="gaussian", kernel_width=None, prop_k=None, dyn_corr_excl=None
     ):
+        if estimator not in _ESTIMATORS:
+            raise ValueError(
+                f"Unknown estimator {estimator!r}; expected one of "
+                f"{sorted(_ESTIMATORS)}."
+            )
+
+        supplied = {
+            "kernel_width": kernel_width,
+            "prop_k": prop_k,
+            "dyn_corr_excl": dyn_corr_excl,
+        }
+        for name, value in supplied.items():
+            owners = self._PARAM_OWNER[name]
+            if value is not None and estimator not in owners:
+                raise ValueError(
+                    f"{name}={value!r} is not used by estimator={estimator!r} "
+                    f"(it applies to {'/'.join(owners)}). Remove it, or select "
+                    f"the estimator it belongs to."
+                )
+
         self._estimator = estimator
-        self._kernel_width = kernel_width
-        self._prop_k = prop_k
+        # Defaults applied after validation so "not supplied" stays
+        # distinguishable from "supplied with the default value".
+        self._kernel_width = 0.5 if kernel_width is None else kernel_width
+        self._prop_k = 4 if prop_k is None else prop_k
         self._dyn_corr_excl = dyn_corr_excl
         self._entropy_calc = self._getcalc("entropy")
 
         self.identifier = self.identifier + "_" + estimator
         if estimator == "kraskov":
-            self.identifier = self.identifier + "_NN-{}".format(prop_k)
+            # Only the measures with a genuine KSG implementation may accept it.
+            # The composed measures (joint/conditional/crossmap/causal entropy,
+            # directed info, stochastic interaction) are built from marginal
+            # entropies, and _getcalc hands them GaussianEntropyCalculator for
+            # "kraskov" -- so they returned exactly the Gaussian result while
+            # advertising kraskov_NN-<k> in the identifier. Reporting a k-NN
+            # estimate that was never computed is worse than refusing.
+            if not isinstance(self, (MutualInfo, TimeLaggedMutualInfo, TransferEntropy)):
+                raise NotImplementedError(
+                    f"The kraskov estimator is not implemented for "
+                    f"{type(self).__name__}: it is composed from marginal "
+                    f"entropies, and no KSG estimator exists for that "
+                    f"composition. Use estimator='kozachenko' for a "
+                    f"k-nearest-neighbour entropy, or 'gaussian'."
+                )
+            self.identifier = self.identifier + "_NN-{}".format(self._prop_k)
             self.labels = self.labels + ["nonlinear"]
         elif estimator == "kernel":
-            self.identifier = self.identifier + "_W-{}".format(kernel_width)
+            self.identifier = self.identifier + "_W-{}".format(self._kernel_width)
             self.labels = self.labels + ["nonlinear"]
         elif estimator == "symbolic":
             if not isinstance(self, TransferEntropy):
@@ -1273,6 +1361,26 @@ class TransferEntropy(InfoTheoryBase, Directed):
         if "estimator" not in kwargs.keys() or kwargs["estimator"] == "gaussian":
             self.identifier = "gc"
         super().__init__(**kwargs)
+
+        if auto_embed_method is not None and auto_embed_method not in _AUTO_EMBED_METHODS:
+            # The value was previously never inspected: any non-None string
+            # took the auto-embed branch, so a typo silently ran MAX_CORR_AIS.
+            raise ValueError(
+                f"Unknown auto_embed_method {auto_embed_method!r}; implemented: "
+                f"{sorted(_AUTO_EMBED_METHODS)}. (Ragwitz-style local-prediction "
+                f"selection is not implemented; the search here maximises AIS.)"
+            )
+
+        if self._estimator == "symbolic" and int(k_history) < 2:
+            # An ordinal pattern of length 1 has exactly one possible symbol, so
+            # every entropy term is zero and TE is identically zero. It is not a
+            # degenerate edge case, it is a guaranteed-null statistic.
+            raise ValueError(
+                "estimator='symbolic' requires k_history >= 2: a length-1 "
+                "ordinal pattern has a single symbol, so the transfer entropy "
+                "is identically zero."
+            )
+
         self._calc = self._getcalc("TransferEntropy")
 
         # Store embedding params for numpy path
