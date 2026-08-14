@@ -193,14 +193,18 @@ class debiased_weighted_squared_PhaseLagIndex(mne, Undirected):
 
 class PhaseSlopeIndex(mne, Undirected):
     name = "Phase slope index (wavelet)"
-    # Antisymmetric, not undirected: the upper triangle is filled as the
-    # negated lower triangle (see multivariate), so A[i,j] == -A[j,i] holds by
-    # construction for every band statistic.
-    labels = ["unsigned", "wavelet", "antisymmetric"]
+    labels = ["unsigned", "wavelet"]
 
     def __init__(self, **kwargs):
         self.identifier = "psi"
         super().__init__(**kwargs)
+        # The per-frequency tensor is antisymmetric, but only a statistic that
+        # commutes with negation keeps the matrix antisymmetric. mean does;
+        # max does not (max of the negated band is -min, not -max), so the max
+        # variants are genuinely asymmetric.
+        trait = "antisymmetric" if self._statistic == "mean" else "asymmetric"
+        self.labels = [l for l in self.labels
+                       if l not in ("undirected", "directed")] + [trait]
         self.identifier += f"_{self._statistic}"
 
     def _get_psi(self, data):
@@ -238,17 +242,25 @@ class PhaseSlopeIndex(mne, Undirected):
 
     @parse_multivariate
     def multivariate(self, data):
-        adj_freq = self._get_psi(data)
-        adj = self._statfn(np.real(adj_freq), axis=(2, 3))
+        psi = np.real(self._get_psi(data))
 
-        # mne_connectivity returns a *lower-triangular* dense matrix; the upper
-        # triangle is zero and must be filled in here. PSI is antisymmetric --
-        # psi[i,j] = -psi[j,i], the sign being the entire lead/lag content -- so
-        # the fill must negate. The inherited mne.multivariate mirrors with a
-        # plus sign, which is correct for the magnitude-like wavelet measures
-        # but for PSI reported psi[i,j] == psi[j,i], inverting the direction for
-        # half of every matrix.
-        ui = np.triu_indices(data.n_processes, 1)
-        adj[ui] = -adj.T[ui]
+        # mne_connectivity returns a *lower-triangular* dense tensor: the upper
+        # triangle is zero and must be filled in. PSI is antisymmetric per
+        # frequency -- psi[i,j,f] = -psi[j,i,f], the sign being the entire
+        # lead/lag content -- so the fill must negate, and it must happen
+        # BEFORE the band statistic is applied.
+        #
+        # Negating after reduction is only valid for a statistic that commutes
+        # with negation. mean does; max does not:
+        #     max_f psi[i,j,f] = max_f(-psi[j,i,f]) = -min_f psi[j,i,f]
+        # which is not -max_f psi[j,i,f]. Reducing first and negating second
+        # made the max variants fail a process-permutation test by up to 11.5.
+        #
+        # Subtracting the transpose fills both triangles in one step, since the
+        # upper triangle is zero: lower keeps psi[i,j,f], upper becomes
+        # -psi[j,i,f], diagonal cancels to zero.
+        psi = psi - np.swapaxes(psi, 0, 1)
+
+        adj = self._statfn(psi, axis=(2, 3))
         np.fill_diagonal(adj, np.nan)
         return adj

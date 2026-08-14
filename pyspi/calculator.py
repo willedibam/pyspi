@@ -408,6 +408,15 @@ class Calculator:
         spec = self.run_spec
         h = hashlib.sha256()
         h.update(json.dumps(spec, sort_keys=True, default=str).encode())
+        # Hash the config *contents*, not just its path and the identifiers it
+        # produces. Several parameters do not reach the identifier -- changing
+        # dyn_corr_excl from 1 to 10 leaves it as "mi_kraskov_NN-4_DCE" -- so a
+        # config edited in place produced an identical digest and silently
+        # resumed the previous parameterisation's results.
+        try:
+            h.update(Path(self._configfile).read_bytes())
+        except OSError:
+            h.update(b"<configfile unreadable>")
         dataset = getattr(self, "_dataset", None)
         if dataset is not None:
             arr = np.ascontiguousarray(dataset.to_numpy(), dtype=np.float64)

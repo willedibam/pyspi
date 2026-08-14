@@ -219,3 +219,40 @@ def test_conditional_entropy_label_matches_implementation():
         "ConditionalEntropy computes H(X|Y), which is directed, but these "
         f"variants are labelled undirected: {sorted(mislabelled)}"
     )
+
+
+# --------------------------------------------------------------------------
+# Wavelet PSI band statistics
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("statistic", ["mean", "max"])
+def test_wavelet_psi_is_permutation_invariant(statistic):
+    """Both band statistics must survive a permutation of the processes.
+
+    mne_connectivity returns a lower-triangular tensor and the upper triangle
+    is filled by negating. That fill must happen *before* the band statistic:
+    negating after reduction is only valid for a statistic commuting with
+    negation. mean commutes, max does not --
+    ``max_f(-v) = -min_f(v) != -max_f(v)`` -- so reducing first made the max
+    variants permutation-dependent by up to 11.5.
+    """
+    from pyspi.statistics.wavelet import PhaseSlopeIndex
+
+    rng = np.random.default_rng(0)
+    x = np.cumsum(rng.standard_normal(400))
+    arr = np.vstack([x, np.roll(x, 4) + 0.1 * rng.standard_normal(400),
+                     rng.standard_normal(400)])
+    perm = [2, 0, 1]
+    inv = np.argsort(perm)
+
+    fwd = PhaseSlopeIndex(statistic=statistic).multivariate(
+        Data(data=arr, dim_order="ps", zscore=True))
+    permuted = PhaseSlopeIndex(statistic=statistic).multivariate(
+        Data(data=arr[perm], dim_order="ps", zscore=True))
+    restored = permuted[np.ix_(inv, inv)]
+
+    off = ~np.eye(3, dtype=bool)
+    assert np.allclose(fwd[off], restored[off], equal_nan=True), (
+        f"psi_wavelet statistic={statistic} is not permutation-invariant; "
+        f"max|d|={np.nanmax(np.abs(fwd[off] - restored[off])):.6g}"
+    )

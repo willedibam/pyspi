@@ -171,3 +171,65 @@ def test_ksg_rejects_degenerate_samples():
     data = Data(data=const, dim_order="ps", zscore=False)
     with pytest.raises(ValueError):
         it.MutualInfo(estimator="kraskov").bivariate(data, i=0, j=1)
+
+
+# --------------------------------------------------------------------------
+# Directed information
+# --------------------------------------------------------------------------
+
+def _di_system(phi, c, T=4000, seed=0):
+    """y_t = phi*y_{t-1} + c*x_{t-1} + e_t, with x i.i.d."""
+    r = np.random.default_rng(seed)
+    x = r.standard_normal(T)
+    e = r.standard_normal(T)
+    y = np.zeros(T)
+    for t in range(1, T):
+        y[t] = phi * y[t - 1] + c * x[t - 1] + e[t]
+    return Data(data=np.vstack([x, y]), dim_order="ps", zscore=True)
+
+
+@pytest.mark.parametrize("phi", [0.0, 0.6, 0.95])
+def test_directed_info_is_zero_for_an_independent_source(phi):
+    """DI(X->Y) must not grow with the target's own autocorrelation.
+
+    The previous implementation summed H(Y^i)/i and subtracted causal entropy,
+    which is not Massey's definition: with an independent source it returned
+    0.007 at phi=0 and 1.53 at phi=0.95, i.e. it measured how predictable the
+    target was from its own past.
+    """
+    di = it.DirectedInfo(estimator="gaussian").bivariate(_di_system(phi, 0.0), i=0, j=1)
+    assert abs(di) < 0.02, (
+        f"DI with an independent source is {di:.5f} at phi={phi}; it must be ~0 "
+        f"regardless of the target's autocorrelation."
+    )
+
+
+def test_directed_info_matches_the_analytic_gaussian_value():
+    """With phi=0 and lag-1 coupling, DI over horizon n=2 is 0.5*ln(1+c^2)."""
+    for c in (0.5, 1.0):
+        r = np.random.default_rng(1)
+        T = 200_000
+        x = r.standard_normal(T)
+        e = r.standard_normal(T)
+        y = np.zeros(T)
+        y[1:] = c * x[:-1] + e[1:]
+        d = Data(data=np.vstack([x, y]), dim_order="ps", zscore=True)
+        got = it.DirectedInfo(estimator="gaussian", n=2).bivariate(d, i=0, j=1)
+        expected = 0.5 * np.log(1 + c ** 2)
+        assert abs(got - expected) < 5e-3, (
+            f"DI={got:.6f} vs analytic {expected:.6f} for c={c}."
+        )
+
+
+def test_directed_info_is_directional():
+    d = _di_system(0.5, 1.0)
+    fwd = it.DirectedInfo(estimator="gaussian").bivariate(d, i=0, j=1)
+    rev = it.DirectedInfo(estimator="gaussian").bivariate(d, i=1, j=0)
+    assert fwd > 20 * max(rev, 1e-6), f"DI(X->Y)={fwd:.5f} not >> DI(Y->X)={rev:.5f}"
+
+
+def test_ksg_validation_reaches_the_transfer_entropy_path():
+    """The TE path embeds first, so its usable N is smaller than len(targ)."""
+    small = _data(m=2, t=20)
+    with pytest.raises(ValueError):
+        it.TransferEntropy(estimator="kraskov", prop_k=30).bivariate(small, i=0, j=1)

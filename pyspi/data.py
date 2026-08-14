@@ -176,11 +176,43 @@ class Data:
 
     @property
     def procnames(self):
-        """List of process names."""
+        """List of process names (a copy; mutating it does not affect the Data)."""
         if hasattr(self, "_procnames"):
-            return self._procnames
+            return list(self._procnames)
         else:
             return [f"proc-{i}" for i in range(self.n_processes)]
+
+    def _apply_preprocessing(self, data, log=False):
+        """Detrend and/or z-score along the time axis of a (p, s, r) array.
+
+        The single preprocessing path. ``add_process`` previously appended its
+        argument raw while ``set_data`` transformed it, so building a dataset
+        with ``Data().add_process(x).add_process(y)`` z-scored the first process
+        and left the second on its original scale -- every pairwise statistic
+        then compared a standardised series against an unstandardised one.
+
+        Both are per-process along time, so applying them to one appended
+        process gives exactly the same result as applying them to the whole
+        array at once.
+        """
+        if self.detrend:
+            if log:
+                logger.info("[1/2] Detrending time series in the dataset...")
+            try:
+                data = detrend(data, axis=1)
+            except ValueError as err:
+                logger.warning("Could not detrend data: %s", err)
+        elif log:
+            logger.info("[1/2] Skipping detrending of time series in the dataset.")
+
+        if self.zscore:
+            if log:
+                logger.info("[2/2] Normalising (z-scoring) each time series in the dataset...")
+            data = zscore(data, axis=1, nan_policy="omit", ddof=1)
+        elif log:
+            logger.info("[2/2] Skipping normalisation of time series in the dataset.")
+
+        return data
 
     def _invalidate_caches(self):
         """Drop every statistic cache held on this instance.
@@ -220,10 +252,13 @@ class Data:
         if squeeze:
             dat = np.squeeze(dat)
 
-        # Views inherit the base array's write flag, but be explicit: np.squeeze
-        # may return a new array object in some numpy versions.
-        if dat.flags.owndata:
-            dat.setflags(write=False)
+        # Always freeze, never conditionally. Guarding on `owndata` was exactly
+        # backwards: the shared-memory worker path is precisely where owndata is
+        # False, so the one case that most needed protecting was the one case
+        # left writable -- a worker could mutate the block every other worker
+        # was reading.
+        dat = dat.view()
+        dat.setflags(write=False)
         return dat
 
     @staticmethod
@@ -304,20 +339,7 @@ class Data:
         if n_observations is not None:
             data = data[:, :n_observations]
 
-        if self.detrend:
-            logger.info("[1/2] Detrending time series in the dataset...")
-            try:
-                data = detrend(data, axis=1)
-            except ValueError as err:
-                logger.warning("Could not detrend data: %s", err)
-        else:
-            logger.info("[1/2] Skipping detrending of time series in the dataset.")
-
-        if self.zscore:
-            logger.info("[2/2] Normalising (z-scoring) each time series in the dataset...")
-            data = zscore(data, axis=1, nan_policy="omit", ddof=1)
-        else:
-            logger.info("[2/2] Skipping normalisation of time series in the dataset.")
+        data = self._apply_preprocessing(data, log=True)
 
         # Check all non-finite values, not just NaNs: with zscore=False an inf
         # passes straight through to the estimators, where it surfaces as an
@@ -368,9 +390,12 @@ class Data:
                 f"Process has {proc.size} observations but the dataset has "
                 f"{self.n_observations}."
             )
-        appended = np.append(
-            self._data, np.reshape(proc, (1, self.n_observations, 1)), axis=0
+        # Preprocess the incoming process the same way set_data would, so the
+        # builder path produces a dataset with uniform preprocessing.
+        block = self._apply_preprocessing(
+            np.reshape(np.asarray(proc, dtype=float), (1, self.n_observations, 1))
         )
+        appended = np.append(self._data, block, axis=0)
         self._set_internal(appended)
         self._reset_data_size()
         if hasattr(self, "_procnames"):

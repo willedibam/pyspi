@@ -793,6 +793,12 @@ def _gaussian_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau):
 def _kraskov_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau, k_nn, w):
     """Kraskov TE via Frenzel-Pompe CMI estimator."""
     Y_f, Y_p, X_p = _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau)
+    # Same precondition as the MI path, applied to the *embedded* sample count
+    # rather than the raw series length: embedding consumes the lookback, so
+    # the usable N here is smaller than len(targ). Validating only inside
+    # _ksg_mi_pair left this path unguarded, and TE with k=30 on T=20 returned
+    # a finite 0.467.
+    _validate_ksg_sample(Y_f.shape[0], k_nn, w, context="transfer entropy")
     if Y_f is None:
         return np.nan
 
@@ -1565,27 +1571,67 @@ class DirectedInfo(CausalEntropy, Directed):
         super().__init__(**kwargs)
         self._n = n
 
-    def _compute_entropy_rates(self, targ):
-        targ = np.squeeze(targ)
-        est = self._estimator
-
-        # All estimators now have numpy calculators
-        entropy_rate_sum = 0
-        for i in range(1, self._n + 1):
-            Yi = _numpy_delay_embedding(targ, i)
-            if est == 'gaussian':
-                entropy_rate_sum += _gaussian_entropy_from_data(Yi) / i
-            else:
-                self._entropy_calc.initialise(i)
-                self._entropy_calc.setObservations(Yi)
-                entropy_rate_sum += self._entropy_calc.computeAverageLocalOfObservations() / i
-        return entropy_rate_sum
+    def _entropy_of(self, M):
+        """Joint entropy of the columns of ``M``; 0 for a zero-column matrix."""
+        if M.shape[1] == 0:
+            return 0.0
+        if self._estimator == "gaussian":
+            return _gaussian_entropy_from_data(M)
+        self._entropy_calc.initialise(M.shape[1])
+        self._entropy_calc.setObservations(M)
+        return self._entropy_calc.computeAverageLocalOfObservations()
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
-        entropy_rates = self._compute_entropy_rates(data.to_numpy(squeeze=True)[j])
-        causal_entropy = super().bivariate(data, i=i, j=j)
-        return entropy_rates - causal_entropy
+        r"""Directed information from process ``i`` to process ``j``.
+
+        Massey's finite-horizon definition:
+
+        .. math::
+            I(X^n \to Y^n) = \sum_{i=1}^{n} I(X^i; Y_i \mid Y^{i-1})
+                           = \sum_{i=1}^{n} \left[ H(Y_i \mid Y^{i-1})
+                             - H(Y_i \mid Y^{i-1}, X^i) \right]
+
+        The previous implementation summed :math:`H(Y^i)/i` and subtracted the
+        causal entropy. That is not the above and is not a dependence measure:
+        with a source statistically independent of the target it returned 0.007
+        at target autocorrelation 0, rising to 1.53 at 0.95 -- it grew with how
+        predictable the *target* was from its own past, with no source coupling
+        present at all.
+
+        Each conditional entropy is expanded as a difference of joint entropies
+        over one common row window, so the terms telescope correctly and every
+        entropy is estimated on identically aligned samples.
+        """
+        z = data.to_numpy(squeeze=True)
+        src, targ = np.asarray(z[i], float), np.asarray(z[j], float)
+        n = self._n
+        T = targ.size
+        if T <= n + 1:
+            return np.nan
+
+        # One aligned window for every term: rows are t = n .. T-1.
+        y_now = targ[n:].reshape(-1, 1)
+        y_lags = [targ[n - k: T - k].reshape(-1, 1) for k in range(1, n + 1)]
+        # X^i includes the current source sample (same time index as y_i).
+        x_lags = [src[n - k: T - k].reshape(-1, 1) for k in range(0, n)]
+
+        total = 0.0
+        for order in range(1, n + 1):
+            Ypast = np.hstack(y_lags[: order - 1]) if order > 1 else y_now[:, :0]
+            Xpast = np.hstack(x_lags[:order])
+
+            # H(Y_i | Y^{i-1}) - H(Y_i | Y^{i-1}, X^i)
+            h_y_given_ypast = (
+                self._entropy_of(np.hstack([y_now, Ypast])) - self._entropy_of(Ypast)
+            )
+            h_y_given_ypast_x = (
+                self._entropy_of(np.hstack([y_now, Ypast, Xpast]))
+                - self._entropy_of(np.hstack([Ypast, Xpast]))
+            )
+            total += h_y_given_ypast - h_y_given_ypast_x
+
+        return total
 
 
 class StochasticInteraction(InfoTheoryBase, Undirected):
