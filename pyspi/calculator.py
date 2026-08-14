@@ -507,6 +507,52 @@ class Calculator:
             "Do not set this property externally. Use the compute() method."
         )
 
+    def to_frame(self, dropna=True):
+        """Results in long form: one row per ``(spi, source, target)``.
+
+        :attr:`table` is wide -- an ``M x (n_spis * M)`` frame with a
+        ``(spi, process)`` column MultiIndex -- which is the right shape for
+        storage but awkward for plotting, ``groupby``, or joining against SPI
+        labels. This is the same data with one value per row.
+
+        Self-pairs are dropped (their diagonal is NaN by construction); with
+        ``dropna=False`` failed SPIs keep their NaN rows.
+        """
+        long = (
+            self.table.rename_axis(index="source")
+            .stack(level=["spi", "process"], future_stack=True)
+            .rename("value")
+            .reset_index()
+            .rename(columns={"process": "target"})
+        )
+        long = long[long["source"] != long["target"]]
+        if dropna:
+            long = long.dropna(subset=["value"])
+        return long[["spi", "source", "target", "value"]].reset_index(drop=True)
+
+    def summary(self):
+        """One-line-per-fact overview of the last :meth:`compute` call.
+
+        Human-facing convenience over :attr:`timings`, :attr:`errors` and
+        :attr:`n_spis`, which stay as they are: those are the programmatic
+        handles you filter and assert on, this is the thing you print.
+        """
+        timings = self._timings
+        total = sum(timings.values())
+        slowest = sorted(timings.items(), key=lambda kv: -kv[1])[:5]
+        return {
+            "dataset": self.dataset.name if hasattr(self, "_dataset") else None,
+            "n_processes": self.dataset.n_processes if hasattr(self, "_dataset") else None,
+            "n_observations": self.dataset.n_observations if hasattr(self, "_dataset") else None,
+            "config": str(self._config),
+            "n_spis": self.n_spis,
+            "n_computed": len(timings),
+            "n_failed": len(self._errors),
+            "failed": sorted(self._errors),
+            "total_seconds": round(total, 3),
+            "slowest": [(k, round(v, 3)) for k, v in slowest],
+        }
+
     @property
     def group(self):
         """The numerical group assigned during :meth:`~pyspi.Calculator.calculator.set_group`."""
