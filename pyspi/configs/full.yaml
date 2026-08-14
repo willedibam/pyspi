@@ -589,8 +589,6 @@
       - M03
     configs:
       - estimator: gaussian
-      - estimator: kozachenko
-      - estimator: kernel
 
   StochasticInteraction: # No theiler window
     labels:

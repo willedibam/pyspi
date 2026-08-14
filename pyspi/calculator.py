@@ -351,6 +351,12 @@ class Calculator:
         configfile = resolve_config(config)
 
         self._configfile = configfile  # stored so parallel workers can re-instantiate SPIs
+        # Snapshot at construction: the SPIs were built from *these* bytes, so
+        # the digest must reflect them even if the file changes afterwards.
+        try:
+            self._config_bytes = Path(configfile).read_bytes()
+        except OSError:
+            self._config_bytes = b"<configfile unreadable>"
         self._config = config
         # Duplicates are rejected at insertion inside load_spis_from_yaml; a
         # post-hoc Counter over dict keys can never see a count above 1.
@@ -413,14 +419,13 @@ class Calculator:
         # dyn_corr_excl from 1 to 10 leaves it as "mi_kraskov_NN-4_DCE" -- so a
         # config edited in place produced an identical digest and silently
         # resumed the previous parameterisation's results.
-        try:
-            h.update(Path(self._configfile).read_bytes())
-        except OSError:
-            h.update(b"<configfile unreadable>")
+        h.update(self._config_bytes)
         dataset = getattr(self, "_dataset", None)
         if dataset is not None:
-            arr = np.ascontiguousarray(dataset.to_numpy(), dtype=np.float64)
-            h.update(str(arr.shape).encode())
+            arr = np.ascontiguousarray(dataset.to_numpy())
+            # Native dtype: coercing to float64 first made distinct large-integer
+            # datasets collide.
+            h.update(f"{arr.dtype.str}{arr.shape}".encode())
             h.update(arr.tobytes())
         return h.hexdigest()
 
@@ -541,7 +546,23 @@ class Calculator:
                 detrend=self._detrend,
             )
         else:
-            self._dataset = dataset
+            # Snapshot rather than alias. A caller-owned Data could be mutated
+            # after construction -- changing its width left the table at the old
+            # shape and computation failed; a same-width change silently kept
+            # stale process labels. The snapshot also records the preprocessing
+            # the data *actually* carries, not the Calculator flags that were
+            # bypassed when a prepared Data was supplied.
+            self._dataset = Data._from_prepared_array(
+                np.array(dataset.to_numpy(), copy=True),
+                procnames=dataset.procnames,
+                name=dataset.name,
+            )
+            self._dataset.zscore = dataset.zscore
+            self._dataset.detrend = dataset.detrend
+
+        # Results belong to the dataset that produced them.
+        self._errors = {}
+        self._timings = {}
 
         columns = pd.MultiIndex.from_product(
             [self.spis.keys(), self._dataset.procnames], names=["spi", "process"]
@@ -658,6 +679,9 @@ class Calculator:
                     f"Ignoring checkpoints in {cp_dir}: {reason}. Recomputing "
                     f"from scratch. Use a separate directory per run."
                 )
+                # Clear first: writing the new manifest above the old matrices
+                # would relabel another run's results as this one if interrupted.
+                _parallel.clear_checkpoints(cp_dir)
             _parallel.write_manifest(cp_dir, digest, self.run_spec)
 
         # Resume: skip SPIs whose checkpoint exists.

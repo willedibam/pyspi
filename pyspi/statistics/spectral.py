@@ -516,10 +516,13 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
         self.identifier = self.identifier + paramstr
 
     def _getkey(self):
+        # fs is passed to the spectral transform, so it must key the cache.
+        # Without it, reusing one Data at another sampling frequency returned
+        # the first computation (0.2037 for fs=1 vs 0.2497 fresh at fs=4).
         if self._method == "nonparametric":
-            return (self._method, -1, -1)
+            return (self._method, self._fs, -1, -1)
         else:
-            return (self._method, self._order, self._max_order)
+            return (self._method, self._fs, self._order, self._max_order)
 
     def _get_cache(self, data):
         key = self._getkey()

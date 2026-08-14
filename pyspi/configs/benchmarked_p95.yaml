@@ -622,8 +622,6 @@
       - M03
     configs:
     - estimator: gaussian
-    - estimator: kozachenko
-    - estimator: kernel
 
   StochasticInteraction:
     labels:

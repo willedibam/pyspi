@@ -393,6 +393,17 @@ def checkpoint_owner_matches(checkpoint_dir: Path, digest: str):
     return True, None
 
 
+def clear_checkpoints(checkpoint_dir: Path) -> None:
+    """Remove every result/error file so a new manifest cannot mislabel them."""
+    d = Path(checkpoint_dir)
+    for pattern in ("*.npy", "*.error"):
+        for f in d.glob(pattern):
+            try:
+                f.unlink()
+            except OSError:
+                pass
+
+
 def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool = True):
     """Return (done_results, remaining_keys).
 
@@ -425,6 +436,12 @@ def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool 
         if err is not None and retry_failed:
             remaining.append(key)
             continue
+        # A resumed matrix gets the same validation as a fresh one: an all-NaN
+        # or infinite checkpoint was previously accepted silently, with nothing
+        # recorded in calc.errors.
+        off = arr[~np.eye(M, dtype=bool)] if M > 1 else arr.ravel()
+        if off.size and (np.isinf(off).any() or not np.isfinite(off).any()):
+            err = err or "ValueError: checkpoint contains no finite values"
         done[key] = (arr, err, [], 0.0)
     return done, remaining
 

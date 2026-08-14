@@ -48,7 +48,7 @@ class mne(Unsigned):
 
     def _get_cache(self, data):
         try:
-            conn, freq = data.mne[self.measure]
+            conn, freq = data.mne[(self.measure, self._fs)]
         except (KeyError, AttributeError):
             z = np.moveaxis(data.to_numpy(), 2, 0)
 
@@ -70,9 +70,9 @@ class mne(Unsigned):
             freq = np.asarray(con.freqs)
 
             try:
-                data.mne[self.measure] = (conn, freq)
+                data.mne[(self.measure, self._fs)] = (conn, freq)
             except AttributeError:
-                data.mne = {self.measure: (conn, freq)}
+                data.mne = {(self.measure, self._fs): (conn, freq)}
 
         freq_id = np.where((freq >= self._fmin) * (freq <= self._fmax))[0]
 
@@ -214,20 +214,29 @@ class PhaseSlopeIndex(mne, Undirected):
         inside [fmin, fmax], so each band needs its own call. Cached per band
         on the dataset to share across PSI variants with the same band.
         """
-        key = (self._fmin, self._fmax)
+        # Key on the resolved fmin (below), not the requested one, so two
+        # bands that collapse onto the same floor share correctly.
+        key = (self._fs, max(self._fmin, 5.0 / data.n_observations), self._fmax)
         try:
             return data.mne_psi[key]
         except (AttributeError, KeyError):
             pass
 
         z = np.moveaxis(data.to_numpy(), 2, 0)
-        cwt_freqs = np.linspace(max(self._fmin, 1e-6), self._fmax, 10)
+        # Resolve fmin against the frequency the data can actually support.
+        # fmin=0 asks for an unbounded period: MNE reports an unreliable
+        # spectrum and builds an ~11.1-million-sample Morlet wavelet for T=100.
+        # The five-cycle floor is the same criterion the sibling wavelet path
+        # already applies (see mne._get_cache), so this makes the two
+        # consistent rather than inventing a new policy.
+        fmin = max(self._fmin, 5.0 / data.n_observations)
+        cwt_freqs = np.linspace(max(fmin, 1e-6), self._fmax, 10)
         psi_obj = phase_slope_index(
             data=z,
             mode="cwt_morlet",
             sfreq=self._fs,
             mt_adaptive=True,
-            fmin=self._fmin,
+            fmin=fmin,
             fmax=self._fmax,
             cwt_freqs=cwt_freqs,
             verbose=False,

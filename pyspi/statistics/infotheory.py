@@ -1466,6 +1466,16 @@ class TransferEntropy(InfoTheoryBase, Directed):
                 best_k, best_tau, best_ais = 1, 1, -np.inf
                 for k in range(1, k_max + 1):
                     for tau in range(1, tau_max + 1):
+                        # Skip candidates the estimator cannot support, instead
+                        # of ranking them and rejecting the winner afterwards.
+                        # On kuramoto M7/T100 an invalid (k=10, tau=4, w=33)
+                        # candidate won and the whole SPI then failed, even
+                        # though valid smaller embeddings existed.
+                        n_eff = targ.size - (k - 1) * tau
+                        try:
+                            _validate_ksg_sample(n_eff, k_nn, w)
+                        except ValueError:
+                            continue
                         ais = _ksg_ais(targ, k, tau, k_nn, w)
                         if ais > best_ais:
                             best_ais, best_k, best_tau = ais, k, tau
@@ -1525,7 +1535,11 @@ class CausalEntropy(InfoTheoryBase, Directed):
 
     def __init__(self, n=5, **kwargs):
         super().__init__(**kwargs)
-        self._n = n
+        if int(n) < 1:
+            raise ValueError(f"Horizon n must be >= 1, got {n}.")
+        self._n = int(n)
+        # n changes the measure, so it must reach the identifier.
+        self.identifier += f"_n-{self._n}"
 
     def _compute_causal_entropy(self, src, targ):
         src = np.squeeze(src)
@@ -1568,8 +1582,8 @@ class DirectedInfo(CausalEntropy, Directed):
     labels = ["unsigned", "infotheory", "temporal", "directed"]
 
     def __init__(self, n=5, **kwargs):
-        super().__init__(**kwargs)
-        self._n = n
+        # n is handled by CausalEntropy; re-appending here doubled the suffix.
+        super().__init__(n=n, **kwargs)
 
     def _entropy_of(self, M):
         """Joint entropy of the columns of ``M``; 0 for a zero-column matrix."""
