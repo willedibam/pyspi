@@ -27,3 +27,6 @@ bench/results/analysis/*.ipynb
 CLAUDE.md
 AGENTS.md
 .claude/
+
+# Review/critique artifacts (not part of the package)
+critiques.md
