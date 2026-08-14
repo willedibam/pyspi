@@ -373,6 +373,23 @@
       - estimator: gaussian
         k_history: 1
         l_history: 1
+      # Disabled: k_history=1 gives a single ordinal symbol, so the transfer
+      # entropy is identically zero. Rejected at construction; kept here as a
+      # record of what was dropped.
+      # - estimator: symbolic
+      #   k_history: 1
+      #   l_history: 1
+      #   labels:
+      #     - M05
+      #
+      # Disabled: 10! symbols against ~91 usable samples at T=100 -- every joint
+      # count is 0 or 1, so the value tracks sample size, not dependence. Still
+      # constructible, and defensible for long series.
+      # - estimator: symbolic
+      #   k_history: 10
+      #   l_history: 1
+      #   labels:
+      #     - M05
 
 # statistics that analyse in the frequency-domain (see Schoegl and Supp, 2006)
         labels:
@@ -591,6 +608,14 @@
         statistic: max
 
   DebiasedSquaredPhaseLagIndex:
+    # Disabled: over a WIDE band the max saturates. Debiased squared PLI
+    # attains 1 whenever the sign of the imaginary coherency is consistent
+    # across tapers at any single frequency, and a wide band almost always
+    # contains such a bin -- measured constant at 1.000000 for every pair on
+    # white/AR/coupled data at T=100, 500 and 2000. This is a property of the
+    # BAND, not the statistic: over a narrow band (e.g. fmin 0.2, fmax 0.25)
+    # it discriminates normally (range 0.2-1.0 at T<=500). Re-enable with a
+    # narrow band, or keep the `mean` variants, which are unaffected.
     labels:
       - undirected
       - linear
@@ -613,8 +638,21 @@
         fmax: 0.5
         labels:
           - M12
+
+#      - fs: 1
+#        statistic: max
+
+#      - fmin: 0
+#        fmax: 0.25
+#        statistic: max
+
+#      - fmin: 0.25
+#        fmax: 0.5
+#        statistic: max
 
   DebiasedSquaredWeightedPhaseLagIndex:
+    # Disabled: same wide-band saturation as DebiasedSquaredPhaseLagIndex
+    # above. Narrow bands are fine; the `mean` variants are unaffected.
     labels:
       - undirected
       - linear
@@ -637,6 +675,17 @@
         fmax: 0.5
         labels:
           - M12
+
+#      - fs: 1
+#        statistic: max
+
+#      - fmin: 0
+#        fmax: 0.25
+#        statistic: max
+
+#      - fmin: 0.25
+#        fmax: 0.5
+#        statistic: max
 
   PairwisePhaseConsistency:
     labels:

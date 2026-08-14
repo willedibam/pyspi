@@ -68,6 +68,15 @@
       - M03
     configs:
       - estimator: gaussian
+      # Disabled: composing directed information from four separately-estimated
+      # entropies leaves each with its own dimension-dependent bias, and they do
+      # not cancel. On independent data the kernel variant sat at 3.8-4.4 for
+      # every T from 100 to 8000 (a fixed bandwidth in ~11 dimensions does not
+      # improve with sample size) and kozachenko returned negatives, for a
+      # quantity bounded below by zero. Use estimator: kraskov, which estimates
+      # each conditional-MI term directly.
+      # - estimator: kernel
+      # - estimator: kozachenko
 
   # Transfer entropy
   TransferEntropy:
@@ -86,6 +95,24 @@
         tau_search_max: 4
         dyn_corr_excl: AUTO
   
+      # Disabled: k_history=1 gives a single ordinal symbol, so the transfer
+      # entropy is identically zero. Rejected at construction; kept here as a
+      # record of what was dropped.
+      # - estimator: symbolic
+      #   k_history: 1
+      #   l_history: 1
+      #   labels:
+      #     - M05
+      #
+      # Disabled: 10! symbols against ~91 usable samples at T=100 -- every joint
+      # count is 0 or 1, so the value tracks sample size, not dependence. Still
+      # constructible, and defensible for long series.
+      # - estimator: symbolic
+      #   k_history: 10
+      #   l_history: 1
+      #   labels:
+      #     - M05
+
   # Integrated information
   IntegratedInformation:
     labels:

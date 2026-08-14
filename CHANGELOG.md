@@ -125,6 +125,8 @@ Three group-delay SPIs that shipped as silent all-NaN columns are now recorded f
 
 `full` goes from **328 SPIs to 319**. Every change below is deliberate; nothing else moved on the frozen test fixtures.
 
+Disabled variants are **commented out in the shipped configs rather than deleted**, each with the evidence for switching it off and the condition that would justify switching it back on.
+
 **Removed (10)**
 
 | SPI | Why |
@@ -133,8 +135,8 @@ Three group-delay SPIs that shipped as silent all-NaN columns are now recorded f
 | `te_symbolic_k-10_kt-1_l-1_lt-1` | `10!` symbols against ~91 samples at `T=100`: every count is 0 or 1, so the value reflects the sample size, not dependence. Still constructible for long series. |
 | `di_kernel_W-0.5` | ~3.8-4.4 on independent data at every `T` from 100 to 8000. |
 | `di_kozachenko` | Negative values, for a nonnegative quantity. |
-| `dspli_multitaper_max_*` (3) | Debiased *squared* PLI is bounded by 1, so the band maximum is exactly 1.000000 for every pair — measured at both M3/T100 and M8/T500. It cannot discriminate anything. The `mean` variants are unaffected. |
-| `dswpli_multitaper_max_*` (3) | As above, for the weighted form. |
+| `dspli_multitaper_max_*` (3) | Degenerate **at the bundled bands**, which are all wide. Debiased squared PLI reaches 1 whenever the sign of the imaginary coherency is consistent across tapers at any single frequency, and a wide band almost always contains such a bin: measured constant at 1.000000 for every pair on white/AR/coupled data at T=100, 500 and 2000. Over a *narrow* band it discriminates normally (range 0.2–1.0), so this is a property of the band, not the statistic. The `mean` variants are unaffected. |
+| `dswpli_multitaper_max_*` (3) | Same wide-band saturation, weighted form. |
 
 **Added (1)**
 
