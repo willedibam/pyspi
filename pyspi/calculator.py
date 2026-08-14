@@ -2,9 +2,9 @@
 import numpy as np
 import pandas as pd
 import copy, yaml, importlib, time, warnings, os
+import hashlib, json
 from pathlib import Path
 from tqdm import tqdm
-from collections import Counter
 from scipy import stats
 
 # From this package
@@ -165,6 +165,11 @@ def warn_partial_cache_buckets(spis):
         )
 
 
+# Bumped whenever the .npz layout changes incompatibly. Schema 0 means "written
+# before the field existed", i.e. a pre-3.0.0 pickled file.
+_NPZ_SCHEMA = 1
+
+
 def load_table(path):
     """Load a results table written by :meth:`Calculator.save`.
 
@@ -178,8 +183,30 @@ def load_table(path):
             f"Can only load '.npz' (got '{path.suffix}'). CSV export is one-way; "
             f"re-run the calculation or save as .npz."
         )
-    with np.load(path, allow_pickle=True) as f:
-        values, spis, procs = f["values"], list(f["spis"]), list(f["processes"])
+    # allow_pickle=False: loading a results table must never be able to execute
+    # code. Files written by pyspi < 3.0.0 stored names as object arrays and
+    # will fail here; re-save them from a Calculator.
+    with np.load(path, allow_pickle=False) as f:
+        missing = {"values", "spis", "processes"} - set(f.files)
+        if missing:
+            raise ValueError(
+                f"{path} is not a pyspi results table (missing {sorted(missing)})."
+            )
+        schema = int(f["schema"]) if "schema" in f.files else 0
+        if schema > _NPZ_SCHEMA:
+            raise ValueError(
+                f"{path} was written with schema {schema}, but this pyspi "
+                f"understands up to {_NPZ_SCHEMA}. Upgrade pyspi."
+            )
+        values = f["values"]
+        spis = [str(s) for s in f["spis"]]
+        procs = [str(p) for p in f["processes"]]
+
+    if values.ndim != 3 or values.shape[0] != len(spis):
+        raise ValueError(
+            f"{path} is malformed: values has shape {values.shape}, expected "
+            f"({len(spis)}, {len(procs)}, {len(procs)})."
+        )
     table = pd.DataFrame(
         data=np.concatenate(list(values), axis=1),
         columns=pd.MultiIndex.from_product([spis, procs], names=["spi", "process"]),
@@ -215,16 +242,36 @@ def load_spis_from_yaml(configfile, quiet=False):
             if configs is None:
                 spi = getattr(module, fcn)()
                 _merge_spi_labels(spi, family_labels)
-                spis[spi.identifier] = spi
+                _insert_spi(spis, spi, module_name, fcn, None)
                 log('[%d] %s.%s(x,y) -> "%s"', len(spis), module_name, fcn, spi.identifier)
                 continue
             for params in configs:
                 params, config_labels = _split_config_params(params)
                 spi = getattr(module, fcn)(**params)
                 _merge_spi_labels(spi, family_labels, config_labels)
-                spis[spi.identifier] = spi
+                _insert_spi(spis, spi, module_name, fcn, params)
                 log('[%d] %s.%s(x,y,%s) -> "%s"', len(spis), module_name, fcn, params, spi.identifier)
     return spis
+
+
+def _insert_spi(spis, spi, module_name, fcn, params):
+    """Insert an SPI, rejecting identifier collisions.
+
+    The identifier is the primary key: it names the table column and the
+    checkpoint file. Detecting duplicates *after* building the dict could never
+    work, because dict insertion has already discarded the loser -- the old
+    ``Counter(self._spis.keys())`` check could not return a count above 1.
+    """
+    existing = spis.get(spi.identifier)
+    if existing is not None:
+        raise ValueError(
+            f"Duplicate SPI identifier {spi.identifier!r}: "
+            f"{type(existing).__name__} and {module_name}.{fcn}"
+            f"{f'({params})' if params else ''} both produce it. "
+            "Two configs of the same class must differ in a parameter that "
+            "reaches the identifier."
+        )
+    spis[spi.identifier] = spi
 
 
 def _expand_lagged_correlation_configs(configs):
@@ -305,15 +352,9 @@ class Calculator:
 
         self._configfile = configfile  # stored so parallel workers can re-instantiate SPIs
         self._config = config
+        # Duplicates are rejected at insertion inside load_spis_from_yaml; a
+        # post-hoc Counter over dict keys can never see a count above 1.
         self._spis = load_spis_from_yaml(configfile)
-
-        duplicates = [
-            n for n, count in Counter(self._spis.keys()).items() if count > 1
-        ]
-        if duplicates:
-            raise ValueError(
-                f"Duplicate SPI identifiers: {duplicates}.\n Check the config file for duplicates."
-            )
 
         self._name = name
         self._labels = labels
@@ -349,6 +390,30 @@ class Calculator:
         otherwise indistinguishable from a legitimately undefined statistic.
         """
         return dict(self._errors)
+
+    @property
+    def run_digest(self):
+        """Content hash of the resolved run: spec plus the input data itself.
+
+        This is what a checkpoint is bound to. Resume previously validated only
+        the SPI identifier and an ``(M, M)`` shape, so any other run of the same
+        width silently inherited the earlier run's numbers -- a different
+        dataset, different preprocessing, a different config, or a permuted
+        process order all resumed clean.
+
+        The dataset bytes are hashed, not just its shape and name: two datasets
+        of the same width with the same name are exactly the case that needs
+        separating.
+        """
+        spec = self.run_spec
+        h = hashlib.sha256()
+        h.update(json.dumps(spec, sort_keys=True, default=str).encode())
+        dataset = getattr(self, "_dataset", None)
+        if dataset is not None:
+            arr = np.ascontiguousarray(dataset.to_numpy(), dtype=np.float64)
+            h.update(str(arr.shape).encode())
+            h.update(arr.tobytes())
+        return h.hexdigest()
 
     @property
     def run_spec(self):
@@ -499,8 +564,19 @@ class Calculator:
             values = np.stack([self.table[k].to_numpy(dtype=float) for k in keys])
             np.savez_compressed(
                 path, values=values,
-                spis=np.array(keys, dtype=object),
-                processes=np.array(self.dataset.procnames, dtype=object),
+                # dtype='U', not object: object arrays are only loadable with
+                # allow_pickle=True, which reintroduces arbitrary code execution
+                # on load -- the exact hazard that motivated dropping pickle.
+                spis=np.array(keys, dtype="U"),
+                processes=np.array(self.dataset.procnames, dtype="U"),
+                schema=np.array(_NPZ_SCHEMA),
+                run_spec=np.array(
+                    json.dumps(self.run_spec, sort_keys=True, default=str), dtype="U"
+                ),
+                run_digest=np.array(self.run_digest, dtype="U"),
+                errors=np.array(
+                    json.dumps(self.errors, sort_keys=True, default=str), dtype="U"
+                ),
             )
         else:
             raise ValueError(
@@ -558,8 +634,22 @@ class Calculator:
         spi_keys = list(self.spis.keys())
         M = self.dataset.n_processes
         cp_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
+        self._resume_rejected = False
         if cp_dir is not None:
             cp_dir.mkdir(parents=True, exist_ok=True)
+            digest = self.run_digest
+            owned, reason = _parallel.checkpoint_owner_matches(cp_dir, digest)
+            if not owned:
+                # Refuse to inherit another run's results. Resuming here is how
+                # a different dataset of the same width silently returned the
+                # previous run's numbers.
+                self._resume_rejected = True
+                resume = False
+                warnings.warn(
+                    f"Ignoring checkpoints in {cp_dir}: {reason}. Recomputing "
+                    f"from scratch. Use a separate directory per run."
+                )
+            _parallel.write_manifest(cp_dir, digest, self.run_spec)
 
         # Resume: skip SPIs whose checkpoint exists.
         if cp_dir is not None and resume:

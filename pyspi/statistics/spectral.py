@@ -12,6 +12,7 @@ from pyspi.base import (
 import nitime.analysis as nta
 import nitime.timeseries as ts
 import warnings
+from pyspi.utils import fmt_param
 
 try:
     from spectral_connectivity.transforms import prepare_time_series
@@ -54,7 +55,8 @@ class NonparametricSpectral(Unsigned):
             self._statfn = None
         self._statistic = statistic
         paramstr = (
-            f"_multitaper_{statistic}_fs-{fs}_fmin-{fmin:.3g}_fmax-{fmax:.3g}".replace(
+            f"_multitaper_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
+            f"_fmax-{fmt_param(fmax)}".replace(
                 ".", "-"
             )
         )
@@ -473,13 +475,15 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
         self._method = method
         if self._method == "nonparametric":
             self._measure = "pairwise_spectral_granger_prediction"
-            paramstr = f"_nonparametric_{statistic}_fs-{fs}_fmin-{fmin:.3g}_fmax-{fmax:.3g}".replace(
+            paramstr = (f"_nonparametric_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
+                        f"_fmax-{fmt_param(fmax)}").replace(
                 ".", "-"
             )
         else:
             self._order = order
             self._max_order = max_order
-            paramstr = f"_parametric_{statistic}_fs-{fs}_fmin-{fmin:.3g}_fmax-{fmax:.3g}_order-{order}".replace(
+            paramstr = (f"_parametric_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
+                        f"_fmax-{fmt_param(fmax)}_order-{order}").replace(
                 ".", "-"
             )
 

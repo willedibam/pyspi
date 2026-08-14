@@ -200,3 +200,24 @@ def inspect_calc_results(calc):
         for i, spi in enumerate(spi_results['Partial NaNs']):
             print(f"{i+1}. {spi}")
         print(single_line_60 + "\n")
+
+
+def fmt_param(x):
+    """Format a parameter value for use inside an SPI identifier, losslessly.
+
+    Identifiers are the package's primary key: they name table columns, name
+    checkpoint files, and are compared when resuming. Formatting floats with
+    ``.3g``/``.4g`` made them lossy, so two genuinely different
+    parameterisations could render to the same identifier and silently overwrite
+    one another at dict insertion.
+
+    ``repr`` of a Python float is the shortest string that round-trips, so it is
+    both lossless and stable across platforms. Values that already print
+    identically under ``.3g`` are unaffected, which is why no bundled config's
+    identifiers change.
+    """
+    if isinstance(x, float):
+        if x != x or x in (float("inf"), float("-inf")):
+            return str(x)
+        return repr(x)
+    return str(x)

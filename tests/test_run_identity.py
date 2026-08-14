@@ -1,15 +1,14 @@
-"""Red tests: a checkpoint must identify the run that produced it.
+"""A checkpoint must identify the run that produced it.
 
-Resume currently validates only the SPI identifier and an ``(M, M)`` shape, so
-any other run of the same width silently inherits the previous run's numbers.
-That is the most dangerous class of defect in the package: it produces
-valid-looking results with no warning and no trace.
+These began as red tests and are now green. Resume used to validate only the
+SPI identifier and an ``(M, M)`` shape, so any other run of the same width
+silently inherited the previous run's numbers -- valid-looking results with no
+warning and no trace. Checkpoints are now bound to ``Calculator.run_digest``
+via a ``run.json`` manifest.
 
-Also covered: identifier collisions. Identifiers are formatted with ``.3g``/
-``.4g``, so distinct parameterisations can render to the same string, and
-dictionary insertion overwrites the loser before any duplicate check runs.
-
-See tests/test_state_integrity.py for the xfail(strict=True) rationale.
+Also covered: identifier collisions. Identifiers were formatted with ``.3g``/
+``.4g``, so distinct parameterisations could render to the same string, and
+dictionary insertion overwrote the loser before any duplicate check ran.
 """
 import numpy as np
 import pytest
@@ -41,7 +40,6 @@ def _first_spi_values(calc):
 # Checkpoint identity
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="checkpoints are not bound to the input data")
 def test_checkpoint_rejects_a_different_dataset(tmp_path):
     """A different dataset of the same width must not reuse checkpoints."""
     first = _run(_data(seed=1), tmp_path)
@@ -60,7 +58,6 @@ def test_checkpoint_rejects_a_different_dataset(tmp_path):
     assert not np.allclose(v1, v2, equal_nan=True)
 
 
-@pytest.mark.xfail(strict=True, reason="checkpoints are not bound to the config")
 def test_checkpoint_rejects_a_different_config(tmp_path):
     dataset = _data(seed=3)
     _run(dataset, tmp_path, config="fabfour")
@@ -76,7 +73,6 @@ def test_checkpoint_rejects_a_different_config(tmp_path):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="checkpoints are not bound to process names/order")
 def test_checkpoint_rejects_permuted_processes(tmp_path):
     rng = np.random.default_rng(7)
     arr = rng.standard_normal((3, 80))
@@ -127,7 +123,6 @@ def test_failed_checkpoints_are_retried_by_default(tmp_path):
 # Identifier collisions
 # --------------------------------------------------------------------------
 
-@pytest.mark.xfail(strict=True, reason="duplicate detection runs after dict insertion has merged keys")
 def test_duplicate_identifiers_are_rejected_at_insertion():
     """Two SPIs with the same identifier must raise, not silently overwrite."""
     from pyspi.calculator import load_spis_from_yaml
@@ -151,7 +146,6 @@ def test_duplicate_identifiers_are_rejected_at_insertion():
         os.unlink(path)
 
 
-@pytest.mark.xfail(strict=True, reason="identifiers round floats with .3g/.4g, so distinct params collide")
 def test_identifier_does_not_collide_under_float_rounding():
     """Parameterisations that differ numerically must differ in identifier."""
     from pyspi.statistics.spectral import CoherenceMagnitude
@@ -162,3 +156,66 @@ def test_identifier_does_not_collide_under_float_rounding():
     assert a.identifier != b.identifier, (
         f"Distinct fmin values collide after .3g rounding: {a.identifier!r}."
     )
+
+
+# --------------------------------------------------------------------------
+# Persistence
+# --------------------------------------------------------------------------
+
+def test_npz_round_trips_without_pickle(tmp_path):
+    """Saved tables must load with allow_pickle=False and match exactly."""
+    from pyspi.calculator import load_table
+
+    calc = Calculator(dataset=_data(seed=11), config=CONFIG, verbose=False)
+    calc.compute(progress=False)
+    out = calc.save(tmp_path / "t.npz")
+
+    # The load path must not need pickle; assert it directly as well as via
+    # load_table, so a future regression to dtype=object is caught here.
+    with np.load(out, allow_pickle=False) as f:
+        assert set(f.files) >= {"values", "spis", "processes", "schema"}
+        assert f["spis"].dtype.kind == "U", "SPI names stored as pickled objects"
+        assert f["processes"].dtype.kind == "U"
+
+    reloaded = load_table(out)
+    for key in calc.spis:
+        np.testing.assert_allclose(
+            reloaded[key].to_numpy(dtype=float),
+            calc.table[key].to_numpy(dtype=float),
+            equal_nan=True,
+        )
+
+
+def test_npz_records_its_provenance(tmp_path):
+    from pyspi.calculator import load_table  # noqa: F401  (import parity)
+
+    calc = Calculator(dataset=_data(seed=12), config=CONFIG, verbose=False)
+    calc.compute(progress=False)
+    out = calc.save(tmp_path / "t.npz")
+
+    import json
+    with np.load(out, allow_pickle=False) as f:
+        spec = json.loads(str(f["run_spec"]))
+        assert spec["config"] == CONFIG
+        assert spec["n_processes"] == 3
+        assert str(f["run_digest"]) == calc.run_digest
+
+
+def test_malformed_npz_is_rejected(tmp_path):
+    from pyspi.calculator import load_table
+
+    bad = tmp_path / "bad.npz"
+    np.savez_compressed(bad, values=np.zeros((2, 3, 3)),
+                        spis=np.array(["a"], dtype="U"),
+                        processes=np.array(["p0", "p1", "p2"], dtype="U"))
+    with pytest.raises(ValueError, match="malformed"):
+        load_table(bad)
+
+
+def test_non_pyspi_npz_is_rejected(tmp_path):
+    from pyspi.calculator import load_table
+
+    bad = tmp_path / "other.npz"
+    np.savez_compressed(bad, something_else=np.zeros(3))
+    with pytest.raises(ValueError, match="not a pyspi results table"):
+        load_table(bad)

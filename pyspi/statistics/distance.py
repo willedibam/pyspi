@@ -25,6 +25,7 @@ from pyspi.base import (
     parse_bivariate,
     parse_multivariate,
 )
+from pyspi.utils import fmt_param
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +246,7 @@ class DynamicTimeWarping(TimeWarping):
             if sakoe_chiba_radius is not None:
                 self.identifier += f"_radius-{sakoe_chiba_radius}"
             elif sakoe_chiba_ratio is not None:
-                self.identifier += f"_ratio-{sakoe_chiba_ratio:.4g}"
+                self.identifier += f"_ratio-{fmt_param(sakoe_chiba_ratio)}"
             else:
                 self.identifier += "_radius-auto"
         if normalise:

@@ -9,6 +9,7 @@ from pyspi.base import (
 import numpy as np
 import warnings
 from functools import partial
+from pyspi.utils import fmt_param
 
 
 class mne(Unsigned):
@@ -31,7 +32,8 @@ class mne(Unsigned):
         self._statistic = statistic
 
         paramstr = (
-            f"_wavelet_{statistic}_fs-{fs}_fmin-{fmin:.3g}_fmax-{fmax:.3g}".replace(
+            f"_wavelet_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
+            f"_fmax-{fmt_param(fmax)}".replace(
                 ".", "-"
             )
         )

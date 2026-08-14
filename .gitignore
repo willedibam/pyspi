@@ -25,4 +25,5 @@ bench/results/analysis/*.ipynb
 
 # Local assistant instructions
 CLAUDE.md
+AGENTS.md
 .claude/

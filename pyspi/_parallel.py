@@ -27,6 +27,7 @@ import queue as _queue
 import sys
 import time
 import warnings
+import json
 from collections import defaultdict
 from pathlib import Path
 from typing import Optional
@@ -342,6 +343,54 @@ def build_tasks(spi_keys, spis) -> list[list[str]]:
     # makespan, costs nothing.
     grouped_tasks = sorted(grouped.values(), key=len, reverse=True)
     return grouped_tasks + cacheless
+
+
+MANIFEST_NAME = "run.json"
+SCHEMA_VERSION = 1
+
+
+def read_manifest(checkpoint_dir: Path):
+    """Return the manifest dict for a checkpoint directory, or None."""
+    path = Path(checkpoint_dir) / MANIFEST_NAME
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def write_manifest(checkpoint_dir: Path, digest: str, spec: dict) -> None:
+    """Record which run owns this checkpoint directory."""
+    path = Path(checkpoint_dir) / MANIFEST_NAME
+    payload = {"schema": SCHEMA_VERSION, "digest": digest, "spec": spec}
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=1, sort_keys=True, default=str))
+    os.replace(tmp, path)
+
+
+def checkpoint_owner_matches(checkpoint_dir: Path, digest: str):
+    """Return (matches, reason). A directory with no manifest is unowned.
+
+    An unowned directory is treated as a mismatch rather than a match: it was
+    written by a version that did not record provenance, and there is no way to
+    tell whether it belongs to this run.
+    """
+    manifest = read_manifest(checkpoint_dir)
+    if manifest is None:
+        # Nothing written yet is fine; a populated directory without a manifest
+        # is not.
+        existing = any(Path(checkpoint_dir).glob("*.npy"))
+        if not existing:
+            return True, None
+        return False, "checkpoint directory has results but no run manifest"
+    if manifest.get("schema") != SCHEMA_VERSION:
+        return False, (
+            f"manifest schema {manifest.get('schema')!r} != {SCHEMA_VERSION}"
+        )
+    if manifest.get("digest") != digest:
+        return False, "checkpoint was written by a different run"
+    return True, None
 
 
 def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool = True):
