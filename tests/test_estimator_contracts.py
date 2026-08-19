@@ -791,3 +791,28 @@ def test_rmse_naming_is_restricted_to_the_metric_it_describes():
     for metric in ("cityblock", "cosine", "canberra", "braycurtis"):
         identifier = PairwiseDistance(metric=metric, normalise=True).identifier
         assert not identifier.endswith("_rmse"), identifier
+
+
+@pytest.mark.parametrize("kwargs,exc", [
+    ({"i": 0}, ValueError),          # j omitted
+    ({"j": 1}, ValueError),          # i omitted
+    ({"i": 0, "j": 9}, IndexError),  # out of range
+    ({"i": 0, "j": 1.5}, TypeError),
+])
+def test_bivariate_rejects_incomplete_or_invalid_indices(kwargs, exc):
+    """`z[None]` is `np.newaxis`, not an error.
+
+    A single index reached the SPI with the other left as None, and indexing
+    the process array with None turned the "pair" into the whole (1, M, T)
+    block -- so the SPI computed something with no relation to what was asked
+    for, silently. The signature is `(data, data2, i, j)`, so
+    `bivariate(data, 0, 3)` -- the obvious way to write it -- binds 0 to
+    `data2` and 3 to `i`, and lands in exactly that state.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.basic import CrossCorrelation
+
+    rng = np.random.default_rng(0)
+    data = Data(data=rng.standard_normal((4, 100)), dim_order="ps")
+    with pytest.raises(exc):
+        CrossCorrelation(sigonly=False).bivariate(data, **kwargs)
