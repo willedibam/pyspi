@@ -59,6 +59,14 @@ def main(argv=None) -> int:
                     help="Skip z-scoring each time series before computing.")
     cp.add_argument("--quiet", action="store_true",
                     help="Suppress INFO logging; show warnings/errors only.")
+    cp.add_argument("--fail-on-error", action="store_true",
+                    help="Exit non-zero if any SPI raised. Off by default: on "
+                         "real data a handful of SPIs legitimately fail (a "
+                         "spectral factorisation that will not converge, an "
+                         "estimator refusing input it cannot support), so a "
+                         "hard failure there would be the normal case and get "
+                         "ignored. A run in which *nothing* succeeded always "
+                         "exits non-zero, flag or no flag.")
 
     args = parser.parse_args(argv)
 
@@ -82,6 +90,29 @@ def main(argv=None) -> int:
     out = args.output or args.data.with_suffix(".spi.npz")
     calc.save(out)
     print(f"Wrote results table -> {out}")
+
+    # Report failures on the way out, unconditionally. `--quiet` suppresses the
+    # computation summary, which used to be the only place a failed SPI was
+    # mentioned -- so `pyspi compute --quiet` printed "Wrote results table" and
+    # exited 0 over a table that could be entirely NaN.
+    n_failed = len(calc.errors)
+    if n_failed:
+        print(f"{n_failed} of {calc.n_spis} SPI(s) failed: "
+              f"{', '.join(sorted(calc.errors))}", file=sys.stderr)
+
+    values = np.stack([calc.table[k].to_numpy(dtype=float) for k in calc.spis])
+    off_diagonal = ~np.eye(calc.dataset.n_processes, dtype=bool)
+    n_empty = int(sum(not np.isfinite(v[off_diagonal]).any() for v in values))
+    if n_empty:
+        print(f"{n_empty} of {calc.n_spis} SPI(s) produced no finite value.",
+              file=sys.stderr)
+
+    if n_empty == calc.n_spis:
+        print("Every SPI is empty; the results table carries no information.",
+              file=sys.stderr)
+        return 1
+    if n_failed and args.fail_on_error:
+        return 1
     return 0
 
 

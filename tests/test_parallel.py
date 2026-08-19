@@ -152,3 +152,81 @@ def test_cli_module_importable():
     import importlib
     mod = importlib.import_module("pyspi.__main__")
     assert hasattr(mod, "main")
+
+
+# --------------------------------------------------------------------------
+# CLI exit status
+# --------------------------------------------------------------------------
+
+def _cli_dataset(tmp_path):
+    """A small VAR(1); enough for the SPIs in parity_failure_config to run."""
+    rng = np.random.default_rng(0)
+    A = np.array([[0.5, 0.0], [0.7, 0.4]])
+    X = np.zeros((2, 120))
+    for t in range(1, X.shape[1]):
+        X[:, t] = A @ X[:, t - 1] + rng.standard_normal(2)
+    path = tmp_path / "cli_data.npy"
+    np.save(path, X)
+    return path
+
+
+@pytest.fixture
+def cli_env(monkeypatch):
+    """`failing_spis` importable by the CLI and by any worker it spawns."""
+    tests_dir = str(Path(__file__).parent)
+    existing = os.environ.get("PYTHONPATH", "")
+    monkeypatch.setenv(
+        "PYTHONPATH", tests_dir + (os.pathsep + existing if existing else "")
+    )
+    if tests_dir not in sys.path:
+        monkeypatch.syspath_prepend(tests_dir)
+
+
+def test_cli_reports_failures_and_exits_zero_by_default(tmp_path, capsys, cli_env):
+    """`--quiet` must not turn a partly-failed run into a silent success.
+
+    The computation summary is the only place a failed SPI was mentioned, and
+    `--quiet` suppresses it -- so the CLI printed "Wrote results table" and
+    exited 0 over a table whose columns had raised. Exit stays 0 (a few SPIs
+    failing is normal on real data), but the failure is now on stderr.
+    """
+    from pyspi.__main__ import main
+
+    data = _cli_dataset(tmp_path)
+    out = tmp_path / "res.npz"
+    code = main(["compute", "--data", str(data), "--quiet",
+                 "--config", str(Path(__file__).parent / "parity_failure_config.yaml"),
+                 "--output", str(out)])
+    assert code == 0
+    err = capsys.readouterr().err
+    assert "always_raises" in err, f"failure not reported on stderr: {err!r}"
+    assert out.exists()
+
+
+def test_cli_fail_on_error_exits_nonzero(tmp_path, cli_env):
+    """Opt-in hard failure for pipelines that want it."""
+    from pyspi.__main__ import main
+
+    data = _cli_dataset(tmp_path)
+    code = main(["compute", "--data", str(data), "--quiet", "--fail-on-error",
+                 "--config", str(Path(__file__).parent / "parity_failure_config.yaml"),
+                 "--output", str(tmp_path / "res.npz")])
+    assert code == 1
+
+
+def test_cli_exits_nonzero_when_every_spi_is_empty(tmp_path, cli_env):
+    """A table with no finite value anywhere is a failed run, not a result."""
+    from pyspi.__main__ import main
+
+    config = tmp_path / "all_failing.yaml"
+    config.write_text(
+        "failing_spis:\n"
+        "  AlwaysRaises:\n"
+        "    labels: [test]\n"
+        "    configs:\n"
+        "      - message: deliberate test failure\n"
+    )
+    data = _cli_dataset(tmp_path)
+    code = main(["compute", "--data", str(data), "--quiet",
+                 "--config", str(config), "--output", str(tmp_path / "res.npz")])
+    assert code == 1
