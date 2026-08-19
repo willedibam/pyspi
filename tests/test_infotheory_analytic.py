@@ -61,7 +61,11 @@ N_SMALL = 3000
 # carry genuine O(1e-2) finite-sample bias at N=20000 (KSG k=4; box kernel at
 # fixed bandwidth 0.25) — these are estimator properties, not slack chosen to
 # make the test pass; the measured errors are ~0.009.
-MI_ATOL = {"gaussian": 1e-9, "kraskov": 0.02, "kernel": 0.02, "kozachenko": 0.02}
+# 1e-7, not 1e-9: the Gaussian MI path now goes through the same ridge as
+# the entropy path, which biases it by ridge*r^2/(1-r^2) ~ 5.6e-9 at
+# rho=0.6. That is the price of the two paths agreeing at r -> 1, where
+# they used to differ by 8.4 nats.
+MI_ATOL = {"gaussian": 1e-7, "kraskov": 0.02, "kernel": 0.02, "kozachenko": 0.02}
 
 _ESTIMATOR_KWARGS = {"kraskov": {"prop_k": 4}, "kernel": {"kernel_width": 0.25}}
 
@@ -310,7 +314,7 @@ def test_mutual_info_chain_rule_gaussian():
     ce = ConditionalEntropy(estimator="gaussian").multivariate(data)
 
     assert mi == pytest.approx(je - ce[0, 1] - ce[1, 0], abs=1e-7)
-    assert mi == pytest.approx(-0.5 * np.log(1 - 0.6 ** 2), abs=1e-9)
+    assert mi == pytest.approx(-0.5 * np.log(1 - 0.6 ** 2), abs=1e-7)
 
 
 # ---------------------------------------------------------------------------
@@ -358,3 +362,52 @@ def test_coupling_increases_directed_measures(cls, kwargs, sign, estimator):
         f"expected direction (coupled={coupled[0, 1]}, "
         f"independent={independent[0, 1]}, expected sign={sign:+d})"
     )
+
+
+def test_gaussian_singularity_policy_is_shared_by_every_path():
+    """One ridge, reachable from either direction, on exactly singular input.
+
+    Gaussian MI used to clip r^2 at 1 - 1e-15 while the entropy path ridged the
+    covariance at 1e-8 relative. On a pair of identical N=100 series the direct
+    MI was 17.2698 nats and the same quantity assembled from entropies was
+    8.8638 -- a factor of two apart, from two regularisation policies in one
+    module. Both now return the ridge's bound, -0.5*log(1 - 1/(1+1e-8)^2).
+    """
+    from pyspi.statistics.infotheory import GAUSSIAN_RIDGE
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal(100)
+    data = Data(data=np.vstack([x, x.copy()]), dim_order="ps", zscore=False)
+
+    mi = MutualInfo(estimator="gaussian")
+    je = JointEntropy(estimator="gaussian")
+
+    bound = -0.5 * np.log(1 - 1 / (1 + GAUSSIAN_RIDGE) ** 2)
+    direct = mi.multivariate(data)[0, 1]
+    composed = (mi._compute_entropy(data, i=0) + mi._compute_entropy(data, i=1)
+                - je.multivariate(data)[0, 1])
+
+    assert direct == pytest.approx(bound, rel=1e-12)
+    assert composed == pytest.approx(bound, abs=1e-7)
+    assert je.bivariate(data, i=0, j=1) == pytest.approx(
+        je.multivariate(data)[0, 1], abs=1e-7)
+
+
+def test_gaussian_ridge_is_equivariant_to_per_variable_rescaling():
+    """The ridge is proportional to each variable's own variance.
+
+    An isotropic ridge eps = 1e-8 * mean(diag(Sigma)) makes the regularisation
+    of a quiet variable depend on the units of a loud one, so `zscore=False`
+    results move when an unrelated process is rescaled.
+    """
+    rng = np.random.default_rng(3)
+    Z = rng.standard_normal((3, 500))
+    Z[1] += 0.7 * Z[0]
+    Z[2] += 0.5 * Z[1]
+
+    mi = MutualInfo(estimator="gaussian")
+    base = mi.multivariate(Data(data=Z, dim_order="ps", zscore=False))
+    Z_scaled = Z.copy()
+    Z_scaled[0] *= 1e6
+    scaled = mi.multivariate(Data(data=Z_scaled, dim_order="ps", zscore=False))
+    assert np.allclose(base, scaled, atol=1e-12, equal_nan=True)

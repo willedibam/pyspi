@@ -409,3 +409,139 @@ def test_ccm_auto_embedding_maximises_skill_rather_than_returning_max_e():
         f"every process selected the maximum candidate E ({chosen}); that is "
         f"the symptom of reading max(E) instead of argmax(rho)"
     )
+
+
+# ---------------------------------------------------------------------------
+# KSG input conditioning: JIDT's NORMALISE and NOISE_LEVEL_TO_ADD
+# ---------------------------------------------------------------------------
+
+def _correlated_pair(n=2000, rho=0.8, seed=0):
+    rng = np.random.default_rng(seed)
+    z = rng.standard_normal(n)
+    return z, rho * z + np.sqrt(1 - rho ** 2) * rng.standard_normal(n)
+
+
+@pytest.mark.parametrize("scale", [1e-3, 1.0, 1e3])
+def test_ksg_mi_is_invariant_to_per_coordinate_rescaling(scale):
+    """MI is invariant under any smooth invertible marginal transform.
+
+    The KSG estimator's L-infinity neighbour radius is not, which is why JIDT
+    normalises each column by default (``normalise = true`` on
+    MutualInfoMultiVariateCommon). Without it, scaling one member of a
+    correlated Gaussian pair by 1e-3 or 1e3 collapsed the estimate from 0.49 to
+    0.05 and 0.06 against a true MI of 0.51.
+    """
+    from pyspi.statistics.infotheory import _ksg_mi_pair
+
+    x, y = _correlated_pair()
+    analytic = -0.5 * np.log(1 - np.corrcoef(x, y)[0, 1] ** 2)
+    got = _ksg_mi_pair(x, scale * y, 4, 0)
+    assert abs(got - analytic) < 0.05, (
+        f"MI = {got:.4f} at scale {scale:g}; analytic {analytic:.4f}"
+    )
+
+
+@pytest.mark.parametrize("w", [0, 5])
+@pytest.mark.parametrize("levels", [2, 4, None])
+def test_ksg_mi_of_independent_quantised_marginals_is_near_zero(levels, w):
+    """Ties must not be read as dependence.
+
+    Every kth-nearest-neighbour radius is zero on quantised data, so the
+    digamma counts saturate on the tie structure. Measured before the 1e-8
+    dither JIDT adds by default: independent binary marginals (N=400, k=4)
+    gave -3.35, four-level -1.96, and one-decimal-rounded Gaussians *+0.90* --
+    a confident false positive on independent data.
+    """
+    from pyspi.statistics.infotheory import _ksg_mi_pair
+
+    rng = np.random.default_rng(0)
+    def draw():
+        if levels is None:
+            return np.round(rng.standard_normal(400), 1)
+        return rng.integers(0, levels, 400).astype(float)
+
+    mi = _ksg_mi_pair(draw(), draw(), 4, w)
+    assert abs(mi) < 0.1, f"independent quantised marginals gave MI = {mi:+.4f}"
+
+
+def test_ksg_mi_recovers_the_discrete_mutual_information_of_tied_data():
+    """Dither is not just a tie-breaker; the limit is the right one.
+
+    For independent additive noise, I(X + e*xi; Y + e*eta) -> I(X; Y) as
+    e -> 0, so the dithered estimate targets the discrete MI rather than a
+    quantisation artefact. Checked against the plug-in estimate on the same
+    sample, so the comparison is not confounded by sampling error.
+    """
+    from pyspi.statistics.infotheory import _ksg_mi_pair
+
+    rng = np.random.default_rng(1)
+    x = (rng.random(4000) < 0.5)
+    y = np.where(rng.random(4000) < 0.8, x, ~x)
+
+    joint = np.array([[np.mean((x == a) & (y == b)) for b in (False, True)]
+                      for a in (False, True)])
+    px, py = joint.sum(1), joint.sum(0)
+    plug_in = float(np.sum(joint * np.log(joint / np.outer(px, py))))
+
+    got = _ksg_mi_pair(x.astype(float), y.astype(float), 4, 0)
+    assert abs(got - plug_in) < 0.05, f"KSG {got:.4f} vs plug-in {plug_in:.4f}"
+
+
+def test_ksg_dither_is_reproducible_and_independent_of_call_context():
+    """The dither must be a pure function of the series.
+
+    A per-call RNG would make ``bivariate(data, i, j)`` disagree with
+    ``multivariate(data)[i, j]``, break serial/parallel equality, and put a
+    stochastic term in every frozen baseline. The seed is derived from a digest
+    of the (normalised) column instead, so the same series always draws the
+    same noise however many processes it is passed alongside.
+    """
+    import pyspi.statistics.infotheory as it
+    from pyspi.data import Data
+
+    rng = np.random.default_rng(2)
+    Z = rng.standard_normal((4, 300))
+    data = Data(data=Z, dim_order="ps", zscore=False)
+
+    for cls in (it.MutualInfo, it.TimeLaggedMutualInfo):
+        spi = cls(estimator="kraskov")
+        table = spi.multivariate(data)
+        assert spi.bivariate(data, i=0, j=2) == table[0, 2]
+        assert np.array_equal(spi.multivariate(data), table, equal_nan=True)
+
+
+def test_kraskov_spis_are_finite_on_the_quantised_bundled_dataset():
+    """`forex` has a process with 24 distinct values in 250 samples.
+
+    That is exactly the regime where zero neighbour radii used to dominate, and
+    it ships with the package, so it is a fixture rather than a hypothetical.
+    """
+    import pyspi.statistics.infotheory as it
+    from pyspi.data import load_dataset
+
+    data = load_dataset("forex")
+    for spi in (it.MutualInfo(estimator="kraskov"),
+                it.TimeLaggedMutualInfo(estimator="kraskov"),
+                it.TransferEntropy(estimator="kraskov"),
+                it.DirectedInfo(estimator="kraskov")):
+        table = spi.multivariate(data)
+        off = ~np.eye(table.shape[0], dtype=bool)
+        assert np.isfinite(table[off]).all(), f"{spi.identifier} has non-finite values"
+        assert np.abs(table[off]).max() < 10, f"{spi.identifier} is implausibly large"
+
+
+def test_kozachenko_entropy_still_refuses_tied_data_rather_than_dithering():
+    """A deliberate divergence from JIDT, and the reason is not stylistic.
+
+    JIDT dithers its Kozachenko calculator with the same 1e-8 it uses for KSG.
+    That is safe for mutual information, whose dithered limit is the discrete
+    value, but not for differential entropy: H(X + e*xi) -> -inf as e -> 0 for
+    discrete X, so a dithered estimate on quantised data reports the dither
+    level. pyspi names the problem instead of returning a number set by an
+    implementation constant.
+    """
+    import pyspi.statistics.infotheory as it
+    from pyspi.data import load_dataset
+
+    with pytest.raises(ValueError, match="tied observations"):
+        it.JointEntropy(estimator="kozachenko").multivariate(load_dataset("forex"))

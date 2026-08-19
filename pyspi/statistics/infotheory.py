@@ -6,6 +6,7 @@ Frontiers in Robotics and AI), which served as the reference implementation the
 port was validated against; the version used for validation was JIDT 1.6.1.
 """
 
+import hashlib
 import math
 import numpy as np
 from pyspi import utils
@@ -22,55 +23,90 @@ from pyspi.base import Undirected, Directed, Unsigned, parse_univariate, parse_b
 # Pure-numpy entropy calculators (drop-in replacements for JIDT)
 # ---------------------------------------------------------------------------
 
-def _gaussian_pairwise_joint_entropy(Z):
+# One singularity policy for every Gaussian quantity in this module: each
+# variable is treated as observed with independent additive noise of variance
+# GAUSSIAN_RIDGE times its own variance, so
+#
+#     Sigma  ->  Sigma + GAUSSIAN_RIDGE * diag(diag(Sigma)).
+#
+# Two properties make this the version worth having, as opposed to the
+# isotropic eps = ridge * mean(diag(Sigma)) it replaces:
+#
+#   * It commutes with the compositions. log|.| of a 1-D block is
+#     log(V(1+ridge)), of a 2-D block log(V_i V_j((1+ridge)^2 - r^2)), so
+#     H(X) + H(Y) - H(X,Y) is exactly -0.5*log(1 - r^2/(1+ridge)^2) -- the
+#     direct MI formula below, with no residual. An isotropic ridge does not
+#     have this property, because eps then depends on which block it is in.
+#   * It is equivariant to per-variable rescaling, so the regularisation does
+#     not quietly depend on the units of the loudest process.
+#
+# The previous mismatch was not subtle. Gaussian MI clipped r^2 at 1 - 1e-15,
+# giving -0.5*log(1e-15) = 17.2698 nats on a pair of identical N=100 series,
+# while the entropy path's ridge gave 8.8638 for the same quantity on the same
+# data. Both now return 8.8638.
+GAUSSIAN_RIDGE = 1e-8
+
+
+def _gaussian_mi_from_r(r, ridge_rel=GAUSSIAN_RIDGE):
+    """I(X;Y) = -0.5*log(1 - r^2) for jointly Gaussian X, Y, ridged.
+
+    The ridge is what the entropy path applies, expressed on the correlation
+    scale: adding independent noise of variance ridge*V to each variable
+    attenuates the correlation by exactly (1 + ridge). The bound is therefore
+    -0.5*log(1 - 1/(1+ridge)^2) ~ 8.86 nats rather than an unreachable
+    infinity, and it is the *same* bound the entropy composition reaches.
+    """
+    r2 = np.clip(np.asarray(r, dtype=np.float64) ** 2, 0.0, 1.0)
+    return -0.5 * np.log(1.0 - r2 / (1.0 + ridge_rel) ** 2)
+
+
+def _gaussian_pairwise_joint_entropy(Z, ridge_rel=GAUSSIAN_RIDGE):
     """Vectorised pairwise Gaussian joint entropy, matching the scalar path.
 
-    The scalar primitive (_gaussian_entropy_from_data -> _gaussian_log_det)
-    regularises with a ridge eps = 1e-8 * mean(diag(Sigma)). The vectorised
-    path used to clip r^2 to 1 - 1e-15 instead, so on singular data the two
-    disagreed by 8.406 nats -- bivariate() and multivariate() returned
-    different numbers for the same SPI. Both now apply the same ridge.
+    Same ridge as _gaussian_log_det, so bivariate() and multivariate() cannot
+    disagree; before either was regularised consistently they differed by 8.406
+    nats on singular data.
     """
     R = np.corrcoef(Z)
     V = np.var(Z, axis=1, ddof=1)
-    eps = 1e-8 * (V[:, None] + V[None, :]) / 2.0
-    det = (V[:, None] + eps) * (V[None, :] + eps) - (R ** 2) * V[:, None] * V[None, :]
+    # Factored rather than (1+ridge)^2 - R^2: on a singular pair those two
+    # terms agree to ~1e-8 and the subtraction loses most of the digits.
+    det = (V[:, None] * V[None, :]) * (
+        (1.0 + ridge_rel - np.abs(R)) * (1.0 + ridge_rel + np.abs(R)))
     with np.errstate(invalid="ignore", divide="ignore"):
         JE = np.log(2 * np.pi * np.e) + 0.5 * np.log(det)
     return np.where(det > 0, JE, np.nan)
 
 
-def _gaussian_log_det(cov, ridge_rel=1e-8):
-    """log|Σ + εI| with ε = ridge_rel * mean(diag(Σ)).
+def _gaussian_log_det(cov, ridge_rel=GAUSSIAN_RIDGE):
+    """log|Σ + ridge*diag(diag(Σ))| -- the shared Gaussian log-determinant.
 
-    Returns NaN on degenerate input (non-finite mean, non-positive mean,
-    or still-singular after ridge). Never returns -inf, so that downstream
-    entropy differences (H_xy - H_y) cannot cascade to catastrophic overflow
-    in np.nan_to_num.
+    Every Gaussian entropy, joint entropy, conditional entropy, MI, TLMI, TE
+    and AIS in this module goes through this or through `_gaussian_mi_from_r`,
+    which is its closed form on a 2x2 block. Returns NaN, never -inf, on input
+    that is still degenerate after the ridge -- a variable with zero variance
+    has no scale for a *proportional* ridge to act on, and its differential
+    entropy really is -inf, so NaN reports "undefined" rather than propagating
+    an infinity into a difference of entropies.
 
-    Academic rationale: for rank-deficient Σ the unregularised log|Σ| is
-    mathematically -inf (data lives on a lower-dim subspace). JIDT adds
-    NOISE_LEVEL_TO_ADD=1e-8 gaussian noise to observations for the same
-    reason; ridge-regularising Σ directly is equivalent in expectation
-    (cov of x+η equals Σ + σ²I for iid additive noise η) and numerically
-    stabler than perturbing samples.
+    Rationale for regularising at all: for rank-deficient Σ the unregularised
+    log|Σ| is -inf (the data lives on a lower-dimensional subspace). JIDT adds
+    NOISE_LEVEL_TO_ADD=1e-8 Gaussian noise to the observations for the same
+    reason; ridging Σ is that operation in expectation (cov(x + η) =
+    Σ + cov(η)) and is deterministic.
     """
     if np.ndim(cov) == 0:
         var = float(cov)
-        if not np.isfinite(var):
+        if not np.isfinite(var) or var <= 0:
             return np.nan
-        if var <= 0:
-            return np.nan
-        eps = ridge_rel * var
-        return float(np.log(var + eps))
+        return float(np.log(var * (1.0 + ridge_rel)))
     cov = np.asarray(cov, dtype=np.float64)
     d = cov.shape[0]
-    mean_diag = float(np.trace(cov)) / d
-    if not np.isfinite(mean_diag) or mean_diag <= 0:
+    diag = np.diag(cov)
+    if not np.all(np.isfinite(diag)) or np.any(diag <= 0):
         return np.nan
-    eps = ridge_rel * mean_diag
     try:
-        sign, log_det = np.linalg.slogdet(cov + eps * np.eye(d))
+        sign, log_det = np.linalg.slogdet(cov + ridge_rel * np.diag(diag))
     except np.linalg.LinAlgError:
         return np.nan
     if sign <= 0 or not np.isfinite(log_det):
@@ -546,6 +582,83 @@ def _numpy_delay_embedding(x, dim):
 
 
 # ---------------------------------------------------------------------------
+# k-NN input conditioning (JIDT's NORMALISE and NOISE_LEVEL_TO_ADD)
+# ---------------------------------------------------------------------------
+
+# JIDT switches both of these on by default for every KSG-family calculator:
+# MutualInfoCalculatorMultiVariateKraskov, ConditionalMutualInfoCalculator-
+# MultiVariateKraskov and EntropyCalculatorMultiVariateKozachenko all set
+# `addNoise = true; noiseLevel = 1e-8` in their constructors ("to match the
+# noise order in MILCA toolkit"), and `normalise = true` is the default on
+# MutualInfoMultiVariateCommon / ConditionalMutualInfoMultiVariateCommon.
+# Noise is added *after* normalisation, so 1e-8 is in standard deviations.
+#
+# pyspi 2.x ran JIDT with both defaults active -- it set NOISE_SEED=42 and
+# never touched NORMALISE or NOISE_LEVEL_TO_ADD. The pure-NumPy port carried
+# the seed over but implemented neither policy, which is not a rounding
+# difference:
+#
+#   ties      Independent binary marginals (N=400, k=4) returned MI = -3.35;
+#             four-level, -1.96; one-decimal-rounded Gaussians, *+0.90* -- a
+#             confident false positive on independent data. Every kth-nearest-
+#             neighbour radius is zero, so the digamma counts saturate on the
+#             tie structure and the estimate measures quantisation.
+#   scale     KSG's L-infinity radius is not invariant to per-coordinate
+#             rescaling. With zscore=False, scaling one of a correlated
+#             Gaussian pair (true MI 0.50) by 1e-3 or 1e3 collapsed the
+#             estimate from 0.49 to 0.05 and 0.06.
+#
+# Normalisation fixes the second outright. Dither fixes the first in the
+# limit that matters: for independent additive noise, I(X+eps*xi; Y+eps*eta)
+# -> I(X; Y) as eps -> 0, so a tiny dither recovers the discrete answer
+# instead of the tie artefact (Kraskov et al. 2004, Phys. Rev. E 69, 066138,
+# recommend exactly this).
+#
+# The same argument does *not* extend to differential entropy, and pyspi
+# deliberately parts company with JIDT there: H(X + eps*xi) -> -inf as
+# eps -> 0 for discrete X, so dithered Kozachenko entropy on quantised data
+# reports the dither level, not the data. KLEntropyCalculator keeps its
+# explicit error instead (see its docstring).
+#
+# Both are fixed implementation policy, not tunable parameters, so neither
+# appears in SPI identifiers; they belong to the algorithm version that
+# `run_digest` binds to.
+_KNN_NOISE_LEVEL = 1e-8
+_KNN_NOISE_SEED = 42
+
+
+def _knn_condition(X, noise_level=_KNN_NOISE_LEVEL, seed=_KNN_NOISE_SEED):
+    """Per-column z-score, then add `noise_level` standard deviations of dither.
+
+    The dither's RNG is seeded from a digest of the column itself, so the noise
+    on a given series is a pure function of its values. That is what keeps
+    `bivariate(data, i, j)` and `multivariate(data)[i, j]` identical: the noise
+    cannot depend on how many other processes happened to be passed alongside,
+    on the order they were passed in, or on which worker process ran the pair.
+    blake2b rather than `hash()`, which is salted per interpreter.
+    """
+    X = np.asarray(X, dtype=np.float64)
+    reshaped = X.ndim == 1
+    if reshaped:
+        X = X.reshape(-1, 1)
+    out = np.empty_like(X)
+    for c in range(X.shape[1]):
+        col = X[:, c]
+        sd = col.std(ddof=1)          # JIDT MatrixUtils.stdDevs: sample std
+        # A constant column has no scale to normalise by. The KSG entry points
+        # reject that input outright; leaving it centred keeps this helper from
+        # being the thing that raises.
+        col = (col - col.mean()) / (sd if sd > 0 else 1.0)
+        if noise_level:
+            digest = hashlib.blake2b(np.ascontiguousarray(col).tobytes(),
+                                     digest_size=8).digest()
+            rng = np.random.default_rng(int.from_bytes(digest, "little") ^ seed)
+            col = col + noise_level * rng.standard_normal(col.shape[0])
+        out[:, c] = col
+    return out.reshape(-1) if reshaped else out
+
+
+# ---------------------------------------------------------------------------
 # KSG MI estimator
 # ---------------------------------------------------------------------------
 
@@ -573,19 +686,23 @@ def _validate_ksg_sample(N, k, w, context=""):
         )
 
 
-def _ksg_mi_pair(x, y, k, w, tree_x, tree_y):
-    """KSG Estimator 1 MI for a single pair."""
+def _ksg_mi_pair(x, y, k, w):
+    """KSG Estimator 1 MI for a single pair of scalar series."""
     N = len(x)
     _validate_ksg_sample(N, k, w, context="mutual information")
-    # A constant marginal has zero radius everywhere: every neighbour distance
-    # collapses to 0, the digamma counts saturate, and the estimator returns a
-    # number that reflects the tie structure rather than any dependence.
+    # A constant marginal carries no information, but it is almost always a
+    # broken input rather than a result the caller wants: the estimate would be
+    # of the dither `_knn_condition` adds, not of the data. Checked before
+    # conditioning, which is what makes it detectable at all.
     for name, v in (("x", x), ("y", y)):
         if np.ptp(v) == 0:
             raise ValueError(
                 f"KSG cannot estimate mutual information: marginal {name} is "
                 f"constant, so all neighbour distances are zero."
             )
+    x, y = _knn_condition(np.column_stack([x, y])).T
+    tree_x = cKDTree(x.reshape(-1, 1))
+    tree_y = cKDTree(y.reshape(-1, 1))
     xy = np.column_stack([x, y])
     tree_xy = cKDTree(xy)
 
@@ -637,11 +754,10 @@ def _ksg_mi_pair(x, y, k, w, tree_x, tree_y):
     return float(mi)
 
 
-def _ksg_mi_general(A, B, k_nn, w=0):
+def _ksg_mi_general(A, B, k_nn, w=0, condition=True):
     """KSG Estimator 1 MI(A; B) for multivariate A (N,dA), B (N,dB), L-inf norm.
 
-    Generalisation of _ksg_mi_pair to arbitrary marginal dimensions (the pair
-    version is kept for the 1-D/1-D MI grids where pre-built trees are reused).
+    Generalisation of _ksg_mi_pair to arbitrary marginal dimensions.
     Marginal neighbours are counted strictly (< eps); psi(N) uses full N. An
     optional Theiler window w excludes |j-i| <= w from the neighbour set.
     """
@@ -651,6 +767,8 @@ def _ksg_mi_general(A, B, k_nn, w=0):
         A = A[:, None]
     if B.ndim == 1:
         B = B[:, None]
+    if condition:
+        A, B = np.split(_knn_condition(np.column_stack([A, B])), [A.shape[1]], axis=1)
     N = A.shape[0]
     AB = np.column_stack([A, B])
     tree_ab = cKDTree(AB)
@@ -758,11 +876,7 @@ def _gaussian_ais(targ, k, tau):
     N = Y_f.shape[0]
 
     def _slogdet(arr):
-        cov = np.cov(arr, rowvar=False, ddof=1)
-        if arr.shape[1] == 1:
-            return np.log(max(float(cov), 1e-300))
-        sign, ld = np.linalg.slogdet(cov)
-        return ld if sign > 0 else -np.inf
+        return _gaussian_log_det(np.cov(arr, rowvar=False, ddof=1))
 
     ais_raw = 0.5 * (_slogdet(Y_f) + _slogdet(Y_p) - _slogdet(YfYp))
     return ais_raw - k / (2.0 * N)
@@ -807,12 +921,7 @@ def _gaussian_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau):
         return np.nan
 
     def _slogdet(data):
-        N, d = data.shape
-        cov = np.cov(data, rowvar=False, ddof=1)
-        if d == 1:
-            return np.log(max(float(cov), 1e-300))
-        sign, ld = np.linalg.slogdet(cov)
-        return ld if sign > 0 else -np.inf
+        return _gaussian_log_det(np.cov(data, rowvar=False, ddof=1))
 
     YfYp = np.concatenate([Y_f, Y_p], axis=1)
     YfYpXp = np.concatenate([Y_f, Y_p, X_p], axis=1)
@@ -822,7 +931,7 @@ def _gaussian_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau):
     return float(te)
 
 
-def _ksg_cmi(A, B, C, k_nn, w=0):
+def _ksg_cmi(A, B, C, k_nn, w=0, condition=True):
     """KSG conditional mutual information I(A; B | C), Frenzel-Pompe estimator.
 
     Estimates the CMI *directly* rather than as a sum of four separately
@@ -845,12 +954,22 @@ def _ksg_cmi(A, B, C, k_nn, w=0):
         if np.ptp(arr, axis=0).min() == 0:
             raise ValueError(f"KSG cannot estimate: {name} has a constant column.")
     has_C = C is not None and np.asarray(C).size and np.asarray(C).shape[1] > 0
+    if condition:
+        if has_C:
+            C = np.atleast_2d(C)
+            A, B, C = np.split(
+                _knn_condition(np.column_stack([A, B, C])),
+                [A.shape[1], A.shape[1] + B.shape[1]], axis=1,
+            )
+        else:
+            A, B = np.split(
+                _knn_condition(np.column_stack([A, B])), [A.shape[1]], axis=1)
     if not has_C:
         # With nothing to condition on this *is* mutual information, so use the
         # MI estimator rather than emulating it. Faking the conditioning count
         # as a constant N-(2w+1) matched _ksg_mi_general only at w=0 and drifted
         # with the Theiler window (0.005 at w=1, 0.051 at w=10 on a probe).
-        return _ksg_mi_general(A, B, k_nn, w)
+        return _ksg_mi_general(A, B, k_nn, w, condition=False)
 
     joint = np.concatenate([A, B, C], axis=1)
     AC = np.concatenate([A, C], axis=1)
@@ -1256,16 +1375,12 @@ class MutualInfo(InfoTheoryBase, Undirected):
             # Handled by multivariate; bivariate fallback
             z = data.to_numpy(squeeze=True)
             if self._estimator == 'gaussian':
-                r = np.corrcoef(z[i], z[j])[0, 1]
-                r2 = np.clip(r ** 2, 0, 1 - 1e-15)
-                return -0.5 * np.log(1 - r2)
+                return float(_gaussian_mi_from_r(np.corrcoef(z[i], z[j])[0, 1]))
             else:
                 # kraskov bivariate
-                tree_x = cKDTree(z[i].reshape(-1, 1))
-                tree_y = cKDTree(z[j].reshape(-1, 1))
                 k = int(self._prop_k)
                 w = self._resolve_theiler(data, i, j)
-                return _ksg_mi_pair(z[i], z[j], k, w, tree_x, tree_y)
+                return _ksg_mi_pair(z[i], z[j], k, w)
 
         # kernel estimator: use numpy KernelMICalculator
         if self._estimator == 'kernel':
@@ -1282,22 +1397,18 @@ class MutualInfo(InfoTheoryBase, Undirected):
     def multivariate(self, data):
         if self._estimator == 'gaussian':
             Z = data.to_numpy(squeeze=True)
-            R = np.corrcoef(Z)
-            r2 = np.clip(R ** 2, 0, 1 - 1e-15)
-            MI = -0.5 * np.log(1 - r2)
+            MI = _gaussian_mi_from_r(np.corrcoef(Z))
             np.fill_diagonal(MI, np.nan)
             return MI
         elif self._estimator == 'kraskov':
             Z = data.to_numpy(squeeze=True)
             M, N = Z.shape
             k = int(self._prop_k)
-            marginal_trees = [cKDTree(Z[i].reshape(-1, 1)) for i in range(M)]
             result = np.full((M, M), np.nan)
             for i in range(M):
                 for j in range(i + 1, M):
                     w = self._resolve_theiler(data, i, j)
-                    mi = _ksg_mi_pair(Z[i], Z[j], k, w,
-                                      marginal_trees[i], marginal_trees[j])
+                    mi = _ksg_mi_pair(Z[i], Z[j], k, w)
                     result[i, j] = result[j, i] = mi
             return result
         return super().multivariate(data)
@@ -1323,15 +1434,11 @@ class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
             src = z[i][:-1]
             tgt = z[j][1:]
             if self._estimator == 'gaussian':
-                r = np.corrcoef(src, tgt)[0, 1]
-                r2 = np.clip(r ** 2, 0, 1 - 1e-15)
-                return -0.5 * np.log(1 - r2)
+                return float(_gaussian_mi_from_r(np.corrcoef(src, tgt)[0, 1]))
             else:
-                tree_x = cKDTree(src.reshape(-1, 1))
-                tree_y = cKDTree(tgt.reshape(-1, 1))
                 k = int(self._prop_k)
                 w = self._resolve_theiler(data, i, j)
-                return _ksg_mi_pair(src, tgt, k, w, tree_x, tree_y)
+                return _ksg_mi_pair(src, tgt, k, w)
 
         # kernel estimator: use numpy KernelMICalculator
         if self._estimator == 'kernel':
@@ -1354,9 +1461,7 @@ class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
             Z_tgt = Z[:, 1:]
             stacked = np.vstack([Z_src, Z_tgt])
             R = np.corrcoef(stacked)
-            r_cross = R[:M, M:]
-            r2 = np.clip(r_cross ** 2, 0, 1 - 1e-15)
-            TLMI = -0.5 * np.log(1 - r2)
+            TLMI = _gaussian_mi_from_r(R[:M, M:])
             np.fill_diagonal(TLMI, np.nan)
             return TLMI
         elif self._estimator == 'kraskov':
@@ -1365,16 +1470,13 @@ class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
             k = int(self._prop_k)
             Z_src = Z[:, :-1]
             Z_tgt = Z[:, 1:]
-            src_trees = [cKDTree(Z_src[i].reshape(-1, 1)) for i in range(M)]
-            tgt_trees = [cKDTree(Z_tgt[j].reshape(-1, 1)) for j in range(M)]
             result = np.full((M, M), np.nan)
             for i in range(M):
                 for j in range(M):
                     if i == j:
                         continue
                     w = self._resolve_theiler(data, i, j)
-                    mi = _ksg_mi_pair(Z_src[i], Z_tgt[j], k, w,
-                                      src_trees[i], tgt_trees[j])
+                    mi = _ksg_mi_pair(Z_src[i], Z_tgt[j], k, w)
                     result[i, j] = mi
             return result
         return super().multivariate(data)
