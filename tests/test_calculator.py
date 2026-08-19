@@ -1,7 +1,7 @@
 from pyspi.calculator import (Calculator, Data, CalculatorFrame, CorrelationFrame,
                               load_spis_from_yaml, resolve_config, bundled_configs)
 from pyspi.data import available_datasets, load_dataset
-import numpy as np 
+import numpy as np
 import os
 import pytest
 
@@ -321,7 +321,7 @@ def test_calculator_frame_normal_operation():
     dataset_labels = ['label1', 'label2', 'label3']
 
     # create calculator frame
-    calc_frame = CalculatorFrame(name="MyCalcFrame", datasets=[Data(data=data, dim_order='ps') for data in datasets], 
+    calc_frame = CalculatorFrame(name="MyCalcFrame", datasets=[Data(data=data, dim_order='ps') for data in datasets],
                                  names=dataset_names, labels=dataset_labels, config='fabfour')
     assert(isinstance(calc_frame, CalculatorFrame)), "CalculatorFrame failed to instantiate."
 
@@ -329,7 +329,7 @@ def test_calculator_frame_normal_operation():
     # check expected number of calcs in frame - 3 for 3 datasets
     num_calcs_in_frame = calc_frame.n_calculators
     assert num_calcs_in_frame == 3, f"Unexpected number ({num_calcs_in_frame}) of calculators in the frame. Expected 3."
-    
+
     # get the frame name
     assert calc_frame.name == "MyCalcFrame", "Calculator frame has unexpected name."
 
@@ -337,18 +337,18 @@ def test_calculator_frame_normal_operation():
     for (index, calc) in enumerate(calc_frame.calculators[0]):
         assert calc.name == dataset_names[index], "Indiviudal calculator has unexpected name."
         assert calc.labels == dataset_labels[index], "Indiviudal calculator has unexpected label."
-    
+
     # check that compute runs
     calc_frame.compute()
 
 def test_correlation_frame_normal_operation():
-    """Test whether the correlation frame instantiates as expected.""" 
+    """Test whether the correlation frame instantiates as expected."""
     datasets = [np.random.randn(3, 100) for _ in range(3)]
     dataset_names = ['d1', 'd2', 'd3']
     dataset_labels = ['label1', 'label2', 'label3']
-    calc_frame = CalculatorFrame(name="MyCalcFrame", datasets=[Data(data=data, dim_order='ps') for data in datasets], 
+    calc_frame = CalculatorFrame(name="MyCalcFrame", datasets=[Data(data=data, dim_order='ps') for data in datasets],
                                  names=dataset_names, labels=dataset_labels, config='fabfour')
-    
+
     calc_frame.compute()
     cf = calc_frame.get_correlation_df()
 
@@ -387,9 +387,9 @@ def test_normalisation_flag():
     data = np.random.randn(3, 100)
     calc = Calculator(dataset=data, zscore=False, detrend=False)
     calc_loaded_dataset = calc.dataset.to_numpy().squeeze()
-    
-    assert (calc_loaded_dataset == data).all(), f"Calculator zscore=False not producing the correct output." 
-    
+
+    assert (calc_loaded_dataset == data).all(), f"Calculator zscore=False not producing the correct output."
+
 
 
 def test_save_load_npz_roundtrip(tmp_path):

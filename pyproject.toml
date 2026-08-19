@@ -7,7 +7,10 @@ name = "pyspi"
 version = "3.0.0"
 description = "Library for pairwise analysis of time series data."
 readme = "README.md"
-license = { text = "GNU General Public License v3 (GPLv3)" }
+# PEP 639 SPDX expression. The `{ text = ... }` table is deprecated by
+# setuptools >= 77 and emits a build warning that will become an error.
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE.txt"]
 requires-python = ">=3.10"
 authors = [
     { name = "Oliver M. Cliff", email = "oliver.m.cliff@gmail.com" },
@@ -100,7 +103,8 @@ Homepage = "https://github.com/DynamicsAndNeuralSystems/pyspi"
 Documentation = "https://time-series-features.gitbook.io/pyspi/"
 
 [tool.pytest.ini_options]
-# Default: skip the slow regression suite (test_regression.py, ~12 min).
+# Default: skip the slow suite (test_baseline_drift.py plus the cache-sharing
+# sweep in test_cache_keys.py; ~2 min on a 2024 laptop).
 # Run everything with: pytest -m ''
 # Run only regression: pytest -m slow
 addopts = "-m 'not slow'"

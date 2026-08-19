@@ -77,6 +77,7 @@ and [alternative installation options](https://time-series-features.gitbook.io/p
 
 ```python
 import numpy as np
+import pyspi
 from pyspi.calculator import Calculator
 
 dataset = np.random.randn(5, 500)      # 5 processes, 500 observations

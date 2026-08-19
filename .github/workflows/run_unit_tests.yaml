@@ -32,6 +32,6 @@ jobs:
           pip install -e '.[testing]'
 
       - name: Run unit tests
-        # pyproject.toml sets addopts = "-m 'not slow'", so the ~12 min regression
+        # pyproject.toml sets addopts = "-m 'not slow'", so the baseline-drift
         # suite is excluded here by design. See run_slow_tests.yaml for that.
         run: pytest -q

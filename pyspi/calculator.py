@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 import copy, yaml, importlib, time, warnings, os
+import functools
 import hashlib, json
 from pathlib import Path
 from tqdm import tqdm
@@ -112,6 +113,24 @@ def resolve_config(config):
     return str(path)
 
 
+@functools.lru_cache(maxsize=1)
+def _full_config_cache_buckets():
+    """``{cache_bucket: {identifiers}}`` for the `full` config, built once.
+
+    Cached because the caller is an advisory check that runs on every
+    `Calculator` construction, and the answer is a property of the shipped
+    config rather than of the run.
+    """
+    from collections import defaultdict
+
+    available = defaultdict(set)
+    for key, spi in load_spis_from_yaml(resolve_config("full"), quiet=True).items():
+        bucket = _parallel.cache_bucket(spi)
+        if bucket is not None:
+            available[bucket].add(key)
+    return available
+
+
 def warn_partial_cache_buckets(spis):
     """Warn when a config keeps only part of a shared-cache group.
 
@@ -143,17 +162,16 @@ def warn_partial_cache_buckets(spis):
         b = bucket(spi)
         if b is not None:
             kept[b].add(key)
-    if not kept:
+    if not any(bkey[0] in EXPENSIVE for bkey in kept):
+        # Nothing this advisory could say anything about. Checked before the
+        # `full` config is touched: building it instantiates 325 SPIs and pulls
+        # in cdt and torch, which is a second or two of import for a check that
+        # only ever comments on `ccm` and `barycenter`.
         return
     try:
-        full = load_spis_from_yaml(resolve_config("full"), quiet=True)
+        available = _full_config_cache_buckets()
     except Exception:  # never let an advisory check break a run
         return
-    available = defaultdict(set)
-    for key, spi in full.items():
-        b = bucket(spi)
-        if b is not None:
-            available[b].add(key)
     for bkey, have in sorted(kept.items(), key=lambda kv: str(kv[0])):
         ns = bkey[0]
         if ns not in EXPENSIVE:
