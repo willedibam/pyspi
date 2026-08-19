@@ -164,10 +164,16 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
         z = _ensure_time_series_3d(z)
         m = sc.Multitaper(z, sampling_frequency=self._fs)
         conn = sc.Connectivity.from_multitaper(m)
-        try:
-            res = getattr(conn, self.measure)()
-        except TypeError:
+        # `_recompute` lets a subclass override a backend measure outright, not
+        # just when the backend raises. DirectedCoherence needs this: the
+        # backend's method returns fine, it is simply unbounded.
+        if getattr(self, "_recompute", False):
             res = self._get_statistic(conn)
+        else:
+            try:
+                res = getattr(conn, self.measure)()
+            except TypeError:
+                res = self._get_statistic(conn)
 
         freq = conn.frequencies
         cache[self.key] = res
@@ -236,10 +242,16 @@ class NonparametricSpectralBivariate(NonparametricSpectral):
             conn = sc.Connectivity.from_multitaper(m)
             conns[conn_key] = conn
 
-        try:
-            res = getattr(conn, self.measure)()
-        except TypeError:
+        # `_recompute` lets a subclass override a backend measure outright, not
+        # just when the backend raises. DirectedCoherence needs this: the
+        # backend's method returns fine, it is simply unbounded.
+        if getattr(self, "_recompute", False):
             res = self._get_statistic(conn)
+        else:
+            try:
+                res = getattr(conn, self.measure)()
+            except TypeError:
+                res = self._get_statistic(conn)
 
         freq = conn.frequencies
         cache[measure_key] = res
@@ -365,6 +377,21 @@ class PairwisePhaseConsistency(NonparametricSpectralMultivariate, Undirected):
 
 
 class DirectedCoherence(NonparametricSpectralBivariate, Directed):
+    """Directed coherence (Baccala et al. 1998).
+
+    ``DC_ij(f) = sqrt(sigma_jj) |H_ij(f)| / sqrt(sum_k sigma_kk |H_ik(f)|^2)``,
+    bounded in [0, 1].
+
+    The backend's ``directed_coherence()`` puts the *squared* magnitude in the
+    numerator while the denominator stays on the magnitude scale, so the ratio
+    is dimensionally |H|^2 / |H| and unbounded: the shipped baselines reached
+    3.27 (VAR), 1.84 (CML) and 1139.47 (Kuramoto). This recomputes it from the
+    same transfer function with |H| in the numerator. Checked two ways: the
+    result is bounded in [0, 1], and with an identity noise covariance it
+    reproduces sqrt(directed_transfer_function()) to 4e-16, which is the
+    identity DC satisfies when all noise variances are equal.
+    """
+
     name = "Directed coherence"
     labels = ["unsigned", "spectral", "directed"]
 
@@ -372,6 +399,15 @@ class DirectedCoherence(NonparametricSpectralBivariate, Directed):
         self.identifier = "dcoh"
         super().__init__(**kwargs)
         self._measure = "directed_coherence"
+        self._recompute = True
+
+    def _get_statistic(self, C):
+        from spectral_connectivity.connectivity import (
+            _get_noise_variance, _total_inflow,
+        )
+        H = C._transfer_function
+        nv = _get_noise_variance(C._noise_covariance)
+        return np.sqrt(nv) * np.abs(H) / _total_inflow(H, nv)
 
 
 class PartialDirectedCoherence(NonparametricSpectralBivariate, Directed):

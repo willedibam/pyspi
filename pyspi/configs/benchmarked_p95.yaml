@@ -955,15 +955,17 @@
       statistic: max
 
   DebiasedSquaredPhaseLagIndex:
-    # NOTE: the `max` band statistic saturates often, and by a margin that
-    # varies strongly with the data. Debiased squared PLI reaches exactly 1
-    # whenever the sign of the imaginary coherency is consistent across tapers
-    # at any one frequency, and the band maximum then pins there. On the frozen
-    # fixtures the share of pairs sitting at exactly 1 runs from 29% to 100%
-    # (var1 M3/T100: 100% at every band; kuramoto M7/T100: 29-86%), and the
-    # number of distinct values from 1 to 16. The `mean` variants are graded
-    # normally. Kept enabled -- this is behaviour of the statistic as defined,
-    # not a defect -- but read `max` values near 1 with it in mind.
+    # NOTE: the `max` band statistic saturates, and more data makes it worse,
+    # not better. The band maximum reaches exactly 1 as soon as the sign of the
+    # imaginary coherency is consistent across tapers at any ONE frequency, and
+    # the number of frequency bins grows linearly with T (51 bins at T=100,
+    # 1001 at T=2000). Since max over a superset of bins is >= max over a
+    # subset, saturation is monotone in T: measured 100% of pairs at exactly 1
+    # at every T from 100 to 2000. On the frozen fixtures the share runs 29-100%
+    # depending on the data, with 1 to 16 distinct values. The `mean` variants
+    # are graded normally. Kept enabled -- this is the statistic behaving as
+    # defined -- but a `max` value near 1 carries little information, and a
+    # longer series will not fix that.
     labels:
       - undirected
       - linear
@@ -1073,34 +1075,35 @@
       fmax: 0.5
       statistic: max
 
-#  DirectedCoherence:
-    # DISABLED: unbounded, contrary to the documented [0, 1] range for directed
-    # coherence. Baseline maxima before disabling: VAR 3.27, CML 1.84, Kuramoto
-    # 1139.47, with 2/6, 2/6 and 6/6 variants exceeding 1 respectively. The
-    # backend normalises |H|^2 as though it were |H|, which removes the bound.
-    # Re-enable only after checking against an independent oracle.
-#    labels:
-#      - directed
-#      - linear
-#      - unsigned
-#      - bivariate
-#      - frequency-dependent
-#      - M06
-#    dependencies:
-#    configs:
-#    - fs: 1
-#    - fmin: 0
-#      fmax: 0.25
-#    - fmin: 0.25
-#      fmax: 0.5
-#    - fs: 1
-#      statistic: max
-#    - fmin: 0
-#      fmax: 0.25
-#      statistic: max
-#    - fmin: 0.25
-#      fmax: 0.5
-#      statistic: max
+  DirectedCoherence:
+    # Directed coherence is recomputed in pyspi (see DirectedCoherence in
+    # statistics/spectral.py): the backend puts |H|^2 in the numerator while
+    # the denominator is on the magnitude scale, which made it unbounded
+    # (baselines reached 3.27 / 1.84 / 1139.47). The corrected form is bounded
+    # in [0,1] and reproduces sqrt(directed_transfer_function()) to 4e-16 under
+    # an identity noise covariance, which is the identity DC must satisfy.
+    labels:
+      - directed
+      - linear
+      - unsigned
+      - bivariate
+      - frequency-dependent
+      - M06
+    dependencies:
+    configs:
+    - fs: 1
+    - fmin: 0
+      fmax: 0.25
+    - fmin: 0.25
+      fmax: 0.5
+    - fs: 1
+      statistic: max
+    - fmin: 0
+      fmax: 0.25
+      statistic: max
+    - fmin: 0.25
+      fmax: 0.5
+      statistic: max
 
   PartialDirectedCoherence:
     labels:

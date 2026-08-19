@@ -117,18 +117,18 @@ Walkthrough tutorials in the full documentation:
 
 ## Choosing an SPI set
 
-Computing all 319 SPIs is expensive, and cost grows steeply in both the number
+Computing all 325 SPIs is expensive, and cost grows steeply in both the number
 of processes *M* and the series length *T*. `config=` takes either a bundled
 name or a path to your own YAML:
 
 | `config=` | SPIs | Use when |
 |:----------|-----:|:---------|
-| `"full"` (default) | 319 | You want everything and can afford it. |
-| `"fast"` | 210 | General use; drops the slowest SPIs. |
-| `"benchmarked_p99"` | 315 | Near-complete, with only the worst cost outliers removed. |
-| `"benchmarked_p95"` | 302 | Good coverage/cost trade-off. |
-| `"benchmarked_p90"` | 287 | Recommended default for large batches. |
-| `"benchmarked_p80"` | 258 | Cost-constrained sweeps. |
+| `"full"` (default) | 325 | You want everything and can afford it. |
+| `"fast"` | 216 | General use; drops the slowest SPIs. |
+| `"benchmarked_p99"` | 321 | Near-complete, with only the worst cost outliers removed. |
+| `"benchmarked_p95"` | 308 | Good coverage/cost trade-off. |
+| `"benchmarked_p90"` | 293 | Recommended default for large batches. |
+| `"benchmarked_p80"` | 264 | Cost-constrained sweeps. |
 | `"sonnet"` | 14 | One representative SPI per module (M01-M14). |
 | `"fabfour"` | 4 | Smoke tests and quick sanity checks. |
 

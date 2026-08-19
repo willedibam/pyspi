@@ -123,13 +123,15 @@ Three group-delay SPIs that shipped as silent all-NaN columns are now recorded f
 
 ### SPI set changes
 
-`full` goes from **328 SPIs to 319**. Every change below is deliberate; nothing else moved on the frozen test fixtures.
+`full` goes from **328 SPIs to 325**. Every change below is deliberate; nothing else moved on the frozen test fixtures.
 
 Disabled variants are **commented out in the shipped configs rather than deleted**, each with the evidence for switching it off and the condition that would justify switching it back on.
 
-**Flagged, not removed.** `dspli_multitaper_max_*` and `dswpli_multitaper_max_*` saturate often, by a margin that varies strongly with the data. The band maximum of a debiased *squared* PLI reaches exactly 1 whenever the sign of the imaginary coherency is consistent across tapers at any one frequency. On the frozen fixtures the share of pairs sitting at exactly 1 runs from **29% to 100%** (var1 M3/T100: 100% at every band; kuramoto M7/T100: 29–86%), with 1 to 16 distinct values. The `mean` variants are graded normally. These remain **enabled** — it is the statistic behaving as defined, not a defect — with the note beside the entries in each config.
+**Flagged, not removed.** `dspli_multitaper_max_*` and `dswpli_multitaper_max_*` saturate, and **more data makes it worse**. The band maximum reaches exactly 1 as soon as the sign of the imaginary coherency is consistent across tapers at any *one* frequency, and the bin count grows linearly with T (51 at T=100, 1001 at T=2000); since a maximum over a superset is at least the maximum over a subset, saturation is monotone in T — measured at 100% of pairs for every T from 100 to 2000. On the frozen fixtures the share runs 29–100% depending on the data, with 1 to 16 distinct values. The `mean` variants are graded normally. These stay **enabled** — it is the statistic behaving as defined — but a `max` value near 1 carries little information and a longer series will not change that.
 
-**Removed (10)**
+**Directed coherence corrected.** `spectral_connectivity.directed_coherence` puts `|H|²` in the numerator while its denominator stays on the magnitude scale, making the ratio unbounded: baselines reached 3.27 (VAR), 1.84 (CML) and **1139.47** (Kuramoto). pyspi now recomputes it from the same transfer function with `|H|`, per Baccalá et al. (1998). Verified two ways — bounded in [0,1] on all three fixtures, and under an identity noise covariance it reproduces `sqrt(directed_transfer_function())` to 4e-16, the identity DC must satisfy when noise variances are equal.
+
+**Removed (4)**
 
 | SPI | Why |
 |:----|:----|

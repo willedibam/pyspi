@@ -164,3 +164,30 @@ def test_directed_transfer_function_against_analytic_var():
     )
     r = np.corrcoef(got[off], expected[off])[0, 1]
     assert r > 0.85, f"DTF does not track the analytic transfer function (r={r:.3f})"
+
+
+def test_directed_coherence_is_bounded():
+    """DC is defined on [0,1]; the backend's version is not.
+
+    ``spectral_connectivity.directed_coherence`` puts |H|^2 in the numerator
+    while ``_total_inflow`` is on the magnitude scale, so the ratio is
+    dimensionally |H|^2/|H| and unbounded -- the shipped baselines reached 3.27
+    (VAR), 1.84 (CML) and 1139.47 (Kuramoto). pyspi recomputes it with |H|.
+    """
+    import os
+    from pyspi.data import Data
+    from pyspi.calculator import load_spis_from_yaml, resolve_config
+
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    dcoh = [k for k in spis if k.startswith("dcoh_")]
+    assert dcoh, "no directed-coherence SPIs in the full config"
+
+    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "data", "fixtures", "kuramoto_M7_T100.npy")
+    data = Data(data=fixture, dim_order="sp")
+    for k in dcoh:
+        A = np.asarray(spis[k].multivariate(data), dtype=float)
+        finite = A[np.isfinite(A)]
+        assert finite.min() >= 0.0 and finite.max() <= 1.0 + 1e-9, (
+            f"{k} outside [0,1]: [{finite.min():.4f}, {finite.max():.4f}]"
+        )
