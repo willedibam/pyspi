@@ -412,3 +412,66 @@ def test_group_delay_of_independent_processes_is_undefined():
     table = GroupDelay(statistic="delay", fmin=0, fmax=0.5).multivariate(data)
     off = ~np.eye(3, dtype=bool)
     assert not np.isfinite(table[off]).any()
+
+
+# --------------------------------------------------------------------------
+# Spectral Granger causality
+# --------------------------------------------------------------------------
+
+def test_spectral_gc_nan_mask_is_in_the_same_orientation_as_the_values():
+    """The mask must be transformed with the matrix it masks.
+
+    `multivariate` puts the backend's matrix into pyspi's (source, target)
+    orientation by transposing it, then applied a NaN mask computed in the
+    backend's orientation. With a directionally asymmetric NaN pattern the cell
+    that was genuinely unestimable is already NaN, and the *mirror* cell -- a
+    perfectly good estimate -- is the one that gets blanked.
+    """
+    from pyspi.statistics.spectral import SpectralGrangerCausality
+
+    M, n_freq = 3, 20
+    F = np.ones((1, n_freq, M, M))
+    F[:, :, 0, 2] = np.nan            # unestimable in one direction only
+    freq = np.linspace(0.0, 0.5, n_freq)
+
+    spi = SpectralGrangerCausality(fmin=0, fmax=0.5, nan_threshold=0.5)
+    spi._get_cache = lambda data: (F, freq)
+
+    with pytest.warns(UserWarning, match="NaN values"):
+        result = spi.multivariate(Data(data=np.zeros((M, 8)), dim_order="ps",
+                                       zscore=False))
+
+    # Backend [0, 2] is pyspi [2, 0].
+    assert np.isnan(result[2, 0])
+    assert np.isfinite(result[0, 2]), "the mirror cell was blanked instead"
+
+
+def test_spectral_gc_parametric_honours_the_sampling_frequency():
+    """`fs` is in the identifier and the cache key, so it must reach the model.
+
+    The parametric branch built `TimeSeries(..., sampling_interval=1)`
+    unconditionally, so `GA.frequencies` came back on a unit-rate axis whatever
+    `fs` said and the [fmin, fmax] band was applied to the wrong frequencies.
+    Two SPIs differing only in `fs` advertised different sampling rates and
+    returned the same numbers.
+    """
+    from pyspi.statistics.spectral import SpectralGrangerCausality
+
+    rng = np.random.default_rng(SEED)
+    T_ = 400
+    X = np.zeros((2, T_))
+    A = np.array([[0.5, 0.0], [0.7, 0.4]])
+    for t in range(1, T_):
+        X[:, t] = A @ X[:, t - 1] + rng.standard_normal(2)
+
+    # The same physical band, expressed at two sampling rates: [0, 0.25] cycles
+    # per sample is [0, 0.5] Hz at fs=2 and [0, 0.25] Hz at fs=1.
+    base = SpectralGrangerCausality(method="parametric", order=2,
+                                    fmin=1e-5, fmax=0.25)
+    scaled = SpectralGrangerCausality(method="parametric", order=2, fs=2,
+                                      fmin=1e-5, fmax=0.5)
+    a = base.multivariate(Data(data=X, dim_order="ps"))
+    b = scaled.multivariate(Data(data=X, dim_order="ps"))
+    assert np.allclose(a, b, atol=1e-8, equal_nan=True), (
+        f"fs did not reach the model:\n{a}\n{b}"
+    )

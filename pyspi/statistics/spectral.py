@@ -780,7 +780,14 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
                 F, freq = super()._get_cache(data)
             else:
                 z = data.to_numpy(squeeze=True)
-                time_series = ts.TimeSeries(z, sampling_interval=1)
+                # 1/fs, not 1. `fs` is in this SPI's identifier and in its
+                # cache key, but the parametric branch hard-coded a unit
+                # sampling interval, so `GA.frequencies` came back in units of
+                # 1/1 whatever `fs` said and the [fmin, fmax] band was applied
+                # on the wrong axis. Two SPIs differing only in `fs` therefore
+                # advertised different sampling rates and computed the same
+                # numbers. No effect at the shipped fs=1.
+                time_series = ts.TimeSeries(z, sampling_interval=1.0 / self._fs)
                 GA = nta.GrangerAnalyzer(
                     time_series, order=self._order, max_order=self._max_order
                 )
@@ -812,7 +819,14 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
 
             result = _to_source_target(self, self._statfn(cache[0, freq_id, :, :], axis=0))
 
-            nan_pct = np.isnan(cache[0, freq_id, :, :]).mean(axis=0)
+            # Transformed the same way as the values it masks. The result is
+            # put into pyspi's (source, target) orientation while the mask was
+            # left in the backend's, so a directionally asymmetric NaN pattern
+            # blanked the *mirror* of the affected pair: the cell that was
+            # actually unestimable was already NaN, and a perfectly good one
+            # next to it was destroyed.
+            nan_pct = _to_source_target(
+                self, np.isnan(cache[0, freq_id, :, :]).mean(axis=0))
             np.fill_diagonal(nan_pct, 0.0)
 
             isna = nan_pct > self.nan_threshold
