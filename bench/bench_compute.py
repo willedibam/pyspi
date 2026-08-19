@@ -164,6 +164,44 @@ def build_environment() -> dict:
     }
 
 
+def cell_seed(base_seed: int, M: int, T: int, n_jobs: int) -> int:
+    """Effective RNG seed for one cell -- a pure function of the cell.
+
+    Was ``args.seed + i`` with ``i`` the position in the *selected* cell list.
+    Under ``--array-index k`` that list has one element, so every array task
+    used ``seed + 1`` while a sequential run gave cell k ``seed + k``: array and
+    sequential execution generated different data for the same cell and their
+    timings were not comparable. Hashing the cell instead also survives adding a
+    point to the grid, which a positional seed does not.
+    """
+    digest = hashlib.blake2b(f"{base_seed}|{M}|{T}|{n_jobs}".encode(),
+                             digest_size=8).digest()
+    return int.from_bytes(digest, "little")
+
+
+def cell_identity(base_seed, M, T, n_jobs, config_path, mp_context, repeats,
+                  environment) -> str:
+    """What a stored cell must match for ``--resume`` to reuse it.
+
+    Resume previously checked only that the file existed, had at least
+    ``repeats`` repeats and carried no ``"error"`` -- so a cell measured under a
+    different config, seed, multiprocessing context or dependency set was
+    silently reused, and the resulting grid mixed measurements that were never
+    comparable.
+    """
+    payload = json.dumps({
+        "cell": [M, T, n_jobs],
+        "config": Path(config_path).read_text(),
+        "seed": cell_seed(base_seed, M, T, n_jobs),
+        "mp_context": mp_context,
+        "repeats": repeats,
+        "python": environment["python_version"],
+        "platform": environment["platform"],
+        "deps": environment["dep_fingerprint"],
+    }, sort_keys=True)
+    return "sha256:" + hashlib.sha256(payload.encode()).hexdigest()[:16]
+
+
 def summarise(values: list[float]) -> dict:
     arr = np.asarray(values, dtype=float)
     return {
@@ -275,27 +313,40 @@ def main(argv=None) -> int:
     t_total = time.perf_counter()
     for i, (M, T, n_jobs) in enumerate(cells, 1):
         path = output_dir / cell_filename(label, M, T, n_jobs)
+        identity = cell_identity(args.seed, M, T, n_jobs, config,
+                                 args.mp_context, args.repeats, env)
         if args.resume and path.exists():
             try:
                 existing = json.loads(path.read_text())
-                if (existing.get("repeats", 0) >= args.repeats
-                        and "error" not in existing):
+                reusable = (existing.get("repeats", 0) >= args.repeats
+                            and "error" not in existing
+                            and existing.get("cell_identity") == identity)
+                if reusable:
                     print(f"[bench] [{i}/{len(cells)}] M={M} T={T} n_jobs={n_jobs}"
                           f" — skipped (resume: {path.name})", file=sys.stderr)
                     continue
+                if existing.get("cell_identity") != identity:
+                    print(f"[bench] [{i}/{len(cells)}] {path.name} was measured "
+                          f"under different conditions; recomputing.",
+                          file=sys.stderr)
             except Exception:
                 pass
 
         print(f"[bench] [{i}/{len(cells)}] M={M} T={T} n_jobs={n_jobs} x{args.repeats}"
               f" -> {path.name}", file=sys.stderr, flush=True)
         t0 = time.perf_counter()
+        seed = cell_seed(args.seed, M, T, n_jobs)
         entry = run_cell(M, T, n_jobs, config, args.mp_context, args.repeats,
-                         args.seed + i)
+                         seed)
         wall = time.perf_counter() - t0
         # Self-contained per-cell file: include run metadata + environment.
         entry["config"] = cfg_label
         entry["mp_context"] = args.mp_context
-        entry["seed"] = args.seed
+        # Both: the base is what was asked for, the effective seed is what the
+        # data was actually generated from and is the one a rerun must match.
+        entry["seed_base"] = args.seed
+        entry["seed"] = seed
+        entry["cell_identity"] = identity
         entry["environment"] = env
 
         if "error" in entry:
