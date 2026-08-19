@@ -57,7 +57,11 @@ class PairwiseDistance(Undirected, Unsigned):
         self._normalise = normalise
         self.identifier += f"_{metric}"
         if normalise:
-            self.identifier += "_rmse"
+            # `d / sqrt(T)` is the root *mean* square difference only when `d`
+            # is the Euclidean norm of the difference. For cityblock, cosine,
+            # canberra or braycurtis it is just that metric divided by a
+            # constant, and calling it RMSE names a quantity it is not.
+            self.identifier += "_rmse" if metric == "euclidean" else "_norm-rootT"
 
     @parse_multivariate
     def multivariate(self, data):
@@ -338,6 +342,12 @@ class DynamicTimeWarping(TimeWarping):
                     )
                     A[i, j] = d
                     A[j, i] = d
+            # The bivariate path and the dtaidistance path both divide by
+            # sqrt(T) under `normalise`; this branch did not, so
+            # `bivariate(data, i, j)` and `multivariate(data)[i, j]` differed by
+            # a factor of sqrt(T) for the itakura constraint alone.
+            if self._normalise:
+                A = A / np.sqrt(Z.shape[1])
             return A
 
         try:

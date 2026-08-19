@@ -75,6 +75,15 @@ class Cointegration(Directed, Unsigned):
         # docstring: johansen is symmetric, aeg is not.
         if method == "aeg":
             self.labels = [l for l in self.labels if l != "undirected"] + ["directed"]
+            if statistic == "tstat":
+                # A *signed* Engle-Granger t-statistic: more negative is
+                # stronger evidence of cointegration, and a positive value
+                # means none at all. Reporting it as unsigned made
+                # `Calculator._rmmin` shift the whole column by its minimum and
+                # `set_group` correlate it through `abs()`, both of which treat
+                # the sign as noise when it is the entire finding. The
+                # identifier already says `tstat`; the class now agrees.
+                self.issigned = lambda: True
         if method == "johansen":
             self.identifier += (
                 f"_{method}_{statistic}_order-{det_order}_ardiff-{k_ar_diff}"
@@ -138,7 +147,6 @@ class Cointegration(Directed, Unsigned):
 
         return ci
 
-    # Return the negative t-statistic (proxy for how co-integrated they are)
     @parse_bivariate
     def bivariate(self, data, i=None, j=None, verbose=False):
         ci = self._from_cache(data, i, j)

@@ -103,7 +103,7 @@ def _reference_symbolic_te(src, targ, k):
     failure mode of the implementation it checks.
     """
     from collections import Counter
-    from math import log2
+    from math import log
 
     from pyspi.statistics.infotheory import _series_to_ordinal_symbols
 
@@ -115,7 +115,8 @@ def _reference_symbolic_te(src, targ, k):
     def H(*cols):
         counts = Counter(zip(*(list(map(int, c)) for c in cols)))
         total = sum(counts.values())
-        return -sum((c / total) * log2(c / total) for c in counts.values())
+        # nats, matching the module-wide convention (see InfoTheoryBase).
+        return -sum((c / total) * log(c / total) for c in counts.values())
 
     return H(tn, tp) - H(tp) - H(tn, tp, sc) + H(tp, sc)
 
@@ -702,3 +703,91 @@ def test_cross_correlation_significance_band_scales_with_the_sample_size():
     # band (1.96/sqrt(T//4) = 2x wider) let through even fewer, masking that the
     # nominal 5% level was never being applied.
     assert (np.abs(lags) > 1.96 / np.sqrt(T)).mean() < 0.15
+
+
+# ---------------------------------------------------------------------------
+# Parameter/identifier/cache-key coverage
+# ---------------------------------------------------------------------------
+
+def test_dyn_corr_excl_value_reaches_the_identifier_and_the_cache_key():
+    """`_DCE` alone named three different Theiler windows.
+
+    dyn_corr_excl=5, =10 and ="AUTO" all produced `mi_kraskov_NN-4_DCE` and the
+    same `_getkey()`, so a config setting two of them collided silently.
+    """
+    import pyspi.statistics.infotheory as it
+
+    spis = [it.MutualInfo(estimator="kraskov", dyn_corr_excl=v)
+            for v in (5, 10, "AUTO")]
+    assert len({s.identifier for s in spis}) == 3, [s.identifier for s in spis]
+    assert len({s._getkey() for s in spis}) == 3
+
+
+def test_crossmap_entropy_embedding_dimension():
+    """`history_length=k` gives k-1 source lags and a k-column joint space.
+
+    Pinned rather than corrected: both readings of the parameter are internally
+    consistent, cross-map entropy has no canonical published definition to
+    arbitrate between them, and re-picking one would change every `xme_*` value
+    on a guess about intent. See the class docstring.
+    """
+    import pyspi.statistics.infotheory as it
+    from pyspi.data import Data
+
+    k = 6
+    rng = np.random.default_rng(0)
+    data = Data(data=rng.standard_normal((2, 200)), dim_order="ps")
+
+    seen = {}
+    spi = it.CrossmapEntropy(history_length=k, estimator="gaussian")
+    real_initialise = spi._entropy_calc.initialise
+
+    def record(d):
+        seen.setdefault("dims", []).append(d)
+        return real_initialise(d)
+
+    spi._entropy_calc.initialise = record
+    spi.bivariate(data, i=0, j=1)
+    assert seen["dims"] == [k, k - 1], seen["dims"]
+
+
+def test_cointegration_aeg_tstat_is_signed_and_johansen_is_not():
+    """The Engle-Granger t-statistic's sign is the finding, not noise.
+
+    Reported as unsigned it went through `Calculator._rmmin`, which shifts the
+    column by its minimum, and through `set_group`'s `abs()`. Johansen's trace
+    and maximum-eigenvalue statistics are non-negative and stay unsigned.
+    """
+    from pyspi.statistics.misc import Cointegration
+
+    assert Cointegration(method="aeg", statistic="tstat").issigned()
+    assert not Cointegration(method="johansen", statistic="trace_stat").issigned()
+    assert not Cointegration(method="johansen", statistic="max_eig_stat").issigned()
+
+
+def test_itakura_dtw_normalisation_agrees_between_bivariate_and_multivariate():
+    """The itakura branch of `multivariate` skipped the sqrt(T) division.
+
+    The bivariate path and the dtaidistance path both apply it under
+    `normalise=True`, so the two disagreed by a factor of sqrt(T) for that one
+    constraint.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.distance import DynamicTimeWarping
+
+    rng = np.random.default_rng(0)
+    data = Data(data=rng.standard_normal((3, 120)), dim_order="ps")
+    spi = DynamicTimeWarping(global_constraint="itakura", normalise=True)
+    assert spi.bivariate(data, i=0, j=1) == pytest.approx(
+        spi.multivariate(data)[0, 1], rel=1e-12)
+
+
+def test_rmse_naming_is_restricted_to_the_metric_it_describes():
+    """`d/sqrt(T)` is a root *mean* square only for the Euclidean norm."""
+    from pyspi.statistics.distance import PairwiseDistance
+
+    assert PairwiseDistance(metric="euclidean",
+                            normalise=True).identifier.endswith("_rmse")
+    for metric in ("cityblock", "cosine", "canberra", "braycurtis"):
+        identifier = PairwiseDistance(metric=metric, normalise=True).identifier
+        assert not identifier.endswith("_rmse"), identifier

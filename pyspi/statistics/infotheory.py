@@ -214,7 +214,7 @@ class KernelEntropyCalculator:
     """Drop-in for JIDT's EntropyCalculatorMultiVariateKernel.
 
     Box kernel (Heaviside) with L-infinity norm, matching JIDT exactly:
-    H = mean(log2(N) - log2(count_i))  [bits]
+    H = mean(log(N) - log(count_i))  [nats]
     where count_i = #{j : |x_j - x_i|_inf <= kernel_width} (includes self).
 
     When NORMALISE=true (JIDT default), data is normalised by std before
@@ -248,30 +248,30 @@ class KernelEntropyCalculator:
         w = self._kernel_width
         # NORMALISE: JIDT scales the bandwidth by std (kernelWidthsInUse = w*std)
         # rather than standardising data. Equivalent operation here is to
-        # standardise X *and* add log2(prod(std)) to the entropy — otherwise
-        # we'd be reporting H(X/std) = H(X) - log2(std), missing the scale
-        # term and giving a constant downward bias of d*log2(std) nats/bits.
+        # standardise X *and* add log(prod(std)) to the entropy — otherwise
+        # we'd be reporting H(X/std) = H(X) - log(std), missing the scale
+        # term and giving a constant downward bias of d*log(std) nats.
         log_std_total = 0.0
         if self._normalise:
             stds = np.std(X, axis=0, ddof=1)
             stds = np.where(stds > 0, stds, 1.0)
             X = X / stds[None, :]
-            log_std_total = float(np.sum(np.log2(stds)))
+            log_std_total = float(np.sum(np.log(stds)))
 
         tree = cKDTree(X)
         # JIDT half-width = kernel_width (not kernel_width/2)
         counts = tree.query_ball_point(X, r=w, p=np.inf,
                                         return_length=True)
         counts = np.asarray(counts, dtype=np.float64)
-        # H = mean(log2(N) - log2(count)) + d*log2(2*w) + sum_d log2(std_d)  [bits]
-        return float(np.mean(np.log2(N) - np.log2(counts))
-                     + d * np.log2(2.0 * w) + log_std_total)
+        # H = mean(log(N) - log(count)) + d*log(2*w) + sum_d log(std_d)  [nats]
+        return float(np.mean(np.log(N) - np.log(counts))
+                     + d * np.log(2.0 * w) + log_std_total)
 
 
 class KernelMICalculator:
     """Drop-in for JIDT's MutualInfoCalculatorMultiVariateKernel.
 
-    MI = mean(log2(n_xy * N / (n_x * n_y)))  [bits]
+    MI = mean(log(n_xy * N / (n_x * n_y)))  [nats]
     where n_x, n_y, n_xy are counts within L∞ ball of radius kernel_width.
     Matches JIDT exactly.
     """
@@ -329,15 +329,15 @@ class KernelMICalculator:
         n_xy = np.asarray(tree_xy.query_ball_point(XY, r=w, p=np.inf,
                                                      return_length=True), dtype=np.float64)
 
-        # MI = mean(log2(n_xy * N / (n_x * n_y)))  [bits]
-        mi = np.mean(np.log2(n_xy) + np.log2(N) - np.log2(n_x) - np.log2(n_y))
+        # MI = mean(log(n_xy * N / (n_x * n_y)))  [nats]
+        mi = np.mean(np.log(n_xy) + np.log(N) - np.log(n_x) - np.log(n_y))
         return float(mi)
 
 
 class KernelTECalculator:
     """Drop-in for JIDT's TransferEntropyCalculatorKernel.
 
-    TE(X→Y) = mean(log2(n_yn_yp_x * n_yp / (n_yp_x * n_yn_yp)))  [bits]
+    TE(X→Y) = mean(log(n_yn_yp_x * n_yp / (n_yp_x * n_yn_yp)))  [nats]
     Uses box kernel with L∞ norm, half-width = kernel_width.
     Matches JIDT exactly.
     """
@@ -429,15 +429,15 @@ class KernelTECalculator:
             n_yp_x = _counts_with_theiler(tree_yp_x, yp_x)
             n_yn_yp_x = _counts_with_theiler(tree_yn_yp_x, yn_yp_x)
 
-        # Drop samples where any bin is empty (log2(0) = -inf; JIDT skips these).
+        # Drop samples where any bin is empty (log(0) = -inf; JIDT skips these).
         valid = (n_yp > 0) & (n_yn_yp > 0) & (n_yp_x > 0) & (n_yn_yp_x > 0)
         if not np.any(valid):
             return float('nan')
         n_yp, n_yn_yp = n_yp[valid], n_yn_yp[valid]
         n_yp_x, n_yn_yp_x = n_yp_x[valid], n_yn_yp_x[valid]
 
-        # TE = mean(log2(n_yn_yp_x * n_yp / (n_yp_x * n_yn_yp)))  [bits]
-        te = np.mean(np.log2(n_yn_yp_x) + np.log2(n_yp) - np.log2(n_yp_x) - np.log2(n_yn_yp))
+        # TE = mean(log(n_yn_yp_x * n_yp / (n_yp_x * n_yn_yp)))  [nats]
+        te = np.mean(np.log(n_yn_yp_x) + np.log(n_yp) - np.log(n_yp_x) - np.log(n_yn_yp))
         return float(te)
 
 
@@ -567,7 +567,7 @@ class SymbolicTECalculator:
                 stacked = np.column_stack(arrs)
                 _, counts = np.unique(stacked, axis=0, return_counts=True)
             probs = counts / counts.sum()
-            return -np.sum(probs * np.log2(probs))
+            return -np.sum(probs * np.log(probs))
 
         # TE = H(yn, yp) - H(yp) - H(yn, yp, x) + H(yp, x)
         H_yn_yp = _discrete_entropy(targ_next, targ_past)
@@ -1044,6 +1044,18 @@ _AUTO_EMBED_METHODS = frozenset({"MAX_CORR_AIS"})
 
 
 class InfoTheoryBase(Unsigned):
+    """Base for the information-theoretic SPIs.
+
+    **Every measure in this module is reported in nats.** The kernel and
+    symbolic calculators used to report bits, inherited from JIDT, which uses
+    base 2 for its box-kernel and discrete estimators and base e for its
+    Gaussian and k-nearest-neighbour ones. Carrying that split into a single
+    results table means `mi_kernel_W-0-5` and `mi_gaussian` are on axes
+    differing by a factor of ln 2 with nothing in the identifier to say so, and
+    the natural things to do with the table -- correlate the columns, rank the
+    SPIs, threshold them -- are all wrong across that boundary. Divide by
+    ln 2 to recover the JIDT-comparable value.
+    """
 
     _AUTO_EMBED_METHOD_PROP_NAME = "AUTO_EMBED_METHOD"
     _K_HISTORY_PROP_NAME = "k_HISTORY"
@@ -1147,7 +1159,11 @@ class InfoTheoryBase(Unsigned):
             self._dyn_corr_excl = None
 
         if self._dyn_corr_excl:
-            self.identifier = self.identifier + "_DCE"
+            # The *value*, not just the flag. `_DCE` alone gave
+            # dyn_corr_excl=5, =10 and ="AUTO" one identifier between them --
+            # three different Theiler windows, three different numbers, one
+            # name -- so a config setting two of them collided silently.
+            self.identifier = self.identifier + f"_DCE-{self._dyn_corr_excl}"
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -1172,7 +1188,12 @@ class InfoTheoryBase(Unsigned):
         if self._estimator == "kernel":
             return (self._estimator, self._kernel_width)
         elif self._estimator == "kraskov":
-            return (self._estimator, self._prop_k)
+            # dyn_corr_excl is in the key even though the entropy caches this
+            # keys are not consumed by the KSG paths today: the rule is that
+            # everything reaching the identifier reaches the cache key, and an
+            # exception maintained by argument is an exception that stops being
+            # true.
+            return (self._estimator, self._prop_k, self._dyn_corr_excl)
         else:
             return (self._estimator,)
 
@@ -1668,6 +1689,21 @@ class TransferEntropy(InfoTheoryBase, Directed):
 
 
 class CrossmapEntropy(InfoTheoryBase, Directed):
+    """H(Y_t | X_{t-1}, ..., X_{t-k+1}) -- a *k*-dimensional joint embedding.
+
+    ``history_length=k`` gives ``k - 1`` source lags, not ``k``: the loop runs
+    ``range(2, k)``, so the joint space [source past, target future] has
+    exactly ``k`` columns. Both readings of the parameter are internally
+    consistent -- "k source lags" would need ``range(2, k + 1)`` -- and the
+    implementation has always been the second one.
+
+    It is documented here rather than changed. Cross-map entropy has no
+    canonical published definition to arbitrate between the two conventions,
+    and silently re-picking one would change every ``xme_*`` value on a guess
+    about intent. The parameter name is the misleading part; the arithmetic is
+    self-consistent, and `test_crossmap_entropy_embedding_dimension` pins it so
+    a future change has to be deliberate.
+    """
 
     name = "Cross-map entropy"
     identifier = "xme"
