@@ -62,7 +62,6 @@ A second pass, driven by a suite of red tests, closed a set of defects that prod
 
 New: `Calculator.errors`, `Calculator.run_spec`, `Calculator.run_digest`, `Calculator.to_frame()` (long-form results, one row per `(spi, source, target)`) and `Calculator.summary()`; an `antisymmetric` structural label for measures satisfying `A[i,j] == -A[j,i]`; and a useful `repr` — a computed `Calculator` previously displayed as `<pyspi.calculator.Calculator at 0x...>`.
 
-`ConditionalEntropy` is labelled `undirected`. `H(X|Y)` is directed in general, but pyspi z-scores by default and the Gaussian form is symmetric when the marginal variances are equal. The label describes behaviour under the default preprocessing; with `zscore=False` the Gaussian variant is genuinely directed, and the kernel and kozachenko variants always are.
 
 Three group-delay SPIs that shipped as silent all-NaN columns are now recorded failures (values unchanged).
 
@@ -143,7 +142,7 @@ Definitions the corrected measures are checked against:
 
 Disabled variants are **commented out in the shipped configs rather than deleted**, each with the evidence for switching it off and the condition that would justify switching it back on.
 
-**Flagged, not removed.** `dspli_multitaper_max_*` and `dswpli_multitaper_max_*` saturate, and **more data makes it worse**. The band maximum reaches exactly 1 as soon as the sign of the imaginary coherency is consistent across tapers at any *one* frequency, and the bin count grows linearly with T (51 at T=100, 1001 at T=2000); since a maximum over a superset is at least the maximum over a subset, saturation is monotone in T — measured at 100% of pairs for every T from 100 to 2000. On the frozen fixtures the share runs 29–100% depending on the data, with 1 to 16 distinct values. The `mean` variants are graded normally. These stay **enabled** — it is the statistic behaving as defined — but a `max` value near 1 carries little information and a longer series will not change that.
+**Flagged, not removed.** `dspli_multitaper_max_*` and `dswpli_multitaper_max_*` saturate: the band maximum reaches exactly 1 as soon as the sign of the imaginary coherency is consistent across tapers at any *one* frequency. On the frozen fixtures the share of pairs at exactly 1 runs **29-100%** depending on the data, with 1 to 16 distinct values; the `mean` variants are graded normally. This is empirical, not a law - saturation is **not** monotone in `T`, since changing `T` recomputes the tapers and Fourier coefficients rather than adding to them (measured non-monotone in 7 of 36 seed/band combinations). They stay **enabled**; the statistic is behaving as defined.
 
 **Directed coherence corrected.** `spectral_connectivity.directed_coherence` puts `|H|²` in the numerator while its denominator stays on the magnitude scale, making the ratio unbounded: baselines reached 3.27 (VAR), 1.84 (CML) and **1139.47** (Kuramoto). pyspi now recomputes it from the same transfer function with `|H|`, per Baccalá et al. (1998). Verified two ways — bounded in [0,1] on all three fixtures, and under an identity noise covariance it reproduces `sqrt(directed_transfer_function())` to 4e-16, the identity DC must satisfy when noise variances are equal.
 

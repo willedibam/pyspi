@@ -134,26 +134,18 @@ def _label_symmetry_audit():
         if observed in ("undetermined", "degenerate"):
             continue  # covered by the degeneracy tests, not by this one
 
+        # Only undirected -> asymmetric is a contradiction. A *directed*
+        # measure may legitimately produce a symmetric matrix on a particular
+        # dataset: lmfit_* and gpfit_DotProduct are symmetric on z-scored data
+        # because a linear model's R^2 is, yet with zscore=False their measured
+        # asymmetry is ~22.7-23.3. Flagging that direction produced false
+        # positives, not findings.
         labels = set(getattr(spi, "labels", []) or [])
         if "undirected" in labels and observed == "asymmetric":
             disagreements[ident] = ("undirected", observed)
-        elif "directed" in labels and observed == "symmetric":
-            disagreements[ident] = ("directed", observed)
     return disagreements
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Open finding, not yet resolved. ce_gaussian, lmfit_* and "
-        "gpfit_DotProduct declare 'directed' but come out symmetric on "
-        "z-scored data: Gaussian conditional entropy is symmetric when the "
-        "marginal variances are equal, which z-scoring guarantees, and a "
-        "linear model's R^2 is symmetric on standardised inputs. Whether the "
-        "label or the preprocessing is wrong is a scientific decision, so it "
-        "is recorded rather than silently relabelled."
-    ),
-)
 def test_declared_symmetry_matches_observed_matrices():
     bad = _label_symmetry_audit()
     assert not bad, "Declared/observed symmetry disagreements:\n" + "\n".join(

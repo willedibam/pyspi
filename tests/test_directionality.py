@@ -108,62 +108,91 @@ def test_antisymmetric_spectral_sign_preserved(cls_name, driven_pair):
 
 
 # --------------------------------------------------------------------------
-# Wilson-derived spectral measures, against an analytic VAR oracle
+# Wilson-derived spectral measures, against an exact analytic spectrum
 # --------------------------------------------------------------------------
 
-def _var1_with_known_transfer():
-    """VAR(1) whose directed transfer function is available in closed form.
+def test_wilson_factorisation_recovers_a_known_transfer_function():
+    """Factorise an *exact* VAR(1) spectrum, bypassing sample estimation.
 
-    ``H(f) = (I - A e^{-2 pi i f})^{-1}`` and
-    ``DTF_{i<-j}(f) = |H_ij| / sqrt(sum_k |H_ik|^2)`` (Kaminski & Blinowska
-    1991). The literature indexes [target, source]; pyspi is row=source, so the
-    analytic matrix is transposed before comparison.
+    For x_t = A x_{t-1} + e_t with noise covariance Sigma, the cross-spectral
+    matrix is S(f) = H(f) Sigma H(f)^H with H(f) = (I - A e^{-2 pi i f})^{-1}.
+    Feeding that exact S to the Wilson decomposition isolates the factorisation
+    from every source of finite-sample error, so any discrepancy is the
+    algorithm's own.
+
+    An earlier version of this test compared pyspi's DTF against the *full*
+    three-process transfer function. That was invalid: pyspi computes
+    NonparametricSpectralBivariate measures on two-process subsystems
+    (`z[[i, j]]`), and a subsystem of a larger VAR legitimately shows flow in
+    both directions because the omitted processes induce correlation. The
+    0.10-0.16 floor that comparison produced was the test's error, not the
+    estimator's.
     """
-    A = np.array([[0.5, 0.0, 0.0],
-                  [0.7, 0.4, 0.0],
-                  [0.0, 0.3, 0.4]])
-    rng = np.random.default_rng(0)
-    T, M = 20000, 3
-    X = np.zeros((M, T))
-    for t in range(1, T):
-        X[:, t] = A @ X[:, t - 1] + rng.standard_normal(M)
+    from spectral_connectivity.minimum_phase_decomposition import (
+        minimum_phase_decomposition,
+    )
 
-    freqs = np.linspace(1e-6, 0.5, 257)
-    ana = np.zeros((len(freqs), M, M))
-    for fi, f in enumerate(freqs):
-        H = np.linalg.inv(np.eye(M) - A * np.exp(-2j * np.pi * f))
-        for i in range(M):
-            ana[fi, i, :] = np.abs(H[i, :]) / np.sqrt((np.abs(H[i, :]) ** 2).sum())
-    expected = ana.mean(axis=0).T
-    np.fill_diagonal(expected, np.nan)
-    return X, expected
+    A = np.array([[0.5, 0.0], [0.7, 0.4]])
+    M = A.shape[0]
+    Sigma = np.eye(M)
+    # The FULL two-sided grid over [0, 1): the algorithm takes an inverse FFT
+    # internally to impose causality, so a half-spectrum silently gives a
+    # factor unrelated to H even though S = G G^H still holds.
+    n = 256
+    freqs = np.arange(n) / n
+
+    H = np.stack([np.linalg.inv(np.eye(M) - A * np.exp(-2j * np.pi * f)) for f in freqs])
+    S = H @ Sigma @ np.conj(np.transpose(H, (0, 2, 1)))
+
+    G = minimum_phase_decomposition(S[np.newaxis, ...])[0]
+
+    # S = G G^H is the contract. The bound is the algorithm's own convergence
+    # tolerance (default 1e-8), not machine precision -- this is an iterative
+    # method, so ~1e-8 is the expected floor rather than a discrepancy.
+    residual = np.abs(S - G @ np.conj(np.transpose(G, (0, 2, 1)))).max()
+    assert residual < 1e-6, f"Wilson reconstruction residual {residual:.3g}"
+
+    # G(f) = H(f) Sigma^{1/2}; the zeroth Fourier coefficient of G is Sigma^{1/2}.
+    g0 = np.fft.ifft(G, axis=0)[0]
+    H_hat = G @ np.linalg.inv(g0)
+    err = np.abs(H_hat - H).max()
+    assert err < 1e-9, f"recovered transfer function differs by {err:.3g}"
+
+    num = np.abs(H_hat) ** 2
+    dtf_hat = num / num.sum(axis=-1, keepdims=True)
+    num = np.abs(H) ** 2
+    dtf = num / num.sum(axis=-1, keepdims=True)
+    assert np.abs(dtf_hat - dtf).max() < 1e-9
 
 
-def test_directed_transfer_function_against_analytic_var():
-    """DTF must stay in [0,1] and rank the true couplings correctly.
+def test_directed_transfer_function_orientation_on_a_two_process_var():
+    """On a 2-process VAR the subsystem *is* the system, so DTF is comparable.
 
-    Absolute calibration is deliberately NOT asserted: on this system at
-    T=20000 the mean absolute error against the closed form is ~0.12, and
-    connections that are exactly zero in the generating VAR are estimated at
-    0.10-0.16. DTF is a row-normalised quantity that also reflects indirect
-    paths, and the Wilson factorisation it is built on returns a factor with a
-    non-trivial reconstruction residual, so the offset is not attributable to
-    one cause here. Ranking and boundedness are what this pins.
+    Bounded, and the driving direction dominates. Absolute calibration is not
+    asserted: DTF as implemented is the squared form, and the multitaper
+    estimate carries finite-sample bias at these lengths.
     """
     from pyspi.data import Data
     from pyspi.statistics.spectral import DirectedTransferFunction
 
-    X, expected = _var1_with_known_transfer()
+    A = np.array([[0.5, 0.0], [0.7, 0.4]])   # 0 -> 1 only
+    rng = np.random.default_rng(0)
+    T = 500
+    X = np.zeros((2, T))
+    for t in range(1, T):
+        X[:, t] = A @ X[:, t - 1] + rng.standard_normal(2)
+
     got = DirectedTransferFunction(statistic="mean", fmin=0, fmax=0.5).multivariate(
         Data(data=X, dim_order="ps", zscore=False)
     )
-
-    off = ~np.eye(3, dtype=bool)
-    assert np.nanmin(got) >= 0.0 and np.nanmax(got) <= 1.0, (
-        f"DTF outside [0,1]: min={np.nanmin(got):.4f} max={np.nanmax(got):.4f}"
+    finite = got[np.isfinite(got)]
+    assert finite.min() >= 0.0 and finite.max() <= 1.0, (
+        f"DTF outside [0,1]: [{finite.min():.4f}, {finite.max():.4f}]"
     )
-    r = np.corrcoef(got[off], expected[off])[0, 1]
-    assert r > 0.85, f"DTF does not track the analytic transfer function (r={r:.3f})"
+    assert got[0, 1] > got[1, 0], (
+        f"DTF did not favour the driving direction: 0->1={got[0,1]:.4f}, "
+        f"1->0={got[1,0]:.4f}"
+    )
 
 
 def test_directed_coherence_is_bounded():
@@ -191,3 +220,32 @@ def test_directed_coherence_is_bounded():
         assert finite.min() >= 0.0 and finite.max() <= 1.0 + 1e-9, (
             f"{k} outside [0,1]: [{finite.min():.4f}, {finite.max():.4f}]"
         )
+
+
+def test_directed_coherence_matches_dtf_under_equal_noise_variances():
+    """DC reduces to sqrt(DTF) when all noise variances are equal.
+
+    A stronger check than boundedness: it pins the *form*, not just the range.
+    The backend's version fails it by construction, since |H|^2 in the
+    numerator is not sqrt of |H|^2/sum|H|^2.
+    """
+    import spectral_connectivity as sc
+    from spectral_connectivity.connectivity import _get_noise_variance, _total_inflow
+    from pyspi.statistics.spectral import _ensure_time_series_3d
+
+    A = np.array([[0.5, 0.0, 0.0], [0.7, 0.4, 0.0], [0.0, 0.3, 0.4]])
+    rng = np.random.default_rng(0)
+    T = 4000
+    X = np.zeros((3, T))
+    for t in range(1, T):
+        X[:, t] = A @ X[:, t - 1] + rng.standard_normal(3)
+
+    m = sc.Multitaper(_ensure_time_series_3d(np.transpose(X)), sampling_frequency=1)
+    conn = sc.Connectivity.from_multitaper(m)
+
+    nv = _get_noise_variance(conn._noise_covariance)
+    corrected = np.sqrt(nv) * np.abs(conn._transfer_function) / _total_inflow(
+        conn._transfer_function, nv
+    )
+    err = np.nanmax(np.abs(corrected - np.sqrt(conn.directed_transfer_function())))
+    assert err < 1e-12, f"DC != sqrt(DTF) under equal noise variances: {err:.3g}"
