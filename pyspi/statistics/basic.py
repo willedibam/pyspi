@@ -98,47 +98,100 @@ class CrossCorrelation(Undirected, Signed):
             self.labels = CrossCorrelation.labels + ["signed"]
         self.identifier += f"_{statistic}_sig-{sigonly}"
 
+    # Lags are examined out to +/- T // 4. Beyond a quarter of the record the
+    # sample cross-correlation is estimated from fewer than 3T/4 overlapping
+    # points and its variance grows without bound under the biased
+    # normalisation used here; the quarter cut is the convention pyspi shipped
+    # and is kept.
+    _MAX_LAG_FRACTION = 4
+
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
         T = data.n_observations
         try:
             r_ij = data.xcorr[(i, j)]
         except (KeyError, AttributeError):
-            x, y = data.to_numpy()[[i, j]]
+            x, y = data.to_numpy(squeeze=True)[[i, j]]
+
+            # Demeaned, and normalised by T rather than T-1. Three separate
+            # problems with the previous line
+            # `correlate(x, y) / x.std() / y.std() / (T - 1)`:
+            #
+            #   * `signal.correlate` was given the *raw* series while the
+            #     divisor used `std()`, which demeans. The two halves of the
+            #     ratio therefore described different quantities: on
+            #     `arange(10)` against itself with zscore=False it returned
+            #     3.8384 for a correlation.
+            #   * The lag-l sum has T - |l| terms, not T - 1. Dividing by T - 1
+            #     is neither the biased (T) nor the unbiased (T - |l|)
+            #     normalisation, and it put the zero lag of a series with
+            #     itself at T/(T-1): exactly 1.1111 for T = 10.
+            #   * `std()` is the sample standard deviation (ddof=0 in numpy,
+            #     so 1/T) while the divisor was T-1 -- mismatched conventions
+            #     in the same expression.
+            #
+            # Biased (divide by T) rather than unbiased (divide by T - |l|):
+            # the result is a *correlation*, so it must stay in [-1, 1], the
+            # zero lag must equal Pearson's r, and the `max` statistic must not
+            # be dominated by the high-variance tail that the unbiased
+            # normalisation produces at large lags. This is the same choice
+            # statsmodels' `ccf(adjusted=False)` and matplotlib's `xcorr` make.
+            x = x - x.mean()
+            y = y - y.mean()
+            scale = T * np.sqrt(np.mean(x ** 2) * np.mean(y ** 2))
 
             # Force FFT method: O(N log N) vs O(N^2) direct for short signals.
-            r_ij = np.squeeze(signal.correlate(x, y, "full", method="fft"))
-            r_ij = r_ij / x.std() / y.std() / (T - 1)
+            r_full = signal.correlate(x, y, "full", method="fft") / scale
 
-            r_ij = r_ij[T - T // 4 : T + T // 4]
+            # correlate(x, y, "full")[T - 1 + l] == sum_t x[t + l] * y[t], so
+            # the zero lag sits at T - 1 and the window must be centred there.
+            # `r_full[T - T//4 : T + T//4]` was centred on T, i.e. on lag +1:
+            # the lag window was asymmetric, which makes `max` over it depend
+            # on the order of the pair for a measure declared undirected.
+            lag_max = T // self._MAX_LAG_FRACTION
+            r_ij = r_full[T - 1 - lag_max: T + lag_max]
 
             try:
                 data.xcorr[(i, j)] = r_ij
             except AttributeError:
                 data.xcorr = {(i, j): r_ij}
-            data.xcorr[(j, i)] = data.xcorr[(i, j)]
+            # r_yx(l) == r_xy(-l), so the opposite orientation is the reversed
+            # sequence, not the same one. Aliasing the two made `bivariate(j,i)`
+            # return the lag profile of (i,j).
+            data.xcorr[(j, i)] = r_ij[::-1]
 
-        # Truncate at first statistically significant zero
-        sigonly = getattr(self, "_sigonly", False)
-        if sigonly:
-            N = len(r_ij) // 2
-            threshold = 1.96 / np.sqrt(N)
-            try:
-                fzf = np.where(np.abs(r_ij[len(r_ij) // 2 :]) <= threshold)[0][0]
-                fzr = np.where(np.abs(r_ij[: len(r_ij) // 2]) <= threshold)[0][-1]
-                r_ij = r_ij[N - fzr : N + fzf]
-            except IndexError:
-                # All values significant or none — use full truncated r_ij
-                pass
+        # Reduce over the significant lags only.
+        if getattr(self, "_sigonly", False):
+            # 1/sqrt(T) is the large-lag standard error of the sample
+            # cross-correlation of two independent series (Bartlett 1955), so
+            # the two-sided 5% band is 1.96/sqrt(T). The previous code used
+            # `1.96/sqrt(len(r_ij)//2)` -- the half-width of the lag *window*,
+            # T//4 -- which is twice too wide and scales with the lag cut
+            # rather than with the sample size.
+            threshold = 1.96 / np.sqrt(T)
+            significant = np.abs(r_ij) > threshold
+            # Selecting *the significant lags*, rather than the contiguous run
+            # of them around lag zero. The previous code walked outwards from
+            # the centre, which is only the right thing when the peak is at
+            # lag 0: for a pair where i leads j by one sample, r(0) is already
+            # insignificant, so the lobe extended one way and not the other and
+            # the two orientations of an SPI declared *undirected* disagreed --
+            # measured 0.9957 against -0.0202 on a lag-1 pair. A set of lags is
+            # invariant under the l -> -l reversal; a one-sided run is not.
+            # (Its slice was independently wrong: `r_ij[N - fzr : N + fzf]`
+            # mirrored `fzr`, which was already an absolute index.)
+            if significant.any():
+                r_ij = r_ij[significant]
+            # If nothing clears the band the pair is uncorrelated at every lag;
+            # reducing over the whole window then reports that, rather than
+            # reducing over an empty slice.
 
+        if self._squared:
+            r_ij = r_ij ** 2
         if self._statistic == "max":
-            if self._squared:
-                return np.max(r_ij**2)
-            return np.max(r_ij)
+            return float(np.max(r_ij))
         elif self._statistic == "mean":
-            if self._squared:
-                return np.mean(r_ij**2)
-            return np.mean(r_ij)
+            return float(np.mean(r_ij))
         else:
             raise TypeError(f"Unknown statistic: {self._statistic}")
 

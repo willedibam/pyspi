@@ -595,3 +595,110 @@ def test_symbolic_transfer_entropy_identifier_matches_what_is_computed():
 
     assert it.TransferEntropy(estimator="symbolic",
                               k_history=3).identifier == "te_symbolic_k-3"
+
+
+# ---------------------------------------------------------------------------
+# CrossCorrelation
+# ---------------------------------------------------------------------------
+
+def _xcorr_data(zscore=True, seed=0, T=500):
+    rng = np.random.default_rng(seed)
+    a = rng.standard_normal(T)
+    b = np.r_[0.0, a[:-1]] + 0.1 * rng.standard_normal(T)   # b lags a by 1
+    from pyspi.data import Data
+    return Data(data=np.vstack([a, b]), dim_order="ps", zscore=zscore)
+
+
+def test_cross_correlation_of_a_series_with_itself_is_one():
+    """A correlation, so the self-pair must be exactly 1 and nothing exceeds it.
+
+    `correlate(x, y) / x.std() / y.std() / (T - 1)` is neither the biased
+    (divide by T) nor the unbiased (divide by T - |l|) normalisation, and it
+    put the zero lag of a series against itself at T/(T-1): exactly 1.1111 for
+    T = 10.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.basic import CrossCorrelation
+
+    x = np.arange(10.0)
+    for zscore in (True, False):
+        data = Data(data=np.vstack([x, x.copy()]), dim_order="ps", zscore=zscore)
+        got = CrossCorrelation(statistic="max", sigonly=False).bivariate(
+            data, i=0, j=1)
+        assert got == pytest.approx(1.0, abs=1e-12), f"zscore={zscore}: {got}"
+
+
+def test_cross_correlation_demeans_and_stays_bounded():
+    """The correlate call used the raw series while the divisor demeaned.
+
+    On `arange(10)` against itself with zscore=False that mismatch returned
+    3.8384 -- for a quantity whose range is [-1, 1].
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.basic import CrossCorrelation
+
+    rng = np.random.default_rng(1)
+    u = rng.standard_normal(300) + 50.0        # large offset, small variance
+    v = 0.5 * u + rng.standard_normal(300)
+    data = Data(data=np.vstack([u, v]), dim_order="ps", zscore=False)
+
+    spi = CrossCorrelation(statistic="max", sigonly=False)
+    assert abs(spi.bivariate(data, i=0, j=1)) <= 1.0
+    lags = data.xcorr[(0, 1)]
+    assert np.abs(lags).max() <= 1.0
+    # Zero lag is Pearson's r by construction.
+    assert lags[len(lags) // 2] == pytest.approx(np.corrcoef(u, v)[0, 1], abs=1e-12)
+
+
+@pytest.mark.parametrize("statistic", ["max", "mean"])
+@pytest.mark.parametrize("sigonly", [True, False])
+def test_cross_correlation_is_symmetric_in_its_arguments(statistic, sigonly):
+    """It is declared undirected, so both orientations must agree.
+
+    Two independent reasons they did not. The lag window
+    `r_full[T - T//4 : T + T//4]` was centred on index T, but zero lag sits at
+    T - 1, so the window was asymmetric by one lag; and the cached opposite
+    orientation was `data.xcorr[(j,i)] = data.xcorr[(i,j)]` rather than its
+    reverse, since r_yx(l) = r_xy(-l). The `sigonly` truncation then walked
+    outwards from the centre, which on a pair where i leads j by one sample
+    (r(0) already insignificant) extended one way and not the other: measured
+    0.9957 against -0.0202.
+    """
+    from pyspi.statistics.basic import CrossCorrelation
+
+    data = _xcorr_data()
+    spi = CrossCorrelation(statistic=statistic, sigonly=sigonly)
+    assert spi.bivariate(data, i=0, j=1) == pytest.approx(
+        spi.bivariate(data, i=1, j=0), abs=1e-12)
+
+
+def test_cross_correlation_cache_stores_the_reversed_lag_profile():
+    from pyspi.statistics.basic import CrossCorrelation
+
+    data = _xcorr_data()
+    CrossCorrelation(sigonly=False).bivariate(data, i=0, j=1)
+    assert np.array_equal(data.xcorr[(0, 1)], data.xcorr[(1, 0)][::-1])
+    # Odd length, so the centre index is exactly the zero lag.
+    assert len(data.xcorr[(0, 1)]) % 2 == 1
+
+
+def test_cross_correlation_significance_band_scales_with_the_sample_size():
+    """1.96/sqrt(T), not 1.96/sqrt(T//4).
+
+    The old threshold was computed from the half-width of the lag *window*, so
+    it was twice too wide and moved if the lag cut changed rather than if the
+    record length did.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.basic import CrossCorrelation
+
+    rng = np.random.default_rng(2)
+    T = 4000
+    data = Data(data=rng.standard_normal((2, T)), dim_order="ps")
+    spi = CrossCorrelation(statistic="max", sigonly=True)
+    spi.bivariate(data, i=0, j=1)
+    lags = data.xcorr[(0, 1)]
+    # Under independence essentially nothing should clear 1.96/sqrt(T); the old
+    # band (1.96/sqrt(T//4) = 2x wider) let through even fewer, masking that the
+    # nominal 5% level was never being applied.
+    assert (np.abs(lags) > 1.96 / np.sqrt(T)).mean() < 0.15
