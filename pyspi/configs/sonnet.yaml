@@ -104,9 +104,11 @@
       #   labels:
       #     - M05
       #
-      # Disabled: 10! symbols against ~91 usable samples at T=100 -- every joint
-      # count is 0 or 1, so the value tracks sample size, not dependence. Still
-      # constructible, and defensible for long series.
+      # Disabled: severely undersampled and unvalidated at T=100. 10! symbols
+      # against ~91 usable samples: on var1 and cml every joint count is 1, so
+      # the value tracks sample size rather than dependence, but that does not
+      # hold universally (kuramoto: 3 of 42 pairs). Still constructible, and
+      # defensible for long series where the symbol space is populated.
       # - estimator: symbolic
       #   k_history: 10
       #   l_history: 1

@@ -832,9 +832,8 @@ def _ksg_cmi(A, B, C, k_nn, w=0):
     Composing the same quantity from marginal entropies leaves each one with
     its own bias in its own dimensionality, and those do not cancel.
 
-    ``C`` may have zero columns, in which case this reduces to plain MI: the
-    conditioning count becomes N-1 for every point, which is exactly what the
-    digamma expression needs.
+    ``C`` may have zero columns, in which case this delegates to the MI
+    estimator -- conditioning on nothing is mutual information.
     """
     A = np.atleast_2d(A)
     B = np.atleast_2d(B)
@@ -846,15 +845,21 @@ def _ksg_cmi(A, B, C, k_nn, w=0):
         if np.ptp(arr, axis=0).min() == 0:
             raise ValueError(f"KSG cannot estimate: {name} has a constant column.")
     has_C = C is not None and np.asarray(C).size and np.asarray(C).shape[1] > 0
+    if not has_C:
+        # With nothing to condition on this *is* mutual information, so use the
+        # MI estimator rather than emulating it. Faking the conditioning count
+        # as a constant N-(2w+1) matched _ksg_mi_general only at w=0 and drifted
+        # with the Theiler window (0.005 at w=1, 0.051 at w=10 on a probe).
+        return _ksg_mi_general(A, B, k_nn, w)
 
-    joint = np.concatenate([A, B, C], axis=1) if has_C else np.concatenate([A, B], axis=1)
-    AC = np.concatenate([A, C], axis=1) if has_C else A
-    BC = np.concatenate([B, C], axis=1) if has_C else B
+    joint = np.concatenate([A, B, C], axis=1)
+    AC = np.concatenate([A, C], axis=1)
+    BC = np.concatenate([B, C], axis=1)
 
     tree_joint = cKDTree(joint)
     tree_AC = cKDTree(AC)
     tree_BC = cKDTree(BC)
-    tree_C = cKDTree(C) if has_C else None
+    tree_C = cKDTree(C)
 
     if w == 0:
         dists, _ = tree_joint.query(joint, k=k_nn + 1, p=np.inf)
@@ -865,11 +870,8 @@ def _ksg_cmi(A, B, C, k_nn, w=0):
                          tree_AC.query_ball_point(AC, eps_strict, p=np.inf)], dtype=np.float64)
         n_BC = np.array([len(l) - 1 for l in
                          tree_BC.query_ball_point(BC, eps_strict, p=np.inf)], dtype=np.float64)
-        if has_C:
-            n_C = np.array([len(l) - 1 for l in
-                            tree_C.query_ball_point(C, eps_strict, p=np.inf)], dtype=np.float64)
-        else:
-            n_C = np.full(N, N - 1, dtype=np.float64)
+        n_C = np.array([len(l) - 1 for l in
+                        tree_C.query_ball_point(C, eps_strict, p=np.inf)], dtype=np.float64)
     else:
         n_query = min(k_nn + 2 * w + 2, N)
         dists_all, idx_all = tree_joint.query(joint, k=n_query, p=np.inf)
@@ -884,11 +886,8 @@ def _ksg_cmi(A, B, C, k_nn, w=0):
                           if abs(j - i) > w and j != i)
             n_BC[i] = sum(1 for j in tree_BC.query_ball_point(BC[i], e_strict, p=np.inf)
                           if abs(j - i) > w and j != i)
-            if has_C:
-                n_C[i] = sum(1 for j in tree_C.query_ball_point(C[i], e_strict, p=np.inf)
-                             if abs(j - i) > w and j != i)
-            else:
-                n_C[i] = max(N - (2 * w + 1), 1)
+            n_C[i] = sum(1 for j in tree_C.query_ball_point(C[i], e_strict, p=np.inf)
+                         if abs(j - i) > w and j != i)
 
     return float(digamma(k_nn) + np.mean(
         digamma(n_C + 1) - digamma(n_AC + 1) - digamma(n_BC + 1)
@@ -1206,12 +1205,13 @@ class ConditionalEntropy(InfoTheoryBase, Directed):
 
     name = "Conditional entropy"
     identifier = "ce"
-    # H(X|Y) is directed in general, but pyspi z-scores by default, and with
-    # equal marginal variances the Gaussian form is symmetric -- as are the
-    # linear-model R^2 SPIs. The label describes what you get under the default
-    # preprocessing. With zscore=False the Gaussian variant is genuinely
-    # directed; the kernel and kozachenko variants always are.
-    labels = ["unsigned", "infotheory", "unordered", "undirected"]
+    # Directed: H(X|Y) != H(Y|X). Measured on var1_M3_T100 under the default
+    # z-scoring, max|A - A.T| is 0.115 for kozachenko and 0.039 for kernel; the
+    # Gaussian form is symmetric there only because equal marginal variances
+    # make it so, and it becomes asymmetric (0.73) with zscore=False. A
+    # structural label describes the measure, not one estimator under one
+    # preprocessing default.
+    labels = ["unsigned", "infotheory", "unordered", "directed"]
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

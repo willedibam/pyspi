@@ -123,20 +123,21 @@ Three group-delay SPIs that shipped as silent all-NaN columns are now recorded f
 
 ### SPI set changes
 
-`full` goes from **328 SPIs to 325**. Every change below is deliberate; nothing else moved on the frozen test fixtures.
+`full` goes from **328 SPIs to 319**. Every change below is deliberate; nothing else moved on the frozen test fixtures.
 
 Disabled variants are **commented out in the shipped configs rather than deleted**, each with the evidence for switching it off and the condition that would justify switching it back on.
 
-**Flagged, not removed.** `dspli_multitaper_max_*` and `dswpli_multitaper_max_*` behave as near-indicators on every dataset tested: the band maximum of a debiased *squared* PLI reaches exactly 1 whenever the sign of the imaginary coherency is consistent across tapers at any one frequency, and pins there for most pairs. Measured over M ∈ {3,5,8}, T ∈ {100,250,500,2000} and white/AR/coupled data — constant at 1.0 for T ≥ 500, and 2–3 distinct values at shorter T with ~90% of pairs at 1 (M=8, T=100: 52 of 56). The `mean` variants on the same data give 17 distinct values over −0.108 to 0.104. These remain **enabled**: that is evidence from the regimes tested, not a proof of degeneracy. The note sits beside the entries in each config; read `max` values near 1 with it in mind.
+**Flagged, not removed.** `dspli_multitaper_max_*` and `dswpli_multitaper_max_*` saturate often, by a margin that varies strongly with the data. The band maximum of a debiased *squared* PLI reaches exactly 1 whenever the sign of the imaginary coherency is consistent across tapers at any one frequency. On the frozen fixtures the share of pairs sitting at exactly 1 runs from **29% to 100%** (var1 M3/T100: 100% at every band; kuramoto M7/T100: 29–86%), with 1 to 16 distinct values. The `mean` variants are graded normally. These remain **enabled** — it is the statistic behaving as defined, not a defect — with the note beside the entries in each config.
 
-**Removed (4)**
+**Removed (10)**
 
 | SPI | Why |
 |:----|:----|
 | `te_symbolic_k-1_kt-1_l-1_lt-1` | A length-1 ordinal pattern has one symbol, so TE is identically zero. |
-| `te_symbolic_k-10_kt-1_l-1_lt-1` | `10!` symbols against ~91 samples at `T=100`: every count is 0 or 1, so the value reflects the sample size, not dependence. Still constructible for long series. |
+| `te_symbolic_k-10_kt-1_l-1_lt-1` | Severely undersampled and unvalidated at `T=100`: `10!` symbols against ~91 usable samples. On var1 and cml every joint count is 1, so the value tracks sample size rather than dependence; that does not hold universally (kuramoto: 3 of 42 pairs). Still constructible, and defensible for long series. |
 | `di_kernel_W-0.5` | ~3.8-4.4 on independent data at every `T` from 100 to 8000. |
 | `di_kozachenko` | Negative values, for a nonnegative quantity. |
+| `dcoh_multitaper_*` (6) | Unbounded, contrary to the documented `[0,1]` range for directed coherence. Baseline maxima: VAR 3.27, CML 1.84, Kuramoto **1139.47**. The backend normalises `\|H\|²` as though it were `\|H\|`. Disabled pending a check against an independent oracle. |
 
 **Added (1)**
 

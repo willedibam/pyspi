@@ -105,3 +105,62 @@ def test_antisymmetric_spectral_sign_preserved(cls_name, driven_pair):
     assert A[0, 1] == pytest.approx(-A[1, 0], rel=1e-9), (
         f"{cls_name} should be antisymmetric; got A[0,1]={A[0, 1]}, A[1,0]={A[1, 0]}"
     )
+
+
+# --------------------------------------------------------------------------
+# Wilson-derived spectral measures, against an analytic VAR oracle
+# --------------------------------------------------------------------------
+
+def _var1_with_known_transfer():
+    """VAR(1) whose directed transfer function is available in closed form.
+
+    ``H(f) = (I - A e^{-2 pi i f})^{-1}`` and
+    ``DTF_{i<-j}(f) = |H_ij| / sqrt(sum_k |H_ik|^2)`` (Kaminski & Blinowska
+    1991). The literature indexes [target, source]; pyspi is row=source, so the
+    analytic matrix is transposed before comparison.
+    """
+    A = np.array([[0.5, 0.0, 0.0],
+                  [0.7, 0.4, 0.0],
+                  [0.0, 0.3, 0.4]])
+    rng = np.random.default_rng(0)
+    T, M = 20000, 3
+    X = np.zeros((M, T))
+    for t in range(1, T):
+        X[:, t] = A @ X[:, t - 1] + rng.standard_normal(M)
+
+    freqs = np.linspace(1e-6, 0.5, 257)
+    ana = np.zeros((len(freqs), M, M))
+    for fi, f in enumerate(freqs):
+        H = np.linalg.inv(np.eye(M) - A * np.exp(-2j * np.pi * f))
+        for i in range(M):
+            ana[fi, i, :] = np.abs(H[i, :]) / np.sqrt((np.abs(H[i, :]) ** 2).sum())
+    expected = ana.mean(axis=0).T
+    np.fill_diagonal(expected, np.nan)
+    return X, expected
+
+
+def test_directed_transfer_function_against_analytic_var():
+    """DTF must stay in [0,1] and rank the true couplings correctly.
+
+    Absolute calibration is deliberately NOT asserted: on this system at
+    T=20000 the mean absolute error against the closed form is ~0.12, and
+    connections that are exactly zero in the generating VAR are estimated at
+    0.10-0.16. DTF is a row-normalised quantity that also reflects indirect
+    paths, and the Wilson factorisation it is built on returns a factor with a
+    non-trivial reconstruction residual, so the offset is not attributable to
+    one cause here. Ranking and boundedness are what this pins.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.spectral import DirectedTransferFunction
+
+    X, expected = _var1_with_known_transfer()
+    got = DirectedTransferFunction(statistic="mean", fmin=0, fmax=0.5).multivariate(
+        Data(data=X, dim_order="ps", zscore=False)
+    )
+
+    off = ~np.eye(3, dtype=bool)
+    assert np.nanmin(got) >= 0.0 and np.nanmax(got) <= 1.0, (
+        f"DTF outside [0,1]: min={np.nanmin(got):.4f} max={np.nanmax(got):.4f}"
+    )
+    r = np.corrcoef(got[off], expected[off])[0, 1]
+    assert r > 0.85, f"DTF does not track the analytic transfer function (r={r:.3f})"

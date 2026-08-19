@@ -281,3 +281,47 @@ def test_directed_info_kraskov_is_zero_for_independent_source(T):
     d = Data(data=r.standard_normal((2, T)), dim_order="ps", zscore=True)
     di = it.DirectedInfo(estimator="kraskov").bivariate(d, i=0, j=1)
     assert abs(di) < 0.15, f"kraskov DI={di:.4f} on independent data at T={T}"
+
+
+@pytest.mark.parametrize("w", [0, 1, 3, 10])
+def test_ksg_cmi_reduces_to_mi_when_conditioning_set_is_empty(w):
+    """I(A;B|nothing) is I(A;B), at every Theiler window.
+
+    The empty-C branch used to fake the conditioning count as a constant
+    N-(2w+1). That matched the MI estimator only at w=0 and drifted with the
+    window (0.005 at w=1, 0.051 at w=10). DirectedInfo's first term has an
+    empty history, so this is on the shipped path whenever a Theiler window is
+    configured.
+    """
+    from pyspi.statistics.infotheory import _ksg_cmi, _ksg_mi_general
+
+    r = np.random.default_rng(0)
+    n = 400
+    a = r.standard_normal((n, 1))
+    b = 0.6 * a + 0.8 * r.standard_normal((n, 1))
+    empty = np.empty((n, 0))
+
+    assert _ksg_cmi(a, b, empty, 4, w) == pytest.approx(
+        _ksg_mi_general(a, b, 4, w), abs=1e-12
+    )
+
+
+def test_conditional_entropy_is_directed():
+    """H(X|Y) != H(Y|X): the label describes the measure, not one estimator.
+
+    The Gaussian form is symmetric under the default z-scoring only because
+    equal marginal variances make it so; kozachenko and kernel are asymmetric
+    even there, and Gaussian becomes asymmetric with zscore=False.
+    """
+    data = _data(m=3, t=200)
+    asym = {}
+    for est in ("gaussian", "kozachenko", "kernel"):
+        A = np.asarray(it.ConditionalEntropy(estimator=est).multivariate(data))
+        off = ~np.eye(3, dtype=bool)
+        asym[est] = float(np.nanmax(np.abs(A - A.T)[off]))
+
+    assert max(asym.values()) > 1e-6, f"no estimator is asymmetric: {asym}"
+    for est in ("gaussian", "kozachenko", "kernel"):
+        spi = it.ConditionalEntropy(estimator=est)
+        assert "directed" in spi.labels, f"{est} lost the directed label"
+        assert "undirected" not in spi.labels

@@ -529,7 +529,7 @@
 
   ConditionalEntropy: # No theiler window yet
     labels:
-      - undirected
+      - directed
       - nonlinear
       - unsigned
       - bivariate
@@ -747,9 +747,11 @@
       #   labels:
       #     - M05
       #
-      # Disabled: 10! symbols against ~91 usable samples at T=100 -- every joint
-      # count is 0 or 1, so the value tracks sample size, not dependence. Still
-      # constructible, and defensible for long series.
+      # Disabled: severely undersampled and unvalidated at T=100. 10! symbols
+      # against ~91 usable samples: on var1 and cml every joint count is 1, so
+      # the value tracks sample size rather than dependence, but that does not
+      # hold universally (kuramoto: 3 of 42 pairs). Still constructible, and
+      # defensible for long series where the symbol space is populated.
       # - estimator: symbolic
       #   k_history: 10
       #   l_history: 1
@@ -991,15 +993,15 @@
         statistic: max
 
   DebiasedSquaredPhaseLagIndex:
-    # NOTE: the `max` band statistic behaves as a near-indicator on the data
-    # tested. It reaches exactly 1 whenever the sign of the imaginary coherency
-    # is consistent across tapers at any one frequency, and pins there for most
-    # pairs: measured over M in {3,5,8}, T in {100,250,500,2000}, white/AR/
-    # coupled data, it is constant at 1.0 for T >= 500, and at shorter T takes
-    # 2-3 distinct values with ~90% of pairs at 1 (M=8, T=100: 52 of 56). The
-    # `mean` variant on the same data gives 17 distinct values over -0.108 to
-    # 0.104. Kept enabled: this is evidence from the regimes tested, not a
-    # proof. Read `max` values near 1 with that in mind.
+    # NOTE: the `max` band statistic saturates often, and by a margin that
+    # varies strongly with the data. Debiased squared PLI reaches exactly 1
+    # whenever the sign of the imaginary coherency is consistent across tapers
+    # at any one frequency, and the band maximum then pins there. On the frozen
+    # fixtures the share of pairs sitting at exactly 1 runs from 29% to 100%
+    # (var1 M3/T100: 100% at every band; kuramoto M7/T100: 29-86%), and the
+    # number of distinct values from 1 to 16. The `mean` variants are graded
+    # normally. Kept enabled -- this is behaviour of the statistic as defined,
+    # not a defect -- but read `max` values near 1 with it in mind.
     labels:
       - undirected
       - linear
@@ -1035,8 +1037,8 @@
         statistic: max
 
   DebiasedSquaredWeightedPhaseLagIndex:
-    # NOTE: same near-indicator behaviour as DebiasedSquaredPhaseLagIndex
-    # above (M=8, T=100: 52 of 56 pairs at exactly 1.0). See that note.
+    # NOTE: same saturation behaviour as DebiasedSquaredPhaseLagIndex above.
+    # See that note.
     labels:
       - undirected
       - linear
@@ -1149,34 +1151,39 @@
   #     fmax: 0.5
   #     statistic: max
 
-  DirectedCoherence:
-    labels:
-      - directed
-      - linear
-      - unsigned
-      - bivariate
-      - frequency-dependent
-      - M06
-    dependencies:
-    configs:
-      - fs: 1
+#  DirectedCoherence:
+    # DISABLED: unbounded, contrary to the documented [0, 1] range for directed
+    # coherence. Baseline maxima before disabling: VAR 3.27, CML 1.84, Kuramoto
+    # 1139.47, with 2/6, 2/6 and 6/6 variants exceeding 1 respectively. The
+    # backend normalises |H|^2 as though it were |H|, which removes the bound.
+    # Re-enable only after checking against an independent oracle.
+#    labels:
+#      - directed
+#      - linear
+#      - unsigned
+#      - bivariate
+#      - frequency-dependent
+#      - M06
+#    dependencies:
+#    configs:
+#      - fs: 1
 
-      - fmin: 0
-        fmax: 0.25
+#      - fmin: 0
+#        fmax: 0.25
 
-      - fmin: 0.25
-        fmax: 0.5
+#      - fmin: 0.25
+#        fmax: 0.5
 
-      - fs: 1
-        statistic: max
+#      - fs: 1
+#        statistic: max
 
-      - fmin: 0
-        fmax: 0.25
-        statistic: max
+#      - fmin: 0
+#        fmax: 0.25
+#        statistic: max
 
-      - fmin: 0.25
-        fmax: 0.5
-        statistic: max
+#      - fmin: 0.25
+#        fmax: 0.5
+#        statistic: max
 
   PartialDirectedCoherence:
     labels:
