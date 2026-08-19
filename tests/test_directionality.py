@@ -475,3 +475,22 @@ def test_spectral_gc_parametric_honours_the_sampling_frequency():
     assert np.allclose(a, b, atol=1e-8, equal_nan=True), (
         f"fs did not reach the model:\n{a}\n{b}"
     )
+
+
+def test_spectral_gc_names_the_cause_when_order_selection_does_not_converge():
+    """The documented exception in KNOWN_UNESTIMABLE, tested rather than assumed.
+
+    nitime's own message -- "Model estimation order did not converge at
+    max_order = 50" -- says nothing about the data, and pyspi used to swallow it
+    into an all-NaN return plus a warning, so `Calculator.errors` recorded only
+    the generic "returned no finite off-diagonal values".
+    """
+    import os
+
+    from pyspi.statistics.spectral import SpectralGrangerCausality
+
+    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "data", "fixtures", "kuramoto_M7_T100.npy")
+    spi = SpectralGrangerCausality(method="parametric", order=None, max_order=50)
+    with pytest.raises(ValueError, match="order selection did not converge"):
+        spi.multivariate(Data(data=fixture, dim_order="sp"))

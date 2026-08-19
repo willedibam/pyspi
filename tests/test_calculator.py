@@ -12,10 +12,40 @@ def test_whether_calculator_instantiates():
     assert isinstance(calc, Calculator), "Calculator failed to instantiate."
 
 def test_whether_calculator_computes():
-    # check whether the calculator runs
-    data = np.random.randn(3, 100)
+    """The default config must run clean, not merely run.
+
+    `compute()` catches per-SPI exceptions into `calc.errors` and carries on, so
+    this test used to pass over a table with failed and entirely-NaN columns in
+    it -- which is how three all-NaN `gd_*` SPIs shipped. Partial NaN is fine
+    and expected (several spectral SPIs are defined only where an estimate
+    converges); a column with no finite value anywhere is not a measurement.
+    """
+    # A coupled VAR(1), not i.i.d. noise. Some SPIs are *defined* only where
+    # there is structure to measure -- `gd_*` needs a significant coherence
+    # band and correctly yields nothing on independent noise (see
+    # test_group_delay_of_independent_processes_is_undefined) -- so white noise
+    # is a degenerate input to assert cleanliness on, not a neutral one.
+    rng = np.random.default_rng(0)
+    A = np.array([[0.5, 0.0, 0.0], [0.7, 0.4, 0.0], [0.0, 0.6, 0.3]])
+    data = np.zeros((3, 200))
+    for t in range(1, data.shape[1]):
+        data[:, t] = A @ data[:, t - 1] + rng.standard_normal(3)
     calc = Calculator(dataset=data)
     calc.compute()
+
+    assert not calc.errors, (
+        f"{len(calc.errors)} SPI(s) raised on the default config:\n  "
+        + "\n  ".join(f"{k}: {v}" for k, v in sorted(calc.errors.items()))
+    )
+    off_diagonal = ~np.eye(calc.dataset.n_processes, dtype=bool)
+    empty = sorted(
+        key for key in calc.spis
+        if not np.isfinite(
+            calc.table[key].to_numpy(dtype=float)[off_diagonal]).any()
+    )
+    assert not empty, (
+        f"{len(empty)} SPI(s) produced no finite value:\n  " + "\n  ".join(empty)
+    )
 
 @pytest.mark.parametrize("config", [
     'fabfour',

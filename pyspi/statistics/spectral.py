@@ -743,16 +743,24 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
             raise NameError(f"Unknown statistic {statistic}")
 
         self._method = method
+        # `self._fmin`, not the `fmin` argument. Spectral GC is undefined at
+        # zero frequency, so `fmin=0` is overridden to 1e-5 above -- but the
+        # identifier was built from the argument, so twelve shipped SPIs said
+        # `fmin-0` while integrating from 1e-5, i.e. excluding the DC bin. Two
+        # configs differing only in `fmin: 0` versus `fmin: 1e-5` would have
+        # produced two identifiers for one computation.
         if self._method == "nonparametric":
             self._measure = "pairwise_spectral_granger_prediction"
-            paramstr = (f"_nonparametric_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
+            paramstr = (f"_nonparametric_{statistic}_fs-{fmt_param(fs)}"
+                        f"_fmin-{fmt_param(self._fmin)}"
                         f"_fmax-{fmt_param(fmax)}").replace(
                 ".", "-"
             )
         else:
             self._order = order
             self._max_order = max_order
-            paramstr = (f"_parametric_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
+            paramstr = (f"_parametric_{statistic}_fs-{fmt_param(fs)}"
+                        f"_fmin-{fmt_param(self._fmin)}"
                         f"_fmax-{fmt_param(fmax)}_order-{order}").replace(
                 ".", "-"
             )
@@ -794,11 +802,37 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
 
                 triu_id = np.triu_indices(data.n_processes)
 
-                F = np.full(GA.causality_xy.shape, np.nan)
-                F[triu_id[0], triu_id[1], :] = GA.causality_xy[
+                try:
+                    causality_xy = GA.causality_xy
+                    causality_yx = GA.causality_yx
+                except ValueError as err:
+                    # nitime's order search walks the lag up to `max_order` and
+                    # raises if the information criterion never turns over.
+                    # That is the signature of over-fitting at this record
+                    # length, not of a transient numerical problem, and its own
+                    # message ("Model estimation order did not converge at
+                    # max_order = 50") says nothing about the data. Relaying it
+                    # as an all-NaN return buried the cause under pyspi's
+                    # generic "returned no finite off-diagonal values".
+                    if "did not converge" not in str(err):
+                        raise
+                    raise ValueError(
+                        f"Parametric spectral Granger causality: automatic AR "
+                        f"order selection did not converge at "
+                        f"max_order={self._max_order} on "
+                        f"{data.n_observations} observations -- the "
+                        f"information criterion improved all the way to the "
+                        f"cap, which at this length means the model is "
+                        f"over-fitting rather than that the true order is "
+                        f"high. Set an explicit `order`, reduce `max_order`, "
+                        f"or use a longer series."
+                    ) from err
+
+                F = np.full(causality_xy.shape, np.nan)
+                F[triu_id[0], triu_id[1], :] = causality_xy[
                     triu_id[0], triu_id[1], :
                 ]
-                F[triu_id[1], triu_id[0], :] = GA.causality_yx[
+                F[triu_id[1], triu_id[0], :] = causality_yx[
                     triu_id[0], triu_id[1], :
                 ]
 
@@ -840,5 +874,8 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
 
             return result
         except ValueError as err:
-            warnings.warn(err)
-            return np.full((data.n_processes, data.n_processes), np.nan)
+            # Not swallowed into an all-NaN table: a ValueError here means the
+            # model could not be fitted, which the caller needs in
+            # `Calculator.errors` with its cause attached, not as a silent
+            # empty column plus a warning.
+            raise

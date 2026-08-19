@@ -32,11 +32,18 @@ SPI set is exercised across a range of M.
 """
 import os
 
+import sys
+
 import numpy as np
 import pytest
 
 from pyspi.calculator import Calculator
 from pyspi.data import Data
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+# Single source of truth for the documented per-fixture exceptions, shared with
+# the generator so the two cannot disagree about what is expected to fail.
+from generate_benchmark_tables import KNOWN_UNESTIMABLE  # noqa: E402
 
 # Whole-file marker: this suite takes ~3.5 minutes. Skipped by default; run with
 #   pytest -m slow tests/test_baseline_drift.py
@@ -174,6 +181,7 @@ def current_tables():
             cache[dataset_name] = (
                 {spi: calc.table[spi].to_numpy() for spi in calc.spis},
                 dict(calc.spis),
+                dict(calc.errors),
             )
         return cache[dataset_name]
 
@@ -188,7 +196,7 @@ def test_baseline_covers_every_spi(dataset_name, baseline_tables, current_tables
     which is how ~45-50 SPIs per dataset escaped the old suite.
     """
     baseline = baseline_tables(dataset_name)
-    _, spis = current_tables(dataset_name)
+    _, spis, _ = current_tables(dataset_name)
     missing_from_baseline = sorted(set(spis) - set(baseline))
     missing_from_current = sorted(set(baseline) - set(spis))
     assert not missing_from_baseline and not missing_from_current, (
@@ -203,7 +211,7 @@ def test_baseline_drift(dataset_name, spi_key, baseline_tables, current_tables,
                         spi_warning_logger):
     """Hard-fail on shape or NaN-pattern change; report numerical drift."""
     ref = baseline_tables(dataset_name)[spi_key]
-    tables, spis = current_tables(dataset_name)
+    tables, spis, _ = current_tables(dataset_name)
     assert spi_key in tables, (
         f"[{dataset_name}] {spi_key}: present in baseline but not in the current "
         f"Calculator (see test_baseline_covers_every_spi)."
@@ -231,10 +239,20 @@ def test_baseline_drift(dataset_name, spi_key, baseline_tables, current_tables,
             f"current non-finite={int(new_nan.sum())}/{new.size}."
         )
 
-    # --- Reported: numerical drift on the finite entries ------------------
+    # --- Enforced: a baseline with nothing in it is not an oracle ---------
+    # `if not finite.any(): return` used to pass here, so an SPI that produced
+    # an all-NaN column at freeze time was recorded as such and then agreed
+    # with itself forever. All three `gd_*` SPIs sat in that state.
+    off_diagonal = ~np.eye(ref.shape[0], dtype=bool)
+    if spi_key in KNOWN_UNESTIMABLE.get(dataset_name, {}):
+        pytest.skip(KNOWN_UNESTIMABLE[dataset_name][spi_key])
+    assert np.isfinite(ref[off_diagonal]).any(), (
+        f"[{dataset_name}] {spi_key}: the frozen baseline has no finite "
+        f"off-diagonal value. An empty column cannot detect a regression; "
+        f"either the SPI is broken or it does not belong in the config."
+    )
+
     finite = ~ref_nan
-    if not finite.any():
-        return
 
     module_name = spis[spi_key].__module__.split(".")[-1]
     atol, rtol = LOOSE_SPIS.get(spi_key, TIGHT)
@@ -265,4 +283,65 @@ def test_baseline_drift(dataset_name, spi_key, baseline_tables, current_tables,
         max_rel,
         num_exceed,
         num_interactions,
+    )
+    # Reported *and* failed. Logging alone made every tolerance in this file
+    # decorative: a deterministic SPI could move by any amount and the suite
+    # still exited 0, with the evidence in a summary banner nobody gates on.
+    pytest.fail(
+        f"[{dataset_name}] {spi_key}: {num_exceed} of {num_interactions} "
+        f"interaction(s) exceed the drift tolerance "
+        f"(atol={atol:g}, rtol={rtol:g}); max |delta|={max_abs:.4g}, "
+        f"max relative={max_rel:.4g}. If the change is intended, say why in "
+        f"CHANGELOG.md and regenerate with "
+        f"tests/tools/generate_benchmark_tables.py."
+    )
+
+
+@pytest.mark.parametrize("dataset_name", DATASETS)
+def test_no_spi_raises_on_the_frozen_fixtures(dataset_name, current_tables):
+    """A completed computation is not the same as a clean one.
+
+    `Calculator.compute()` catches per-SPI exceptions and records them in
+    `calc.errors`, so the suite could run the whole config to completion over a
+    table with failed columns in it and report nothing. Nothing in the config
+    is expected to fail on these fixtures; if something legitimately cannot be
+    estimated on data this small, the exception belongs in an explicit
+    allow-list here with the statistical reason, not in silence.
+    """
+    _, _, errors = current_tables(dataset_name)
+    expected = KNOWN_UNESTIMABLE.get(dataset_name, {})
+    unexpected = {k: v for k, v in errors.items() if k not in expected}
+    assert not unexpected, (
+        f"[{dataset_name}] {len(unexpected)} SPI(s) raised:\n  "
+        + "\n  ".join(f"{k}: {v}" for k, v in sorted(unexpected.items()))
+    )
+    still_failing = sorted(set(expected) - set(errors))
+    assert not still_failing, (
+        f"[{dataset_name}] these are listed as unestimable but now succeed; "
+        f"remove them from KNOWN_UNESTIMABLE:\n  " + "\n  ".join(still_failing)
+    )
+
+
+@pytest.mark.parametrize("dataset_name", DATASETS)
+def test_every_spi_produces_a_finite_value_on_the_frozen_fixtures(
+        dataset_name, current_tables):
+    """No shipped SPI may be an entirely empty column.
+
+    Partial NaN is legitimate and common -- `gd_*` is defined only where the
+    coherence is significant, `sgc_*` where the factorisation converges. An
+    SPI with *no* finite off-diagonal value anywhere is not a measurement.
+    """
+    tables, _, _ = current_tables(dataset_name)
+    expected = KNOWN_UNESTIMABLE.get(dataset_name, {})
+    empty = []
+    for key, matrix in tables.items():
+        if key in expected:
+            continue
+        matrix = np.asarray(matrix, dtype=float)
+        off_diagonal = ~np.eye(matrix.shape[0], dtype=bool)
+        if not np.isfinite(matrix[off_diagonal]).any():
+            empty.append(key)
+    assert not empty, (
+        f"[{dataset_name}] {len(empty)} SPI(s) produced no finite value:\n  "
+        + "\n  ".join(sorted(empty))
     )
