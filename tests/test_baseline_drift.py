@@ -54,24 +54,41 @@ FIXTURE_DIR = os.path.join(_DATA_DIR, "fixtures")
 # default so the RNG-consuming SPIs land in the same place.
 SEED = 42
 
-# Drift thresholds, per family. A value is OK if EITHER the absolute or the
-# relative test passes (the absolute one protects near-zero references).
+# Drift thresholds. A value is OK if EITHER the absolute or the relative test
+# passes (the absolute one protects near-zero references).
 #
-# TIGHT is the default: the benchmark datasets are frozen and almost every SPI
-# is a deterministic function of them, so re-running the same code on the same
-# machine reproduces the baseline to float round-off. 1e-9 sits well above that
-# (~1e-12) while still catching genuine sub-percent regressions that the old
-# blanket RTOL=1e-2 would have hidden.
+# TIGHT is the default: the benchmark datasets are frozen and every SPI
+# measured so far is a deterministic function of them, so re-running the same
+# code on the same machine reproduces the baseline to float round-off. 1e-9
+# sits well above that (~1e-12) while still catching genuine sub-percent
+# regressions that the old blanket RTOL=1e-2 would have hidden.
 TIGHT = (1e-12, 1e-9)   # (atol, rtol)
-# LOOSE applies to families whose values are not a pure function of the data:
-#   causal -- cdt estimators run randomly-initialised optimisers (and torch),
-#             so they are not bit-reproducible across runs or thread counts;
-#   misc   -- GP fitting with random restarts and permutation/randomised
-#             independence tests (hyppo, IDS).
-# Deriving this from the SPI's module keeps the split declarative rather than a
-# hand-maintained list of SPI identifiers.
+# LOOSE is for SPIs that are genuinely not a pure function of the data under
+# this suite's protocol (seed the global RNG, then compute).
 LOOSE = (1e-6, 1e-2)
-LOOSE_MODULES = {"causal", "misc"}
+
+# Per-SPI, not per-module. The previous version applied LOOSE to every SPI in
+# the `causal` and `misc` modules on the assumption that cdt's optimisers, GP
+# restarts and randomised independence tests made them irreproducible. Measured,
+# that is false: `tests/tools/measure_reproducibility.py` computes the full
+# config twice per fixture and, on all three fixtures, **325 of 325 SPIs
+# reproduce bit-exactly** -- max |difference| identically 0, including every
+# `anm`/`cds`/`reci`/`ccm`, every `coint_*`, `gpfit_*` (GaussianProcessRegressor
+# defaults to n_restarts_optimizer=0, so there are no random restarts),
+# `lmfit_*` (random_state pinned to 42) and `ids` (consumes the global RNG,
+# which the suite seeds). A module-wide 1e-2 band over 62 SPIs, ~50 of them
+# deterministic, is slack that hides deterministic regressions -- exactly the
+# failure mode this suite exists to catch.
+#
+# So the map is empty, and that is a measurement, not an assumption. Re-measure
+# with:
+#     python tests/tools/measure_reproducibility.py
+# and add an entry here -- keyed by SPI identifier, valued (atol, rtol) -- for
+# anything that comes back non-zero, with the mechanism named. The tier stays
+# defined because a genuinely stochastic SPI (an unpinned permutation test, a
+# GPU-backed cdt estimator) is a plausible future addition, and it needs a home
+# that is not "the whole module it happens to live in".
+LOOSE_SPIS = {}          # e.g. {"some_stochastic_spi": LOOSE}
 
 
 def _baseline_path(dataset_name):
@@ -220,7 +237,7 @@ def test_baseline_drift(dataset_name, spi_key, baseline_tables, current_tables,
         return
 
     module_name = spis[spi_key].__module__.split(".")[-1]
-    atol, rtol = LOOSE if module_name in LOOSE_MODULES else TIGHT
+    atol, rtol = LOOSE_SPIS.get(spi_key, TIGHT)
 
     abs_diff = np.zeros_like(ref, dtype=np.float64)
     abs_diff[finite] = np.abs(new[finite] - ref[finite])
