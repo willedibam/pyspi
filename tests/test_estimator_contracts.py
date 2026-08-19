@@ -816,3 +816,22 @@ def test_bivariate_rejects_incomplete_or_invalid_indices(kwargs, exc):
     data = Data(data=rng.standard_normal((4, 100)), dim_order="ps")
     with pytest.raises(exc):
         CrossCorrelation(sigonly=False).bivariate(data, **kwargs)
+
+
+@pytest.mark.parametrize("kwargs", [
+    {"estimator": "kernel", "kernel_width": 0},
+    {"estimator": "kernel", "kernel_width": -1},
+    {"estimator": "kraskov", "prop_k": 0},
+    {"estimator": "kraskov", "dyn_corr_excl": -3},
+])
+def test_infotheory_parameters_are_validated_at_construction(kwargs):
+    """A non-positive box-kernel half-width counts only the point itself.
+
+    Every log ratio is then log(N) and the "estimate" is a constant; k < 1 has
+    no kth neighbour at all. Both used to be discovered downstream, as a
+    degenerate number rather than a rejected argument.
+    """
+    import pyspi.statistics.infotheory as it
+
+    with pytest.raises(ValueError, match=">"):
+        it.MutualInfo(**kwargs)

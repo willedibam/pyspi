@@ -1101,8 +1101,21 @@ class InfoTheoryBase(Unsigned):
         self._estimator = estimator
         # Defaults applied after validation so "not supplied" stays
         # distinguishable from "supplied with the default value".
-        self._kernel_width = 0.5 if kernel_width is None else kernel_width
-        self._prop_k = 4 if prop_k is None else prop_k
+        self._kernel_width = 0.5 if kernel_width is None else float(kernel_width)
+        self._prop_k = 4 if prop_k is None else int(prop_k)
+        # Checked here rather than discovered downstream: a non-positive box
+        # kernel half-width counts only the point itself, so every log ratio is
+        # log(N) and the "estimate" is a constant; k < 1 has no kth neighbour.
+        if self._kernel_width <= 0:
+            raise ValueError(
+                f"kernel_width must be > 0, got {self._kernel_width!r}.")
+        if self._prop_k < 1:
+            raise ValueError(f"prop_k must be >= 1, got {self._prop_k!r}.")
+        if dyn_corr_excl is not None and dyn_corr_excl != "AUTO":
+            if int(dyn_corr_excl) < 0:
+                raise ValueError(
+                    f"dyn_corr_excl must be >= 0 or 'AUTO', got "
+                    f"{dyn_corr_excl!r}.")
         self._dyn_corr_excl = dyn_corr_excl
         self._entropy_calc = self._getcalc("entropy")
 
