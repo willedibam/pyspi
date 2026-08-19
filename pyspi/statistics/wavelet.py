@@ -204,7 +204,12 @@ class PhaseSlopeIndex(mne, Undirected):
         # variants are genuinely asymmetric.
         trait = "antisymmetric" if self._statistic == "mean" else "asymmetric"
         self.labels = [l for l in self.labels
-                       if l not in ("undirected", "directed")] + [trait]
+                       if l not in ("undirected", "directed", "unsigned")
+                       ] + [trait, "signed"]
+        # Signed in behaviour, not only in label: see the same note on
+        # statistics/spectral.py's NonparametricSpectral -- `_rmmin` shifts
+        # every "unsigned" SPI by its minimum, which destroys antisymmetry.
+        self.issigned = lambda: True
         self.identifier += f"_{self._statistic}"
 
     def _get_psi(self, data):

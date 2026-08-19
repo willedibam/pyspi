@@ -521,7 +521,7 @@ class GromovWasserstainTau(Undirected, Unsigned):
 # CrossPairwiseDistance: lagged Euclidean distance
 # ---------------------------------------------------------------------------
 
-class CrossPairwiseDistance(Undirected):
+class CrossPairwiseDistance(Undirected, Unsigned):
     """Cross pairwise distance: Euclidean distance at each lag t in 0..tau,
     symmetric (min of fwd and bwd directions), report min or mean over t.
     tau=0 returns identical value to pdist_euclidean (L2 norm).

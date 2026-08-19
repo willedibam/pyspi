@@ -52,6 +52,20 @@ def _merge_spi_labels(spi, family_labels=None, config_labels=None):
     for label in labels + family_labels + config_labels:
         if label not in merged:
             merged.append(label)
+
+    # The SPI's own `issigned()` is authoritative over any declared
+    # signed/unsigned label. It is not metadata: `Calculator._rmmin` subtracts
+    # the minimum from every SPI reporting unsigned, and `set_group` correlates
+    # unsigned SPIs through `abs()`. A config that declares `unsigned` over an
+    # antisymmetric measure (which the shipped configs do for `phase`, `pli`,
+    # `wpli`, `psi`, `gd` and `ccm_*_diff`) does not merely mislabel it -- it
+    # asks for a transform that destroys the lead/lag its sign carries. The
+    # label follows the implementation, not the other way round.
+    issigned = getattr(spi, "issigned", None)
+    if issigned is not None:
+        actual = "signed" if issigned() else "unsigned"
+        merged = [label for label in merged
+                  if label not in ("signed", "unsigned")] + [actual]
     spi.labels = merged
 
 

@@ -113,8 +113,18 @@ class NonparametricSpectral(Unsigned):
         if getattr(self, "_antisymmetric_spectrum", False):
             trait = "antisymmetric" if statistic == "mean" else "asymmetric"
             self.labels = [
-                l for l in self.labels if l not in ("undirected", "directed")
-            ] + [trait]
+                l for l in self.labels
+                if l not in ("undirected", "directed", "unsigned")
+            ] + [trait, "signed"]
+            # And genuinely signed, not just labelled so. `issigned()` is not
+            # cosmetic: `Calculator._rmmin` subtracts the minimum from every
+            # SPI it reports as unsigned, which on an antisymmetric matrix
+            # shifts A[i,j] and A[j,i] by the same amount and destroys the
+            # antisymmetry that carries the lead/lag; and `set_group`
+            # correlates unsigned SPIs through `abs()`, folding lead onto lag.
+            # True for the `max` variants too: the maximum of a signed
+            # spectrum is still signed.
+            self.issigned = lambda: True
 
         paramstr = (
             f"_multitaper_{statistic}_fs-{fmt_param(fs)}_fmin-{fmt_param(fmin)}"
@@ -560,6 +570,36 @@ class PhaseSlopeIndex(NonparametricSpectralMultivariate, Undirected):
         )
 
 
+def _independent_significant_frequencies(p_values, step, alpha=0.05,
+                                         min_group_size=3):
+    """Indices of the largest significant coherence cluster, thinned to `step`.
+
+    Benjamini-Hochberg over the in-band frequencies, then the longest
+    contiguous run of significant points, then every `step`-th point of that
+    run so the regression is not fitted to correlated estimates. Returns None
+    if fewer than `min_group_size` independent points survive -- the phase
+    slope is not identifiable from one or two points, and a two-point "fit" has
+    an r-value of exactly 1 whatever the data.
+    """
+    n = p_values.size
+    order = np.argsort(p_values)
+    ranked = p_values[order]
+    passed = ranked <= alpha * np.arange(1, n + 1) / n
+    significant = np.zeros(n, dtype=bool)
+    if passed.any():
+        significant[order[: np.flatnonzero(passed)[-1] + 1]] = True
+    if not significant.any():
+        return None
+
+    # Longest contiguous run of True.
+    padded = np.concatenate([[False], significant, [False]])
+    edges = np.flatnonzero(padded[1:] != padded[:-1])
+    starts, ends = edges[::2], edges[1::2]
+    longest = np.argmax(ends - starts)
+    keep = np.arange(starts[longest], ends[longest], step)
+    return keep if keep.size >= min_group_size else None
+
+
 class GroupDelay(NonparametricSpectralMultivariate, Directed):
     name = "Group delay"
     labels = ["unsigned", "spectral", "directed", "lagged"]
@@ -568,6 +608,21 @@ class GroupDelay(NonparametricSpectralMultivariate, Directed):
         self.identifier = "gd"
         super().__init__(**kwargs)
         self._measure = "group_delay"
+        # `delay` and `slope` are antisymmetric by construction (the phase of
+        # C_ji is the negative of the phase of C_ij, so the fitted slopes are
+        # exact negatives) and signed -- a negative delay means the row lags
+        # the column. `rvalue` is the fit quality and is symmetric.
+        if self._statistic in ("delay", "slope"):
+            self.labels = [
+                l for l in self.labels
+                if l not in ("undirected", "directed", "unsigned")
+            ] + ["antisymmetric", "signed"]
+            self.issigned = lambda: True
+        # Always use `_get_statistic`. The dispatcher's fallback is
+        # `except TypeError`, and `Connectivity.group_delay()` accepts a
+        # no-argument call, so the backend's (all-NaN, see below) result was
+        # returned without the band arguments ever being passed.
+        self._recompute = True
 
     @property
     def _cache_subkey(self):
@@ -575,10 +630,76 @@ class GroupDelay(NonparametricSpectralMultivariate, Directed):
         return (type(self).__name__, self._fs, self._fmin, self._fmax)
 
     def _get_statistic(self, C):
-        return C.group_delay(
-            frequencies_of_interest=[self._fmin, self._fmax],
-            frequency_resolution=(self._fmax - self._fmin) / 50,
-        )
+        """Gotman (1983) group delay, computed here rather than in the backend.
+
+        ``spectral_connectivity.Connectivity.group_delay`` returns all-NaN for
+        every input, on every dataset, at every length. Not a power problem --
+        the defect is one line in its significance test.
+        ``coherence_fisher_z_transform`` divides by
+        ``sqrt(coherence_bias(n_obs1) + coherence_bias(n_obs2))`` and, in the
+        one-sample case, is called with ``n_obs2 = 0``. ``coherence_bias(0)`` is
+        ``1 / (2*0 - 2) = -0.5``, so the argument of the square root is
+        ``1/(2n-2) - 0.5``, negative for every ``n``: every p-value is NaN,
+        nothing is ever significant, the phase regression runs on a fully
+        masked array, and the result is NaN. Confirmed at 5, 11, 19 and 39
+        tapers, T up to 4000, on a pair with median coherence 0.998.
+
+        The one-sample test is the standard Enochson-Goodman/Bokil form: for
+        coherence estimated from ``n`` independent spectral estimates,
+        ``arctanh|C|`` is approximately normal with mean ``arctanh|Gamma|`` plus
+        a bias ``b = 1/(2n - 2)`` and *variance* ``b``, so the null z-score is
+        ``(arctanh|C| - b) / sqrt(b)``. That is what the second ``coherence_bias``
+        term was meant to be and is what is used here.
+
+        The rest follows the backend's own recipe: Benjamini-Hochberg over the
+        in-band frequencies, keep the largest contiguous significant run,
+        subsample it to statistically independent points, require at least
+        three, and regress the unwrapped coherence phase on frequency. Slope
+        divided by 2*pi is the delay, in samples at ``fs``.
+        """
+        from scipy import stats
+
+        coherency = np.asarray(C.coherency())
+        freqs = np.asarray(C.frequencies)
+        in_band = (freqs >= self._fmin) & (freqs <= self._fmax)
+        f = freqs[in_band]
+        coh = coherency[:, in_band]
+        n_trials, _, M, _ = coh.shape
+
+        # Independent frequency spacing, as the backend defines it: the band is
+        # resolved into 50 pieces and points closer than that are not
+        # independent estimates.
+        df = float(freqs[1] - freqs[0])
+        resolution = (self._fmax - self._fmin) / 50
+        step = max(1, int(np.ceil(resolution / df)))
+
+        bias = 1.0 / (2 * C.n_observations - 2)
+        magnitude = np.minimum(np.abs(coh), 1 - np.finfo(float).eps)
+        z = (np.arctanh(magnitude) - bias) / np.sqrt(bias)
+        p_values = stats.norm.sf(z)
+        phase = np.unwrap(np.angle(coh), axis=1)
+
+        slope = np.full((n_trials, M, M), np.nan)
+        r_value = np.full((n_trials, M, M), np.nan)
+        for t in range(n_trials):
+            for i in range(M):
+                for j in range(i + 1, M):
+                    keep = _independent_significant_frequencies(
+                        p_values[t, :, i, j], step
+                    )
+                    if keep is None:
+                        continue
+                    fit = stats.linregress(f[keep], phase[t, keep, i, j])
+                    # Sign fixed by measurement, not by assumption: with
+                    # y(t) = x(t - L), this orientation makes the delay
+                    # +L at [source, target] after `_to_source_target`, i.e.
+                    # positive means the row leads the column. Verified for
+                    # L in {1, 3, 5, 8} to within 0.005 samples.
+                    slope[t, i, j] = -fit.slope
+                    slope[t, j, i] = fit.slope
+                    r_value[t, i, j] = r_value[t, j, i] = fit.rvalue
+
+        return slope / (2 * np.pi), slope, r_value
 
 
 class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsigned):

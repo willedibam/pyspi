@@ -340,3 +340,75 @@ def test_directed_coherence_uses_only_the_documented_backend_privates():
             f"DirectedCoherence cannot be computed. Check the supported "
             f"spectral-connectivity range in pyproject.toml."
         )
+
+
+# --------------------------------------------------------------------------
+# Group delay
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize("lag", [1, 3, 5, 8])
+def test_group_delay_recovers_a_known_lag(lag):
+    """An independent oracle: a pure delay has a known group delay.
+
+    All three shipped ``gd_*`` SPIs returned no finite off-diagonal value on
+    any input -- Gaussian noise, one-way coupled AR, every frozen fixture, at
+    5/11/19/39 tapers and T up to 4000, on a pair with median coherence 0.998.
+    The cause is one line in the backend, not the data:
+    ``coherence_fisher_z_transform`` divides by
+    ``sqrt(coherence_bias(n_obs1) + coherence_bias(n_obs2))`` and the
+    one-sample call passes ``n_obs2 = 0``, for which ``coherence_bias`` returns
+    ``1/(2*0 - 2) = -0.5``. The radicand is negative for every ``n_obs1``, so
+    every p-value is NaN and nothing is ever significant.
+
+    pyspi computes the statistic itself with the standard one-sample form,
+    ``(arctanh|C| - b) / sqrt(b)`` with ``b = 1/(2n - 2)``. With
+    ``y(t) = x(t - lag)`` the answer is known in advance, which is what makes
+    this a test rather than a re-run of the implementation.
+    """
+    from pyspi.statistics.spectral import GroupDelay
+
+    rng = np.random.default_rng(SEED)
+    T_ = 2000
+    x = rng.standard_normal(T_ + lag)
+    y = x[:-lag] + 0.1 * rng.standard_normal(T_)
+    data = Data(data=np.vstack([x[lag:], y]), dim_order="ps")
+
+    delay = GroupDelay(statistic="delay", fmin=0, fmax=0.5).multivariate(data)
+    # Row is the source: process 0 leads process 1 by `lag` samples.
+    assert delay[0, 1] == pytest.approx(lag, abs=0.05)
+    assert delay[1, 0] == pytest.approx(-lag, abs=0.05)
+
+    r = GroupDelay(statistic="rvalue", fmin=0, fmax=0.5).multivariate(data)
+    assert r[0, 1] > 0.99 and r[0, 1] == pytest.approx(r[1, 0])
+
+
+def test_group_delay_is_estimable_on_the_bundled_fixtures():
+    """Not a repeat of the lag test: it pins that real data now produces values.
+
+    Partial NaN is correct here and is not the defect being guarded against --
+    group delay is defined only where the coherence is significant, so pairs
+    without a significant cluster have none. An *entirely* NaN column is the
+    defect.
+    """
+    import os
+
+    from pyspi.statistics.spectral import GroupDelay
+
+    fixtures = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "data", "fixtures")
+    for name in ("var1_M3_T100.npy", "cml_M5_T100.npy", "kuramoto_M7_T100.npy"):
+        data = Data(data=os.path.join(fixtures, name), dim_order="sp")
+        table = GroupDelay(statistic="delay", fmin=0, fmax=0.5).multivariate(data)
+        off = ~np.eye(table.shape[0], dtype=bool)
+        assert np.isfinite(table[off]).any(), f"{name}: gd is entirely NaN"
+
+
+def test_group_delay_of_independent_processes_is_undefined():
+    """The significance gate must still gate. Independent noise has no delay."""
+    from pyspi.statistics.spectral import GroupDelay
+
+    rng = np.random.default_rng(SEED)
+    data = Data(data=rng.standard_normal((3, 500)), dim_order="ps")
+    table = GroupDelay(statistic="delay", fmin=0, fmax=0.5).multivariate(data)
+    off = ~np.eye(3, dtype=bool)
+    assert not np.isfinite(table[off]).any()

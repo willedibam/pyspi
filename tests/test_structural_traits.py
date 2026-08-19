@@ -251,3 +251,41 @@ def test_wavelet_psi_is_permutation_invariant(statistic):
         f"psi_wavelet statistic={statistic} is not permutation-invariant; "
         f"max|d|={np.nanmax(np.abs(fwd[off] - restored[off])):.6g}"
     )
+
+
+def test_antisymmetric_spis_report_themselves_as_signed():
+    """`issigned()` drives a transform, so it cannot disagree with the values.
+
+    `Calculator._rmmin` subtracts the minimum from every SPI that reports
+    unsigned. On an antisymmetric matrix that shifts A[i,j] and A[j,i] by the
+    same amount, destroying the antisymmetry that carries the lead/lag;
+    `set_group` separately correlates unsigned SPIs through `abs()`, folding
+    lead onto lag. The shipped configs declared `unsigned` for `phase`, `pli`,
+    `wpli`, `psi` (both the multitaper and wavelet families), `gd` and
+    `ccm_*_diff`.
+    """
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    bad = [
+        ident for ident, spi in spis.items()
+        if ({"antisymmetric", "asymmetric"} & set(spi.labels)) and not spi.issigned()
+    ]
+    assert not bad, "antisymmetric SPIs reporting unsigned:\n  " + "\n  ".join(sorted(bad))
+
+
+def test_no_spi_declares_both_signed_and_unsigned():
+    """One authority. `_merge_spi_labels` resolves the label from `issigned()`."""
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    bad = [i for i, s in spis.items() if {"signed", "unsigned"} <= set(s.labels)]
+    assert not bad, "contradictory signedness labels:\n  " + "\n  ".join(sorted(bad))
+
+
+def test_every_bundled_spi_declares_a_signedness():
+    """`_rmmin` calls `issigned()` unguarded, so a missing one is an exception.
+
+    `CrossPairwiseDistance` subclassed only `Undirected`, which supplies no
+    `issigned`, so `Calculator._rmmin()` raised AttributeError on any config
+    containing it.
+    """
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    missing = [i for i, s in spis.items() if not hasattr(s, "issigned")]
+    assert not missing, "SPIs with no issigned():\n  " + "\n  ".join(sorted(missing))
