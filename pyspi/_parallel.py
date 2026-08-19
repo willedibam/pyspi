@@ -134,13 +134,10 @@ def guard_oversubscription(n_jobs: int) -> None:
     requested = n_jobs * threads
 
     # pyEDM (ConvergentCrossMapping) self-parallelises over *processes*, so no
-    # BLAS thread count covers it. It is otherwise pinned only inside parallel
-    # workers, which leaves the one-dataset-per-core cluster pattern
-    # (n_jobs=1 on a 1-core allocation) free to fan out to cpu_count() from
-    # every one of them. Checked before the arithmetic below, because with
-    # threads=1 that case is not oversubscribed on the thread axis at all.
-    if cores <= n_jobs:
-        os.environ.setdefault("PYSPI_PIN_BACKENDS", "1")
+    # BLAS thread count would cover it. It no longer needs covering here: its
+    # pools are unconditionally off at the call site, because pyEDM 2.5 starts
+    # them with forkserver/spawn and so re-imports the caller's __main__ (see
+    # statistics/causal.py).
 
     if requested <= cores:
         return
@@ -184,11 +181,10 @@ def _pin_worker_thread_pools():
         to cpu_count() at import; drives ANM/CDS/RECI/IGCI.
       - torch (drives InterDependenceScore): intra- and inter-op thread counts.
     pyEDM (drives ConvergentCrossMapping) is process-based, not thread-based, so
-    it can't be pinned here — instead this function exports PYSPI_PIN_BACKENDS=1
-    and statistics/causal.py reads it to pass parallel=False to pyEDM.
+    it can't be pinned here — it is instead switched off unconditionally at the
+    call site in statistics/causal.py, for correctness rather than scheduling.
     """
     global _THREADPOOL_LIMITER
-    os.environ["PYSPI_PIN_BACKENDS"] = "1"
     try:
         from threadpoolctl import threadpool_limits
         _THREADPOOL_LIMITER = threadpool_limits(limits=1)  # blas + openmp

@@ -1,4 +1,3 @@
-import os
 import numpy as np
 import pandas as pd
 from cdt.causality.pairwise import ANM, CDS, IGCI, RECI
@@ -66,6 +65,44 @@ class InformationGeometricConditionalIndependence(Directed, Unsigned):
         return IGCI().predict_proba((z[i], z[j]))
 
 
+def _optimal_embedding_dimension(df, column, lib_pred, max_e=10):
+    """E in [1, max_e] maximising simplex-projection skill, computed serially.
+
+    Replaces ``pyEDM.EmbedDimension``, for two independent reasons.
+
+    **It was not selecting anything.** The call site read the winner as
+    ``embed_df.max()["E"]``. ``DataFrame.max()`` reduces column-wise, so that is
+    the largest *candidate* E, not the E at the largest rho -- ``max_e``, every
+    time, for every process, whatever the data says. The three shipped
+    ``ccm_E-None_*`` SPIs were therefore bit-identical to ``ccm_E-10_*`` on all
+    three frozen fixtures (verified: max|difference| exactly 0), while their
+    identifiers advertised an inferred embedding. ``rho.idxmax()`` is the
+    selection that was intended.
+
+    **It cannot be called safely.** ``EmbedDimension`` always builds a
+    ``multiprocessing.Pool``; there is no serial path, and ``numProcess=1``
+    still starts a child. pyEDM 2.5 starts pools with forkserver/spawn, never
+    fork, so each child re-imports the caller's ``__main__`` -- see the note in
+    ``ConvergentCrossMapping._from_cache``. Looping over ``pyEDM.Simplex``
+    (public API, and exactly what ``PoolFunc.EmbedDimSimplexFunc`` calls in each
+    child) gives the same rho per E with no pool at all.
+
+    Ties go to the smallest E: a lower-dimensional embedding that predicts as
+    well is the better model, and ``argmax`` returns the first maximum. Ties are
+    not rare -- ``pyEDM.ComputeError`` rounds rho to 6 digits.
+    """
+    rho = np.empty(max_e)
+    for k, E in enumerate(range(1, max_e + 1)):
+        pred_df = pyEDM.Simplex(
+            dataFrame=df, columns=column, target=column,
+            lib=lib_pred, pred=lib_pred, E=E,
+        )
+        rho[k] = pyEDM.ComputeError(
+            pred_df["Observations"], pred_df["Predictions"]
+        )["rho"]
+    return int(np.nanargmax(rho) + 1)
+
+
 class ConvergentCrossMapping(Directed, Signed):
 
     name = "Convergent cross-mapping"
@@ -102,10 +139,28 @@ class ConvergentCrossMapping(Directed, Signed):
             ccmf = data.ccm[self.key]
         except (AttributeError, KeyError):
             # pyEDM 2.5 self-parallelises (EmbedDimension over processes, CCM
-            # over samples). Inside a pinned pyspi worker, force single-process
-            # so n_jobs workers don't each fan out to cpu_count(). Set by
-            # _parallel._pin_worker_thread_pools; unset for serial runs.
-            pinned = os.environ.get("PYSPI_PIN_BACKENDS") == "1"
+            # over samples), and its pools are single-process here on purpose.
+            #
+            # pyEDM's own `_get_mp_context` documents "**fork is never used**":
+            # it takes forkserver, else spawn. Both re-import the caller's
+            # `__main__` in every child. pyspi is normally driven from a plain
+            # script, and an unguarded script re-executed by a child raises
+            # `RuntimeError: An attempt has been made to start a new process
+            # before the current process has finished its bootstrapping phase`
+            # -- which pyspi catches, so all nine `ccm_*` SPIs come back as an
+            # all-NaN column, with the child having already re-run whatever ran
+            # before `compute()`. It only looks fine from a REPL, a notebook,
+            # or a `if __name__ == "__main__":`-guarded script (which is why
+            # the baseline generator and `python -m pyspi` never saw it).
+            # pyspi cannot know whether its caller is import-safe, so it does
+            # not gamble on it.
+            #
+            # There is no speed argument on the other side either: at pyspi's
+            # sizes the pool costs far more than it saves. Measured on an idle
+            # machine, kuramoto_M7_T100, 21 pairs at E=1: 24.8s with
+            # `parallel=True` against 6.8s with `parallel=False`, a 3.6x
+            # *speedup* from turning it off. Parallelism belongs at the SPI
+            # level, where `Calculator.compute(n_jobs=...)` already provides it.
             z = data.to_numpy(squeeze=True)
 
             M = data.n_processes
@@ -123,16 +178,7 @@ class ConvergentCrossMapping(Directed, Signed):
                 for _i in range(M):
                     pred = str(10) + " " + str(N - 10)
                     col = df.columns.values[_i + 1]
-                    embed_df = pyEDM.EmbedDimension(
-                        dataFrame=df,
-                        lib=pred,
-                        pred=pred,
-                        columns=col,
-                        target=col,
-                        showPlot=False,
-                        numProcess=1 if pinned else 4,
-                    )
-                    embedding[_i] = embed_df.max()["E"]
+                    embedding[_i] = _optimal_embedding_dimension(df, col, pred)
             else:
                 embedding = np.array([self._E] * M)
 
@@ -161,7 +207,7 @@ class ConvergentCrossMapping(Directed, Signed):
                         libSizes=lib_sizes,
                         sample=100,
                         seed=42,
-                        parallel=not pinned,
+                        parallel=False,
                     )
                     ccmf[_i, _j] = ccm_df.iloc[:, 1].values[: (nlibs + 1)]
                     ccmf[_j, _i] = ccm_df.iloc[:, 2].values[: (nlibs + 1)]

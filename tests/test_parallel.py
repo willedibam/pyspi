@@ -128,16 +128,23 @@ def test_failure_isolation(dataset):
             f"Sibling SPI '{sibling}' has unexpected NaNs after isolated failure."
 
 
-def test_pin_worker_thread_pools_sets_env():
-    """Worker pinning must export PYSPI_PIN_BACKENDS — the flag statistics/causal.py
-    reads to pass parallel=False to pyEDM."""
+def test_pin_worker_thread_pools_pins_cdt():
+    """Worker pinning must reach cdt, which autosets NJOBS=cpu_count() at import.
+
+    Was a check on the PYSPI_PIN_BACKENDS env var, whose only consumer was
+    pyEDM's nested pool in statistics/causal.py. That pool is now off
+    unconditionally (it re-imports the caller's __main__), so the flag had no
+    reader left; cdt is the pool this function can still actually pin.
+    """
+    import cdt
+
     from pyspi import _parallel
-    os.environ.pop("PYSPI_PIN_BACKENDS", None)
+    before = cdt.SETTINGS.NJOBS
     try:
         _parallel._pin_worker_thread_pools()
-        assert os.environ.get("PYSPI_PIN_BACKENDS") == "1"
+        assert cdt.SETTINGS.NJOBS == 1
     finally:
-        os.environ.pop("PYSPI_PIN_BACKENDS", None)
+        cdt.SETTINGS.NJOBS = before
 
 
 def test_cli_module_importable():

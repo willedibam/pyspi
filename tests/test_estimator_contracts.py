@@ -361,3 +361,51 @@ def test_wilson_non_convergence_is_reported_not_swallowed():
         "the backend's factorisation-convergence warning was swallowed; "
         f"caught instead: {messages}"
     )
+def test_ccm_auto_embedding_maximises_skill_rather_than_returning_max_e():
+    """``E=None`` must select an embedding, not return the largest candidate.
+
+    The call site read the winner as ``pyEDM.EmbedDimension(...).max()["E"]``.
+    ``DataFrame.max()`` reduces column-wise, so that is the largest *candidate*
+    E -- pyEDM's ``maxE`` default of 10 -- for every process on every dataset.
+    The three shipped ``ccm_E-None_*`` SPIs were consequently bit-identical to
+    ``ccm_E-10_*`` on all three frozen fixtures while advertising an inferred
+    embedding: the identifier said one thing and the number was another.
+
+    This pins the replacement against pyEDM's own per-E skill, and pins that
+    the answer is data-dependent rather than the constant it used to be.
+    """
+    import os
+
+    import pandas as pd
+    import pyEDM
+
+    from pyspi.data import Data
+    from pyspi.statistics.causal import _optimal_embedding_dimension
+
+    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "data", "fixtures", "var1_M3_T100.npy")
+    z = Data(data=fixture, dim_order="sp").to_numpy(squeeze=True)
+    M, N = z.shape
+    df = pd.DataFrame(
+        np.concatenate([np.atleast_2d(np.arange(N)), z]).T,
+        columns=["index"] + [f"proc{p}" for p in range(M)],
+    )
+    lib_pred = f"10 {N - 10}"
+
+    chosen = []
+    for i in range(M):
+        col = df.columns.values[i + 1]
+        reference = pyEDM.EmbedDimension(dataFrame=df, lib=lib_pred, pred=lib_pred,
+                                         columns=col, target=col, showPlot=False,
+                                         numProcess=1)
+        expected = int(reference.loc[reference["rho"].idxmax(), "E"])
+        got = _optimal_embedding_dimension(df, col, lib_pred)
+        assert got == expected, (
+            f"{col}: chose E={got}, pyEDM's skill curve peaks at E={expected}"
+        )
+        chosen.append(got)
+
+    assert any(E != 10 for E in chosen), (
+        f"every process selected the maximum candidate E ({chosen}); that is "
+        f"the symptom of reading max(E) instead of argmax(rho)"
+    )
