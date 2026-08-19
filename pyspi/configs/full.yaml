@@ -721,7 +721,6 @@
       - estimator: kernel
         kernel_width: 0.25
         k_history: 1
-        l_history: 1
         labels:
           - M14
 

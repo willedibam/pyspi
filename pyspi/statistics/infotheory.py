@@ -498,6 +498,13 @@ class SymbolicTECalculator:
     Converts source and target to ordinal patterns of length k,
     then computes TE from joint symbol histograms.
 
+    One pattern length, applied to source and destination alike, at unit
+    delay -- Staniek & Lehnertz (2008) define it this way and JIDT's
+    TransferEntropyCalculatorSymbolic does the same. There is no separate
+    source history or embedding delay here, so `TransferEntropy` refuses
+    `k_tau`, `l_history` and `l_tau` under this estimator rather than
+    accepting them, writing them into the identifier and ignoring them.
+
     TE = H(Y_next | Y_past) - H(Y_next | Y_past, X)
        = H(Y_next, Y_past) - H(Y_past) - H(Y_next, Y_past, X) + H(Y_past, X)
     where all entropies are discrete (histogram-based).
@@ -1494,9 +1501,9 @@ class TransferEntropy(InfoTheoryBase, Directed):
         k_search_max=None,
         tau_search_max=None,
         k_history=1,
-        k_tau=1,
-        l_history=1,
-        l_tau=1,
+        k_tau=None,
+        l_history=None,
+        l_tau=None,
         **kwargs,
     ):
         if "estimator" not in kwargs.keys() or kwargs["estimator"] == "gaussian":
@@ -1521,6 +1528,38 @@ class TransferEntropy(InfoTheoryBase, Directed):
                 "ordinal pattern has a single symbol, so the transfer entropy "
                 "is identically zero."
             )
+
+        # The symbolic and kernel estimators implement a single history length
+        # at unit delay. The symbolic calculator reads only k_HISTORY and uses
+        # that one ordinal-pattern length for *both* source and destination;
+        # the kernel calculator likewise. Both previously accepted k_tau,
+        # l_history and l_tau, and the symbolic branch even wrote them into the
+        # identifier -- so `te_symbolic_k-3_kt-1_l-1_lt-1` advertised a
+        # destination history of 3 and a source history of 1 while computing 3
+        # for both. Sentinel defaults distinguish "not supplied" from "supplied
+        # with the value that happens to be the default", so the unsupported
+        # ones can be refused instead of silently dropped.
+        _EMBEDDING_ONLY = ("gaussian", "kraskov")
+        if self._estimator not in _EMBEDDING_ONLY:
+            for name, value in (("k_tau", k_tau), ("l_history", l_history),
+                                ("l_tau", l_tau)):
+                if value is not None:
+                    raise ValueError(
+                        f"{name}={value!r} is not used by "
+                        f"estimator={self._estimator!r}: it computes a single "
+                        f"history length at unit delay, applied to source and "
+                        f"destination alike. Set k_history, or use "
+                        f"estimator='gaussian'/'kraskov' for independently "
+                        f"aligned source and destination embeddings."
+                    )
+        k_tau = 1 if k_tau is None else k_tau
+        l_history = 1 if l_history is None else l_history
+        l_tau = 1 if l_tau is None else l_tau
+
+        for name, value in (("k_history", k_history), ("k_tau", k_tau),
+                            ("l_history", l_history), ("l_tau", l_tau)):
+            if int(value) < 1:
+                raise ValueError(f"{name} must be >= 1, got {value!r}.")
 
         self._calc = self._getcalc("TransferEntropy")
 
@@ -1548,7 +1587,7 @@ class TransferEntropy(InfoTheoryBase, Directed):
                 self.identifier = self.identifier + "_k-max-{}".format(k_search_max)
         else:
             self._calc.setProperty(self._K_HISTORY_PROP_NAME, str(k_history))
-            if self._estimator != "kernel":
+            if self._estimator in _EMBEDDING_ONLY:
                 self._calc.setProperty(self._K_TAU_PROP_NAME, str(k_tau))
                 self._calc.setProperty(self._L_HISTORY_PROP_NAME, str(l_history))
                 self._calc.setProperty(self._L_TAU_PROP_NAME, str(l_tau))
@@ -1556,6 +1595,8 @@ class TransferEntropy(InfoTheoryBase, Directed):
                     k_history, k_tau, l_history, l_tau
                 )
             else:
+                # One history length, unit delay: the identifier says only what
+                # is computed.
                 self.identifier = self.identifier + "_k-{}".format(k_history)
 
     def __setstate__(self, state):

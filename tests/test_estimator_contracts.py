@@ -545,3 +545,53 @@ def test_kozachenko_entropy_still_refuses_tied_data_rather_than_dithering():
 
     with pytest.raises(ValueError, match="tied observations"):
         it.JointEntropy(estimator="kozachenko").multivariate(load_dataset("forex"))
+
+
+# ---------------------------------------------------------------------------
+# TransferEntropy embedding parameters
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("estimator,extra", [
+    ("symbolic", {"k_tau": 2}),
+    ("symbolic", {"l_history": 2}),
+    ("symbolic", {"l_tau": 2}),
+    ("kernel", {"l_history": 1}),
+    ("kernel", {"k_tau": 1}),
+])
+def test_transfer_entropy_refuses_embedding_parameters_it_does_not_implement(
+        estimator, extra):
+    """The identifier must not advertise an embedding that was never applied.
+
+    `SymbolicTECalculator` reads only `k_HISTORY` and uses that one ordinal
+    pattern length for source *and* destination, at unit delay -- which is how
+    Staniek & Lehnertz (2008) define it. It nonetheless accepted `k_tau`,
+    `l_history` and `l_tau`, stored them, ignored them, and wrote them into the
+    identifier: `te_symbolic_k-3_kt-1_l-1_lt-1` claimed a destination history of
+    3 against a source history of 1 while computing 3 for both. The kernel
+    calculator has the same single-history contract and accepted them too,
+    silently. Symbolic identifiers are now `te_symbolic_k-<k>`, as the kernel
+    ones already were.
+    """
+    import pyspi.statistics.infotheory as it
+
+    with pytest.raises(ValueError, match="not used by estimator"):
+        it.TransferEntropy(estimator=estimator, k_history=2, **extra)
+
+
+@pytest.mark.parametrize("bad", [
+    {"k_history": 0}, {"k_history": -1},
+    {"k_tau": 0}, {"l_history": 0}, {"l_tau": -2},
+])
+def test_transfer_entropy_rejects_non_positive_embedding_parameters(bad):
+    """Validated at the API boundary, not discovered as an empty embedding."""
+    import pyspi.statistics.infotheory as it
+
+    with pytest.raises(ValueError, match=">= 1"):
+        it.TransferEntropy(estimator="gaussian", **({"k_history": 1} | bad))
+
+
+def test_symbolic_transfer_entropy_identifier_matches_what_is_computed():
+    import pyspi.statistics.infotheory as it
+
+    assert it.TransferEntropy(estimator="symbolic",
+                              k_history=3).identifier == "te_symbolic_k-3"
