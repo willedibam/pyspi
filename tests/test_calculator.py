@@ -421,3 +421,96 @@ def test_load_table_rejects_non_npz(tmp_path):
     p.write_text("not npz")
     with pytest.raises(ValueError, match="Can only load"):
         pyspi.load_table(p)
+
+
+def test_load_table_exposes_the_metadata_save_writes(tmp_path):
+    """`save()` has always written run_spec, run_digest and errors.
+
+    `load_table()` read none of them, so a loaded table could not be asked
+    which SPIs failed, what produced it, or whether it matched a rerun --
+    and a NaN column is otherwise indistinguishable from a legitimately
+    undefined statistic.
+    """
+    from pyspi.calculator import load_table
+
+    rng = np.random.default_rng(0)
+    calc = Calculator(dataset=Data(data=rng.standard_normal((3, 80)),
+                                   dim_order="ps", procnames=["a", "b", "c"]),
+                      config="fabfour")
+    calc.compute()
+    path = tmp_path / "t.npz"
+    calc.save(path)
+
+    table = load_table(path)
+    assert table.attrs["run_digest"] == calc.run_digest
+    assert table.attrs["errors"] == calc.errors
+    assert table.attrs["run_spec"]["config"] == calc.run_spec["config"]
+    assert list(table.index) == ["a", "b", "c"]
+
+
+def test_load_table_validates_the_whole_shape(tmp_path):
+    """`ndim` and axis 0 only; a wrong width reached MultiIndex.from_product."""
+    from pyspi.calculator import load_table
+
+    path = tmp_path / "bad.npz"
+    np.savez_compressed(
+        path,
+        values=np.zeros((2, 3, 4)),                       # 3x4, not 3x3
+        spis=np.array(["a", "b"], dtype="U"),
+        processes=np.array(["p0", "p1", "p2"], dtype="U"),
+    )
+    with pytest.raises(ValueError, match="malformed"):
+        load_table(path)
+
+
+def test_run_digest_binds_to_the_computation_version(monkeypatch):
+    """Identical data and config computed by two implementations are two results.
+
+    A digest that cannot tell them apart lets a checkpoint written by one be
+    resumed by the other.
+    """
+    from pyspi import _parallel
+
+    calc = Calculator(dataset=np.zeros((2, 20)) + np.arange(20), config="fabfour")
+    before = calc.run_digest
+    monkeypatch.setattr(_parallel, "COMPUTATION_VERSION", "0.0.0-test")
+    assert calc.run_digest != before
+
+
+def test_process_names_must_be_unique_and_round_trip_exactly(tmp_path):
+    """They label the rows and columns, and `to_frame()` stacks on them.
+
+    Duplicates surfaced as pandas' "Columns with duplicate values are not
+    supported in stack" from four frames away, with nothing pointing at the
+    names. Non-string names were written to the NPZ as a `U` array and came
+    back as their `str()`, so the file did not round-trip.
+    """
+    from pyspi.calculator import load_table
+
+    with pytest.raises(ValueError, match="must be unique"):
+        Data(data=np.zeros((3, 20)) + np.arange(20), dim_order="ps",
+             procnames=["a", "a", "b"])
+
+    data = Data(data=np.zeros((2, 40)) + np.arange(40), dim_order="ps",
+                procnames=[1, 2], zscore=False)
+    assert data.procnames == ["1", "2"]
+
+    calc = Calculator(dataset=data, config="fabfour")
+    calc.compute()
+    path = tmp_path / "t.npz"
+    calc.save(path)
+    assert list(load_table(path).index) == data.procnames
+
+
+def test_a_successful_recomputation_clears_a_stale_error():
+    """`compute(retry_failed=True)` left the old entry beside the good column.
+
+    `save()` then froze the contradiction into the file: an SPI recorded as
+    failed whose column is populated.
+    """
+    calc = Calculator(dataset=np.zeros((2, 40)) + np.arange(40), config="fabfour")
+    calc.compute()
+    key = next(iter(calc.spis))
+    calc._errors[key] = "ValueError: stale"
+    calc._record(key, calc.table[key].to_numpy(), None, [], 0.0)
+    assert key not in calc.errors

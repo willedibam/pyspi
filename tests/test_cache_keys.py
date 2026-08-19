@@ -92,3 +92,66 @@ def test_cache_key_covers_every_identifier_parameter():
         f"fs changes the identifier ({a.identifier!r} vs {b.identifier!r}) but not "
         f"the cache key ({a.key!r} == {b.key!r})."
     )
+
+
+@pytest.mark.slow
+def test_cache_sharing_never_changes_a_value():
+    """The automatic coverage check: caching must be an optimisation only.
+
+    A per-SPI check that "different identifier implies different cache key" is
+    the wrong invariant -- several classes cache a shared intermediate on
+    purpose and apply the differing parameters *after* the lookup
+    (`CoherenceMagnitude` caches one connectivity per (measure, fs) and takes
+    the band statistic from it; `Cointegration` caches one Johansen fit and
+    reads two statistics off it). What must hold is the consequence: computing
+    the whole config against one Data, where every cache is shared, must give
+    exactly what computing each SPI against its own Data gives.
+
+    That is mechanical, needs no per-class knowledge, and fails precisely when
+    a parameter that changes the cached value is missing from the key -- the
+    second SPI would be served the first one's intermediate. `dyn_corr_excl`
+    and the spectral `fs` were both of that shape.
+    """
+    import os
+
+    from pyspi.calculator import Calculator, load_spis_from_yaml, resolve_config
+
+    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "data", "fixtures", "var1_M3_T100.npy")
+
+    np.random.seed(42)
+    shared = Calculator(dataset=Data(data=fixture, dim_order="sp"))
+    shared.compute()
+
+    # Soft-DTW barycentres are fitted by gradient descent seeded from the
+    # global RNG, so isolating one moves the RNG position rather than the
+    # cache; `tests/tools/measure_reproducibility.py` shows they reproduce
+    # exactly when the config is computed twice in the same order.
+    RNG_DEPENDENT = {"bary_sgddtw_mean", "bary_sgddtw_max",
+                     "bary-sq_sgddtw_mean", "bary-sq_sgddtw_max"}
+
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    mismatched = []
+    for identifier, spi in spis.items():
+        if getattr(type(spi), "_cache_namespace", None) is None:
+            continue
+        if identifier in RNG_DEPENDENT:
+            continue
+        np.random.seed(42)
+        isolated = np.asarray(spi.multivariate(Data(data=fixture, dim_order="sp")),
+                              dtype=float)
+        got = shared.table[identifier].to_numpy(dtype=float)
+        # Off-diagonal only: `_parallel.run_spi` NaNs the diagonal on the way
+        # into the table, and several `multivariate` implementations do not.
+        off = ~np.eye(got.shape[0], dtype=bool)
+        if not np.allclose(isolated[off], got[off], rtol=1e-9, atol=1e-12,
+                           equal_nan=True):
+            mismatched.append(
+                f"{identifier} (max|diff|="
+                f"{np.nanmax(np.abs(isolated[off] - got[off])):.3g})")
+
+    assert not mismatched, (
+        "these SPIs differ depending on whether their cache was shared, so a "
+        "parameter that changes the cached value is missing from the cache "
+        "key:\n  " + "\n  ".join(sorted(mismatched))
+    )

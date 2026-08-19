@@ -206,8 +206,16 @@ def load_table(path):
         values = f["values"]
         spis = [str(s) for s in f["spis"]]
         procs = [str(p) for p in f["processes"]]
+        # Provenance. `save()` has always written these three and `load_table`
+        # has never read them, so a loaded table could not be asked which SPIs
+        # failed, what produced it, or whether it matched a rerun.
+        meta = {name: str(f[name]) for name in ("run_spec", "run_digest", "errors")
+                if name in f.files}
 
-    if values.ndim != 3 or values.shape[0] != len(spis):
+    # The whole shape, not just `ndim` and axis 0. A file whose matrices were
+    # the wrong width reached `MultiIndex.from_product` and failed there, with
+    # a reshape error rather than a statement about the file.
+    if values.shape != (len(spis), len(procs), len(procs)):
         raise ValueError(
             f"{path} is malformed: values has shape {values.shape}, expected "
             f"({len(spis)}, {len(procs)}, {len(procs)})."
@@ -218,6 +226,18 @@ def load_table(path):
         index=procs,
     )
     table.columns.name = "process"
+    # `DataFrame.attrs` rather than a wrapper type: it is pandas' documented
+    # place for exactly this, and it keeps `load_table` returning the same
+    # object `Calculator.table` does.
+    table.attrs["schema"] = schema
+    for name in ("run_spec", "errors"):
+        if name in meta:
+            try:
+                table.attrs[name] = json.loads(meta[name])
+            except json.JSONDecodeError:
+                table.attrs[name] = meta[name]
+    if "run_digest" in meta:
+        table.attrs["run_digest"] = meta["run_digest"]
     return table
 
 
@@ -419,11 +439,15 @@ class Calculator:
         spec = self.run_spec
         h = hashlib.sha256()
         h.update(json.dumps(spec, sort_keys=True, default=str).encode())
+        # The algorithm, not only its inputs. Identical data and an identical
+        # config computed by two different estimator implementations are two
+        # different results, and a digest that cannot tell them apart lets a
+        # checkpoint from one be resumed by the other. `COMPUTATION_VERSION` is
+        # bumped whenever a change alters computed values.
+        h.update(_parallel.COMPUTATION_VERSION.encode())
         # Hash the config *contents*, not just its path and the identifiers it
-        # produces. Several parameters do not reach the identifier -- changing
-        # dyn_corr_excl from 1 to 10 leaves it as "mi_kraskov_NN-4_DCE" -- so a
-        # config edited in place produced an identical digest and silently
-        # resumed the previous parameterisation's results.
+        # produces. A config edited in place otherwise produced an identical
+        # digest and silently resumed the previous parameterisation's results.
         h.update(self._config_bytes)
         dataset = getattr(self, "_dataset", None)
         if dataset is not None:
@@ -831,6 +855,12 @@ class Calculator:
         if err is not None:
             self._errors[key] = err
             warnings.warn(f'Caught error for SPI "{key}": {err}')
+        else:
+            # A recomputation that succeeds clears the previous failure. Without
+            # this, `compute(retry_failed=True)` on a resumed run left the old
+            # entry in `calc.errors` next to the good column it had just
+            # written, and `save()` froze that contradiction into the file.
+            self._errors.pop(key, None)
 
     def _rmmin(self):
         """Iterate through all spis and remove the minimum (fixes absolute value errors when correlating)"""

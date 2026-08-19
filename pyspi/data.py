@@ -15,6 +15,34 @@ logger = get_logger("pyspi.data")
 
 VERBOSE = False
 
+
+def _validate_procnames(procnames, n_processes):
+    """Coerce process names to unique strings, or say why they cannot be.
+
+    Names are the column and row labels of the results table, and
+    ``Calculator.to_frame()`` stacks on them: duplicates raised pandas'
+    "Columns with duplicate values are not supported in stack" from four frames
+    away, with nothing pointing at the names. They are also written to the NPZ
+    as a ``U`` array, so a non-string name came back as its ``str()`` and the
+    file did not round-trip -- ``procnames=[1, 2]`` loaded as ``["1", "2"]``.
+    Coercing here makes the object and the file agree from the start.
+    """
+    names = [str(p) for p in procnames]
+    if len(names) != n_processes:
+        raise ValueError(
+            f"procnames length ({len(names)}) does not match "
+            f"n_processes ({n_processes})."
+        )
+    duplicates = sorted({n for n in names if names.count(n) > 1})
+    if duplicates:
+        raise ValueError(
+            f"Process names must be unique; {duplicates} appear(s) more than "
+            f"once. They label the rows and columns of the results table, and "
+            f"`Calculator.to_frame()` cannot stack duplicated labels."
+        )
+    return names
+
+
 class Data:
     """Store data for dependency analysis.
 
@@ -120,12 +148,7 @@ class Data:
                 n_observations=n_observations,
             )
             if procnames is not None:
-                if len(procnames) != self.n_processes:
-                    raise ValueError(
-                        f"procnames length ({len(procnames)}) does not match "
-                        f"n_processes ({self.n_processes})."
-                    )
-                self._procnames = list(procnames)
+                self._procnames = _validate_procnames(procnames, self.n_processes)
 
     @classmethod
     def _from_prepared_array(cls, arr, procnames=None, name=None):
@@ -153,9 +176,13 @@ class Data:
         self._data = arr
         self.data_type = arr.dtype.type
         self._name = name or "N/A"
-        if procnames is not None:
-            self._procnames = list(procnames)
         self._reset_data_size()
+        if procnames is not None:
+            # Validated on the internal constructor too. The parallel workers
+            # reach Data only through this path, so skipping the check here
+            # would mean a name set that `Calculator.to_frame()` cannot stack
+            # is caught in a serial run and not in a parallel one.
+            self._procnames = _validate_procnames(procnames, self.n_processes)
         self._sync_procnames()
         return self
 
