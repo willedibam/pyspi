@@ -133,17 +133,8 @@ def warn_partial_cache_buckets(spis):
 
     from collections import defaultdict
 
-    def bucket(spi):
-        """``(namespace, *cache_subkey)`` -- the key that actually shares a cache.
-
-        Namespace alone is too coarse: ``_cache_subkey`` splits one namespace
-        into independent caches (Barycenter caches per mode, so bary_dtw and
-        bary_softdtw share nothing).
-        """
-        ns = getattr(type(spi), "_cache_namespace", None)
-        if ns is None:
-            return None
-        return (ns, *tuple(getattr(spi, "_cache_subkey", ())))
+    # The same definition the scheduler buckets on; see _parallel.cache_bucket.
+    bucket = _parallel.cache_bucket
 
     # Keyed by identifier, not class: a bucket is a set of *variants* (ccm is
     # one class with nine configs), and it is the variants that share the cache.

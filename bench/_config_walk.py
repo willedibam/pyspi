@@ -14,6 +14,10 @@ from pathlib import Path
 
 import yaml
 
+# cache_bucket is re-exported, not redefined: the benchmark tooling, the
+# scheduler and the config advisory must not drift apart on what "shares a
+# cache" means.
+from pyspi._parallel import cache_bucket  # noqa: F401
 from pyspi.calculator import _expand_lagged_correlation_configs, _split_config_params
 
 
@@ -41,15 +45,3 @@ def walk_spis(configfile):
                     ctor_params, _ = _split_config_params(params)
                     spi = cls(**ctor_params)
                 yield module_name, class_name, params, spi.identifier, spi
-
-
-def cache_bucket(spi) -> tuple | None:
-    """``(namespace, *cache_subkey)`` for a shared-cache SPI, else ``None``.
-
-    ``_cache_subkey`` is an optional per-instance tuple that splits a namespace
-    into independent caches (e.g. Barycenter caches per ``mode``).
-    """
-    ns = getattr(type(spi), "_cache_namespace", None)
-    if ns is None:
-        return None
-    return (ns, *tuple(getattr(spi, "_cache_subkey", ())))

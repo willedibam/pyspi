@@ -335,23 +335,70 @@ def _atomic_npy_write(path: Path, arr: np.ndarray) -> None:
     os.replace(tmp, path)
 
 
-def build_tasks(spi_keys, spis) -> list[list[str]]:
-    """Bucket SPI keys by ``_cache_namespace``.
+def cache_bucket(spi):
+    """``(namespace, *_cache_subkey)`` -- the key that actually shares a cache.
 
-    Tagged SPIs sharing a namespace form one multi-SPI task (cache shared
-    on the worker's Data). Untagged SPIs become single-SPI tasks.
+    The one definition of "these SPIs share work", used by the scheduler here,
+    by ``calculator.warn_partial_cache_buckets`` and by ``bench/cut_config.py``.
+    ``None`` for an SPI that caches nothing.
+
+    Namespace alone is too coarse. ``_cache_subkey`` splits a namespace into
+    independent caches -- ``Barycenter`` caches per mode, so ``bary_dtw`` and
+    ``bary_softdtw`` share nothing, and the multitaper spectral SPIs cache per
+    class and sampling frequency. On the ``full`` config the namespaces divide
+    as: spectral_mv 84 SPIs across 16 independent caches, covariance 32 across
+    8, spectral_bv 30 across 5, barycenter 16 across 4, coint 11 across 7,
+    ccm 9 across 3.
+    """
+    ns = getattr(type(spi), "_cache_namespace", None)
+    if ns is None:
+        return None
+    return (ns, *tuple(getattr(spi, "_cache_subkey", ())))
+
+
+# Amortized cost per SPI at the M=16, T=800 anchor cell
+# (bench/results/analysis/report.md). Used only to decide which task a worker
+# picks up first, so a stale or missing entry costs some makespan and nothing
+# else -- it cannot change a computed value. Anything unlisted is treated as
+# cheap.
+_NAMESPACE_COST = {"ccm": 292.7, "barycenter": 11.1, "spectral_bv": 1.6,
+                   "spectral_mv": 0.3, "coint": 0.3, "covariance": 0.3}
+
+
+def build_tasks(spi_keys, spis) -> list[list[str]]:
+    """Bucket SPI keys by the cache they actually share.
+
+    SPIs in one bucket form a multi-SPI task, so the cached intermediate is
+    built once on the worker's Data and reused; SPIs that cache nothing become
+    single-SPI tasks.
+
+    Bucketing by ``_cache_namespace`` alone -- as this did -- serialises SPIs
+    that share no cache at all. On ``full`` it produced one 84-member
+    ``spectral_mv`` task covering 16 independent caches, and the longest task
+    is what bounds the makespan: no amount of parallelism could split it.
+    Bucketing on ``cache_bucket`` gives 43 shareable groups whose largest has
+    24 members.
+
+    Ordering is by estimated cost (members times the namespace's measured
+    amortized cost) rather than member count, so a 3-member ``ccm`` bucket
+    starts before a 24-member ``covariance`` one. This affects scheduling only;
+    every task is computed identically whichever order it runs in.
     """
     cacheless: list[list[str]] = []
-    grouped: dict[str, list[str]] = defaultdict(list)
+    grouped: dict[tuple, list[str]] = defaultdict(list)
     for key in spi_keys:
-        ns = getattr(type(spis[key]), "_cache_namespace", None)
-        if ns is None:
+        bucket = cache_bucket(spis[key])
+        if bucket is None:
             cacheless.append([key])
         else:
-            grouped[ns].append(key)
-    # Largest groups first so workers pick up heavy tasks early — modest help on
-    # makespan, costs nothing.
-    grouped_tasks = sorted(grouped.values(), key=len, reverse=True)
+            grouped[bucket].append(key)
+
+    def cost(item):
+        bucket, keys = item
+        return len(keys) * _NAMESPACE_COST.get(bucket[0], 0.1)
+
+    grouped_tasks = [keys for _, keys in
+                     sorted(grouped.items(), key=cost, reverse=True)]
     return grouped_tasks + cacheless
 
 

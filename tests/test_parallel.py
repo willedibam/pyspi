@@ -230,3 +230,53 @@ def test_cli_exits_nonzero_when_every_spi_is_empty(tmp_path, cli_env):
     code = main(["compute", "--data", str(data), "--quiet",
                  "--config", str(config), "--output", str(tmp_path / "res.npz")])
     assert code == 1
+
+
+# --------------------------------------------------------------------------
+# Task decomposition
+# --------------------------------------------------------------------------
+
+def test_build_tasks_splits_namespaces_into_the_caches_they_actually_share():
+    """The longest task bounds the makespan, so it must not be a fiction.
+
+    `build_tasks` bucketed on `_cache_namespace` alone, which serialises SPIs
+    that share no cache at all: on `full` that produced one 84-member
+    `spectral_mv` task covering 16 independent caches, and no amount of
+    parallelism could split it. `_cache_subkey` is what separates them, and
+    `calculator.warn_partial_cache_buckets` and `bench/cut_config.py` were
+    already using it -- the scheduler was the odd one out.
+    """
+    from pyspi._parallel import build_tasks, cache_bucket
+    from pyspi.calculator import load_spis_from_yaml, resolve_config
+
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    tasks = build_tasks(list(spis), spis)
+
+    assert sorted(k for t in tasks for k in t) == sorted(spis), "keys lost or duplicated"
+
+    # Every task is exactly one cache bucket (or one cacheless SPI).
+    for task in tasks:
+        buckets = {cache_bucket(spis[k]) for k in task}
+        assert len(buckets) == 1, f"task mixes caches: {sorted(buckets)}"
+        if buckets == {None}:
+            assert len(task) == 1
+
+    largest = max(len(t) for t in tasks)
+    assert largest <= 30, (
+        f"largest task has {largest} members; namespace-only bucketing gave 84"
+    )
+
+
+def test_build_tasks_starts_with_the_expensive_buckets():
+    """Ordering is by estimated cost, not member count.
+
+    A 3-member `ccm` bucket (292.7s amortized per SPI at the M=16, T=800 anchor)
+    must be picked up before a 24-member `covariance` one (<0.3s). Scheduling
+    only -- it cannot change a computed value.
+    """
+    from pyspi._parallel import build_tasks
+    from pyspi.calculator import load_spis_from_yaml, resolve_config
+
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    tasks = build_tasks(list(spis), spis)
+    assert tasks[0][0].startswith("ccm_"), f"first task is {tasks[0][0]}"
