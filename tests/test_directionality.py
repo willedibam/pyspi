@@ -222,30 +222,121 @@ def test_directed_coherence_is_bounded():
         )
 
 
-def test_directed_coherence_matches_dtf_under_equal_noise_variances():
-    """DC reduces to sqrt(DTF) when all noise variances are equal.
+class _StubConnectivity:
+    """Minimal stand-in exposing only the two private properties DC reads."""
 
-    A stronger check than boundedness: it pins the *form*, not just the range.
-    The backend's version fails it by construction, since |H|^2 in the
-    numerator is not sqrt of |H|^2/sum|H|^2.
+    def __init__(self, transfer_function, noise_covariance):
+        self._transfer_function = transfer_function
+        self._noise_covariance = noise_covariance
+
+
+def _baccala_dc(H, sigma):
+    """Baccala et al. (1998) DC, written out with explicit loops."""
+    n_f, n = H.shape[-3], H.shape[-1]
+    out = np.zeros((n_f, n, n))
+    for k in range(n_f):
+        for i in range(n):
+            den = np.sqrt(sum(sigma[c] * abs(H[0, k, i, c]) ** 2 for c in range(n)))
+            for j in range(n):
+                out[k, i, j] = np.sqrt(sigma[j]) * abs(H[0, k, i, j]) / den
+    return out
+
+
+def test_directed_coherence_weights_by_the_source_innovation_variance():
+    """The sigma_jj weight is indexed by the *source*, and must not cancel.
+
+    Regression test for a second backend defect, distinct from the |H|^2
+    numerator. ``_get_noise_variance`` reshapes ``diag(Sigma)`` to
+    ``(..., 1, n, 1)``, which broadcasts along the *row* (target) axis of H.
+    A row-indexed weight is constant across the summation index, so it factors
+    out of numerator and denominator and cancels exactly -- the measure
+    degenerates to ``sqrt(DTF)`` for *every* noise covariance. The previous
+    equal-variance test could not see this, because it asserted precisely the
+    identity the bug makes unconditionally true.
+    """
+    from pyspi.statistics.spectral import DirectedCoherence
+
+    rng = np.random.default_rng(0)
+    n_f, n = 7, 3
+    H = (rng.standard_normal((1, n_f, n, n))
+         + 1j * rng.standard_normal((1, n_f, n, n)))
+    sigma = np.array([0.5, 4.0, 0.1])          # unequal *diagonal* variances
+    C = _StubConnectivity(H, np.diag(sigma)[np.newaxis])
+
+    got = DirectedCoherence.__new__(DirectedCoherence)._get_statistic(C)[0]
+    assert np.abs(got - _baccala_dc(H, sigma)).max() < 1e-12
+
+    # Bounded, and exactly row-normalised: sum_j DC_ij^2 == 1.
+    assert got.min() >= 0.0 and got.max() <= 1.0
+    assert np.abs((got ** 2).sum(axis=-1) - 1.0).max() < 1e-12
+
+    # The weight must actually bite. sqrt(DTF) is what the row-indexed form
+    # returns; if this were still close, the variances would be cancelling.
+    mag2 = np.abs(H[0]) ** 2
+    sqrt_dtf = np.sqrt(mag2 / mag2.sum(axis=-1, keepdims=True))
+    assert np.abs(got - sqrt_dtf).max() > 0.1, (
+        "DC collapsed onto sqrt(DTF) despite unequal innovation variances"
+    )
+
+
+def test_directed_coherence_equals_sqrt_dtf_iff_variances_are_equal():
+    """Both halves of the identity, on an *exact* VAR(1) spectrum.
+
+    Equal innovation variances make sigma cancel legitimately, so DC reduces to
+    sqrt(DTF); unequal ones must not. Driving this from the analytic
+    cross-spectrum rather than a sampled estimate keeps the assertion about the
+    factorisation and the algebra, not about finite-sample calibration.
+    """
+    from spectral_connectivity.minimum_phase_decomposition import (
+        minimum_phase_decomposition,
+    )
+    from pyspi.statistics.spectral import DirectedCoherence
+
+    A = np.array([[0.5, 0.0], [0.7, 0.4]])
+    M, n = A.shape[0], 256
+    freqs = np.arange(n) / n
+    H = np.stack([np.linalg.inv(np.eye(M) - A * np.exp(-2j * np.pi * f))
+                  for f in freqs])
+
+    dc = DirectedCoherence.__new__(DirectedCoherence)
+    for sigma, equal in ((np.array([1.0, 1.0]), True),
+                         (np.array([0.25, 4.0]), False)):
+        Sigma = np.diag(sigma)
+        S = H @ Sigma @ np.conj(np.transpose(H, (0, 2, 1)))
+        G = minimum_phase_decomposition(S[np.newaxis, ...])
+        g0 = np.fft.ifft(G, axis=-3).real[..., 0, :, :]
+        H_hat = G @ np.linalg.inv(g0)[:, np.newaxis]
+        Sigma_hat = g0 @ np.transpose(g0, (0, 2, 1))
+
+        # Sigma is recovered even though G is unique only up to a real
+        # orthogonal factor U: g0 = Sigma^{1/2} U, so g0 g0^T = Sigma.
+        assert np.abs(Sigma_hat[0] - Sigma).max() < 1e-6
+
+        got = dc._get_statistic(_StubConnectivity(H_hat, Sigma_hat))[0]
+        assert np.abs(got - _baccala_dc(H_hat, sigma)).max() < 1e-9
+
+        mag2 = np.abs(H_hat[0]) ** 2
+        sqrt_dtf = np.sqrt(mag2 / mag2.sum(axis=-1, keepdims=True))
+        gap = np.abs(got - sqrt_dtf).max()
+        if equal:
+            assert gap < 1e-9, f"DC != sqrt(DTF) at equal variances: {gap:.3g}"
+        else:
+            assert gap > 0.1, f"DC collapsed onto sqrt(DTF): gap {gap:.3g}"
+
+
+def test_directed_coherence_uses_only_the_documented_backend_privates():
+    """Pin the private-API surface DC depends on.
+
+    ``_transfer_function`` and ``_noise_covariance`` are the whole contract;
+    the arithmetic is done in pyspi. Losing either is an import-time-visible
+    break rather than a silently wrong number, which is what the supported
+    version range in pyproject.toml is anchored on.
     """
     import spectral_connectivity as sc
-    from spectral_connectivity.connectivity import _get_noise_variance, _total_inflow
-    from pyspi.statistics.spectral import _ensure_time_series_3d
 
-    A = np.array([[0.5, 0.0, 0.0], [0.7, 0.4, 0.0], [0.0, 0.3, 0.4]])
-    rng = np.random.default_rng(0)
-    T = 4000
-    X = np.zeros((3, T))
-    for t in range(1, T):
-        X[:, t] = A @ X[:, t - 1] + rng.standard_normal(3)
-
-    m = sc.Multitaper(_ensure_time_series_3d(np.transpose(X)), sampling_frequency=1)
-    conn = sc.Connectivity.from_multitaper(m)
-
-    nv = _get_noise_variance(conn._noise_covariance)
-    corrected = np.sqrt(nv) * np.abs(conn._transfer_function) / _total_inflow(
-        conn._transfer_function, nv
-    )
-    err = np.nanmax(np.abs(corrected - np.sqrt(conn.directed_transfer_function())))
-    assert err < 1e-12, f"DC != sqrt(DTF) under equal noise variances: {err:.3g}"
+    for attr in ("_transfer_function", "_noise_covariance"):
+        assert isinstance(getattr(sc.Connectivity, attr, None), property), (
+            f"spectral_connectivity.Connectivity.{attr} is gone; "
+            f"DirectedCoherence cannot be computed. Check the supported "
+            f"spectral-connectivity range in pyproject.toml."
+        )

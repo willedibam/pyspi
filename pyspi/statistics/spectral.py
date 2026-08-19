@@ -1,4 +1,6 @@
+import logging
 import numpy as np
+from contextlib import contextmanager
 from copy import deepcopy
 
 import spectral_connectivity as sc  # For directed spectral statistics (excl. spectral GC)
@@ -24,6 +26,48 @@ except ImportError:
                 "upgrade the package or ensure axis='signals'."
             )
         return time_series[:, np.newaxis, :]
+
+
+@contextmanager
+def _surface_backend_log_warnings():
+    """Re-emit ``spectral_connectivity``'s log warnings as Python warnings.
+
+    Wilson's factorisation is iterative. When it hits its iteration cap it
+    reports that through ``logging.Logger.warning`` -- "Maximum iterations
+    reached. 0 of 1 converged" -- and then *returns the unconverged factor
+    anyway*. Every Wilson-derived measure (directed coherence, DTF, dDTF, PDC,
+    gPDC, nonparametric spectral GC) is computed from that factor.
+
+    pyspi records per-SPI diagnostics from the ``warnings`` channel only
+    (``_parallel.run_spi``), and logging is a different channel, so an
+    unconverged factorisation reached the results table with nothing recorded
+    against it. On the bundled ``kuramoto_M7_T100`` fixture that is 2 of 21
+    pairs; the relative factorisation residual ``max|S - GG^H| / max|S|`` there
+    runs 0.14-6.0 across pairs, so these are not marginal numbers.
+
+    This bridges the two channels for the duration of one backend call. It does
+    not change any value: the point is that a caller inspecting
+    ``calc.errors``/warnings can now see which pairs the factorisation failed
+    on. Improving the estimate itself (longer series, a parametric VAR fit, or
+    a tighter multitaper configuration) is the user's call, not something pyspi
+    can do behind their back.
+    """
+    records = []
+
+    class _Collect(logging.Handler):
+        def emit(self, record):
+            records.append(record.getMessage())
+
+    handler = _Collect(level=logging.WARNING)
+    backend = logging.getLogger("spectral_connectivity")
+    backend.addHandler(handler)
+    try:
+        yield
+    finally:
+        backend.removeHandler(handler)
+    # dict.fromkeys: one warning per distinct message, not per frequency bin.
+    for message in dict.fromkeys(records):
+        warnings.warn(f"spectral_connectivity: {message}", RuntimeWarning)
 
 
 def _ensure_time_series_3d(z):
@@ -167,13 +211,17 @@ class NonparametricSpectralMultivariate(NonparametricSpectral):
         # `_recompute` lets a subclass override a backend measure outright, not
         # just when the backend raises. DirectedCoherence needs this: the
         # backend's method returns fine, it is simply unbounded.
-        if getattr(self, "_recompute", False):
-            res = self._get_statistic(conn)
-        else:
-            try:
-                res = getattr(conn, self.measure)()
-            except TypeError:
+        # The Connectivity object is lazy, so the factorisation happens inside
+        # this block, not at construction -- which is why the bridge wraps the
+        # measure extraction rather than `from_multitaper`.
+        with _surface_backend_log_warnings():
+            if getattr(self, "_recompute", False):
                 res = self._get_statistic(conn)
+            else:
+                try:
+                    res = getattr(conn, self.measure)()
+                except TypeError:
+                    res = self._get_statistic(conn)
 
         freq = conn.frequencies
         cache[self.key] = res
@@ -245,13 +293,14 @@ class NonparametricSpectralBivariate(NonparametricSpectral):
         # `_recompute` lets a subclass override a backend measure outright, not
         # just when the backend raises. DirectedCoherence needs this: the
         # backend's method returns fine, it is simply unbounded.
-        if getattr(self, "_recompute", False):
-            res = self._get_statistic(conn)
-        else:
-            try:
-                res = getattr(conn, self.measure)()
-            except TypeError:
+        with _surface_backend_log_warnings():
+            if getattr(self, "_recompute", False):
                 res = self._get_statistic(conn)
+            else:
+                try:
+                    res = getattr(conn, self.measure)()
+                except TypeError:
+                    res = self._get_statistic(conn)
 
         freq = conn.frequencies
         cache[measure_key] = res
@@ -380,16 +429,50 @@ class DirectedCoherence(NonparametricSpectralBivariate, Directed):
     """Directed coherence (Baccala et al. 1998).
 
     ``DC_ij(f) = sqrt(sigma_jj) |H_ij(f)| / sqrt(sum_k sigma_kk |H_ik(f)|^2)``,
-    bounded in [0, 1].
+    where ``H`` is the transfer function in the backend's ``[target, source]``
+    convention and ``sigma_kk`` is the innovation variance of process ``k``.
+    Bounded in [0, 1], with ``sum_j DC_ij^2 == 1`` by construction.
 
-    The backend's ``directed_coherence()`` puts the *squared* magnitude in the
-    numerator while the denominator stays on the magnitude scale, so the ratio
-    is dimensionally |H|^2 / |H| and unbounded: the shipped baselines reached
-    3.27 (VAR), 1.84 (CML) and 1139.47 (Kuramoto). This recomputes it from the
-    same transfer function with |H| in the numerator. Checked two ways: the
-    result is bounded in [0, 1], and with an identity noise covariance it
-    reproduces sqrt(directed_transfer_function()) to 4e-16, which is the
-    identity DC satisfies when all noise variances are equal.
+    Two things are wrong with the backend's ``directed_coherence()``:
+
+    1. It puts the *squared* magnitude in the numerator while the denominator
+       stays on the magnitude scale, so the ratio is dimensionally |H|^2 / |H|
+       and unbounded -- the shipped baselines reached 3.27 (VAR), 1.84 (CML)
+       and 1139.47 (Kuramoto).
+    2. ``_get_noise_variance`` reshapes ``diag(Sigma)`` to ``(..., 1, n, 1)``,
+       which broadcasts the variance along the *row* (target) axis of ``H``.
+       Baccala's weight is indexed by the *source*. With the weight on the row
+       it factors out of numerator and denominator alike and cancels exactly,
+       so the innovation variances have no effect at all: the measure silently
+       degenerates to ``sqrt(directed_transfer_function())`` for *every* noise
+       covariance, not just the equal-variance case. Verified: with innovation
+       standard deviations (1, 3, 0.2) the row-indexed form still reproduces
+       sqrt(DTF) to 4e-16.
+
+    Both are corrected here by recomputing from the same transfer function with
+    ``|H|`` in the numerator and the variance broadcast along the source axis.
+    The equal-variance identity ``DC == sqrt(DTF)`` now *discriminates*: it
+    holds only when the innovation variances are in fact equal.
+
+    Correlated innovations
+    ----------------------
+    Baccala's formula uses only ``diag(Sigma)``. Two properties are unaffected
+    by off-diagonal innovation covariance: the value stays in [0, 1] (the
+    denominator contains the numerator's term), and ``sum_j DC_ij^2 == 1``
+    holds identically. What does *not* survive is the reading of ``DC_ij^2`` as
+    the fraction of process ``i``'s spectral power arriving from ``j``: that
+    requires ``S_ii = sum_j sigma_jj |H_ij|^2``, which holds only for diagonal
+    ``Sigma``. This is not academic -- the Wilson-estimated innovation
+    correlation on the bundled fixtures reaches 0.14 (VAR), 0.64 (CML) and
+    1.00 (Kuramoto).
+
+    Whitening is *not* applied. The minimum-phase factor ``G = H L`` with
+    ``L = g_0`` triangular would give an exactly power-decomposing variant, but
+    a triangular factor is order-dependent: recomputing the same pair as
+    ``[j, i]`` yields a different ``L`` (measured, not permutation-related), so
+    a pairwise SPI built on it would depend on process order -- the defect that
+    made ``coint_aeg`` wrong. Baccala's published diagonal form is order-free,
+    so it is what is computed, with the assumption stated rather than hidden.
     """
 
     name = "Directed coherence"
@@ -402,12 +485,16 @@ class DirectedCoherence(NonparametricSpectralBivariate, Directed):
         self._recompute = True
 
     def _get_statistic(self, C):
-        from spectral_connectivity.connectivity import (
-            _get_noise_variance, _total_inflow,
-        )
-        H = C._transfer_function
-        nv = _get_noise_variance(C._noise_covariance)
-        return np.sqrt(nv) * np.abs(H) / _total_inflow(H, nv)
+        # Deliberately does not use the backend's _get_noise_variance /
+        # _total_inflow helpers: the first carries the source/target axis bug
+        # described above, and doing the algebra here keeps the private-API
+        # surface down to the two properties (see test_backend_private_api).
+        H = C._transfer_function                       # (..., f, target, source)
+        sigma = np.diagonal(C._noise_covariance, axis1=-1, axis2=-2)   # (..., n)
+        sigma = sigma[..., np.newaxis, np.newaxis, :]  # broadcast along `source`
+        mag2 = np.abs(H) ** 2
+        inflow = np.sqrt(np.sum(sigma * mag2, axis=-1, keepdims=True))
+        return np.sqrt(sigma) * np.abs(H) / inflow
 
 
 class PartialDirectedCoherence(NonparametricSpectralBivariate, Directed):

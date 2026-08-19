@@ -325,3 +325,39 @@ def test_conditional_entropy_is_directed():
         spi = it.ConditionalEntropy(estimator=est)
         assert "directed" in spi.labels, f"{est} lost the directed label"
         assert "undirected" not in spi.labels
+
+
+def test_wilson_non_convergence_is_reported_not_swallowed():
+    """A failed spectral factorisation must reach the caller's warnings.
+
+    Wilson's algorithm is iterative and, on hitting its iteration cap, reports
+    "Maximum iterations reached. N of M converged" through
+    ``logging.Logger.warning`` and returns the unconverged factor anyway. Every
+    Wilson-derived measure (DC, DTF, dDTF, PDC, gPDC, nonparametric spectral
+    GC) is built from that factor.
+
+    pyspi collects per-SPI diagnostics from the ``warnings`` channel only, so
+    before the bridge in ``statistics/spectral.py`` those numbers reached the
+    results table with nothing recorded against them. This is not hypothetical:
+    it fires on a *bundled* fixture. Same class of defect as the six SPIs above
+    -- a value that is quietly not what it claims to be.
+    """
+    import os
+    import warnings
+
+    from pyspi.data import Data
+    from pyspi.statistics.spectral import DirectedCoherence
+
+    fixture = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "data", "fixtures", "kuramoto_M7_T100.npy")
+    data = Data(data=fixture, dim_order="sp")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        DirectedCoherence(statistic="mean", fmin=0, fmax=0.5).multivariate(data)
+
+    messages = [str(w.message) for w in caught]
+    assert any("Maximum iterations reached" in m for m in messages), (
+        "the backend's factorisation-convergence warning was swallowed; "
+        f"caught instead: {messages}"
+    )
