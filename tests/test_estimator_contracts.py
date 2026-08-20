@@ -880,12 +880,13 @@ def test_ksg_matches_an_independent_brute_force_reference():
 def test_ksg_mi_of_a_variable_with_itself_is_its_discrete_entropy(n):
     """Duplicate columns must not share a dither.
 
-    They did, so the dither never broke the degeneracy: the joint cloud
-    collapsed onto the diagonal, every neighbour radius stayed at the dither
-    scale, and the estimate reduced to psi(k) - 2*psi(k+1) + psi(N) -- a
-    function of N and k with no dependence on the data. Measured 4.04, 4.73,
-    5.43 and 6.12 nats at N = 200, 400, 800, 1600, growing by ln 2 per
-    doubling, and *identical* (4.7341 at N=400) for binary, four-level and
+    They did, so the dither never broke the degeneracy. With x == y exactly,
+    every joint L-infinity distance equals the marginal one, so the kth joint
+    radius is the kth marginal radius and strict counting gives
+    n_x = n_y = k - 1; the estimate collapses to psi(N) - psi(k), with no
+    dependence on the data. Measured 4.0397, 4.7341, 5.4279 and 6.1213 nats at
+    N = 200, 400, 800, 1600 with k = 4 -- psi(N) - psi(4) to four decimals at
+    every N -- and *identical* (4.7341 at N=400) for binary, four-level and
     rounded-Gaussian duplicates.
 
     For a discrete X the finite oracle is exact: I(X + eps*a; X + eps*b) -> H(X)
@@ -895,6 +896,8 @@ def test_ksg_mi_of_a_variable_with_itself_is_its_discrete_entropy(n):
     """
     from pyspi.statistics.infotheory import _ksg_mi_pair
 
+    from scipy.special import digamma
+
     rng = np.random.default_rng(0)
     for levels in (2, 4):
         x = rng.integers(0, levels, n).astype(float)
@@ -903,6 +906,10 @@ def test_ksg_mi_of_a_variable_with_itself_is_its_discrete_entropy(n):
         got = _ksg_mi_pair(x, x.copy(), 4, 0)
         assert got == pytest.approx(entropy, abs=0.12), (
             f"{levels}-level duplicate at N={n}: {got:.4f} vs H(X)={entropy:.4f}")
+        # ... and emphatically not the shared-dither closed form.
+        degenerate = float(digamma(n) - digamma(4))
+        assert abs(got - degenerate) > 1.0, (
+            f"still on the psi(N) - psi(k) = {degenerate:.4f} branch")
 
 
 def test_ksg_dither_is_symmetric_and_repeatable_including_duplicates():
@@ -1165,8 +1172,14 @@ def test_sigonly_returns_zero_when_no_lag_clears_the_threshold(statistic, square
 
 @pytest.mark.parametrize("sign", [+1, -1])
 def test_cross_correlation_reports_the_sign_of_the_association(sign):
-    """`max` is a signed maximum over lags, so it tracks the largest *positive*
-    correlation; `mean` carries the sign; the squared variants carry neither.
+    """What each reduction actually reports.
+
+    `max` is the largest *retained positive* correlation, not the strongest
+    association: on an anticorrelated pair whose true r(0) is -1, `xcorr_max`
+    returns a small positive number, because the maximum of a signed profile is
+    a maximum. `mean` carries the sign. The squared variants carry the strength
+    without it. That is the shipped semantics and this pass does not redesign
+    it; the test records it so it cannot be mistaken for a defect later.
 
     Asserted on the returned SPI values rather than on the cached lag profile,
     since the reduction and the thresholding are where the bugs were.
@@ -1427,3 +1440,28 @@ def test_validated_value_is_the_one_used_in_identifier_and_cache_key():
     assert spi.identifier == "mi_kraskov_NN-6_DCE-3"
     assert spi._getkey() == ("kraskov", 6, 3)
     assert all(type(v) is int for v in spi._getkey()[1:])
+
+
+def test_the_dither_realisation_does_not_move_a_continuous_estimate():
+    """Why appending a replica index to the key moved no bundled value.
+
+    The key changed for every column, not just for duplicates -- but only the
+    *integer* neighbour counts enter the estimate, and a 1e-8 perturbation does
+    not change which points fall inside the radius. The dither breaks ties; it
+    does not participate in the arithmetic.
+    """
+    import pyspi.statistics.infotheory as it
+
+    rng = np.random.default_rng(0)
+    z = rng.standard_normal(300)
+    y = 0.7 * z + 0.7 * rng.standard_normal(300)
+
+    original = it._KNN_NOISE_SEED
+    try:
+        values = []
+        for seed in (42, 43, 12345, 99999):
+            it._KNN_NOISE_SEED = seed
+            values.append(it._ksg_mi_pair(z, y, 4, 0))
+    finally:
+        it._KNN_NOISE_SEED = original
+    assert len(set(values)) == 1, values

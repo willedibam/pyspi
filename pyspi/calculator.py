@@ -369,7 +369,7 @@ class Calculator:
             Which SPIs to compute. Either the name of a bundled config or a path
             to your own YAML file, default="full". Bundled configs are:
 
-            - ``"full"`` -- every SPI (~328).
+            - ``"full"`` -- every SPI (325).
             - ``"fast"`` -- drops the slowest SPIs.
             - ``"sonnet"`` -- 14 representative SPIs, one per module (M01-M14).
             - ``"fabfour"`` -- 4 SPIs: covariance, Spearman, directed information,

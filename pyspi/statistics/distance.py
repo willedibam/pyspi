@@ -53,10 +53,12 @@ class PairwiseDistance(Undirected, Unsigned):
     identifier. For ``metric="euclidean"`` that is exactly the root mean square
     difference, ``sqrt(mean((x - y)**2))``, and the name is literal. For the
     other metrics -- cityblock, cosine, chebyshev, canberra, braycurtis -- the
-    suffix is pyspi's house label for "divided by sqrt(T)" and nothing more:
-    those quantities are not root *mean* squares, and the division only puts
-    them on a comparable scale across record lengths. Read `_rmse` as the
-    normalisation, not as a claim about the metric.
+    suffix is pyspi's house label for "divided by sqrt(T)" and nothing more.
+    Those quantities are not root *mean* squares, and dividing them by sqrt(T)
+    does **not** make them comparable across record lengths either -- only the
+    Euclidean norm grows as sqrt(T) under i.i.d. differences, so only for
+    `euclidean` is the division the right power. Read `_rmse` as the name of the
+    normalisation that was applied, not as a claim about the metric.
     """
 
     name = "Pairwise distance"

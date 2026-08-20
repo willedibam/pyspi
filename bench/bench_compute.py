@@ -62,7 +62,7 @@ PRESETS = {
 TRACKED_DEPS = (
     "pyspi", "numpy", "scipy", "pandas", "scikit-learn", "statsmodels",
     "mne", "mne-connectivity", "spectral-connectivity", "nitime",
-    "hyppo", "cdt", "torch", "tslearn", "dtaidistance", "pyEDM",
+    "hyppo", "tslearn", "dtaidistance", "pyEDM",
     "h5py", "pyyaml", "tqdm",
 )
 

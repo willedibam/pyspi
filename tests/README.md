@@ -33,32 +33,38 @@ corrupt baseline can never break collection of unrelated tests.
 ### Contract tests (originally red)
 
 These files began as *red* tests: assertions for behaviour the package did not
-yet have. Nearly all are now green, and the handful that remain are marked
-`@pytest.mark.xfail(strict=True, reason=...)` with their reasoning in the
-marker. Strict xfail means:
+yet have. All but one are now green. The single remaining marker is
+`test_structural_traits.py::test_no_bundled_spi_returns_a_constant_matrix`,
+`@pytest.mark.xfail(strict=True)`, and it records a **fixture/low-data finding,
+not a proven universal defect**: `dspli_*_max`, `dswpli_*_max` and one
+`phase_*_max` variant return a constant matrix on `var1_M3_T100` (M=3, T=100),
+which carries no pairwise information *on that fixture*. Whether it holds at
+larger M or T has not been established, and no SPI should be removed on this
+evidence alone.
 
-* the suite stays green while the fixes are outstanding, so these can be merged
-  before the fixes without breaking CI;
-* `strict=True` turns an *unexpected pass* into a failure. When a fix lands, the
-  test fails until the marker is deleted — so a marker cannot silently outlive
-  the bug it describes.
+`strict=True` turns an *unexpected pass* into a failure, so when the question is
+settled the test fails until the marker is deleted -- a marker cannot silently
+outlive the finding it describes.
 
 Two rules when working on these:
 
-1. **Never relax an assertion to make one pass.** Delete the marker instead.
+1. **Do not relax an assertion to make one pass.** Fix the code, or leave the
+   marker.
 2. **Check the failure reason, not just the xfail count.** Several of these
-   initially "failed" for reasons unrelated to the bug under test — a vacuous
+   initially "failed" for reasons unrelated to the bug under test -- a vacuous
    comparison, a wrong keyword, a config name passed where a path was wanted. An
    xfail proves nothing until you have seen the message. Run with `--runxfail`
    to see it.
 
 One trap worth naming: `parse_bivariate`'s signature is
 `(self, data, data2=None, i=None, j=None)`, so `spi.bivariate(data, 0, 1)` binds
-`data2=0, i=1` and dies with an unrelated dimension error. Always pass `i=`/`j=`
-by keyword.
+`data2=0, i=1`. That is now rejected with a message naming the signature (it
+used to reach `z[None]`, which numpy reads as `np.newaxis`, and compute
+something unrelated). Always pass `i=`/`j=` by keyword.
 
-Log base matters when reading these: `gaussian`, `kraskov` and `kozachenko`
-report **nats**; `kernel` and `symbolic` report **bits** (inherited from JIDT).
+Log base: every information-theoretic estimator reports **nats**. `kernel` and
+`symbolic` used to report bits, inherited from JIDT's base-2 box-kernel and
+discrete estimators; divide by ln 2 for the JIDT-comparable value.
 
 ## Baselines
 

@@ -178,7 +178,7 @@ class CrossCorrelation(Undirected, Signed):
         # *single* correlation between two independent white series, and
         # neither of the two things that would make it a significance test is
         # done here -- the band is not inflated for the series'
-        # autocorrelation (which is what Bartlett's formula is for), and it is
+        # autocorrelation, and it is
         # not corrected for having been applied at every one of the ~T/2 lags
         # in the window. Read it as "drop the small lags", not as "these lags
         # are significant".

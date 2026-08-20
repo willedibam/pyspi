@@ -49,8 +49,8 @@ _pyspi_ requires **Python 3.10 or newer**.
 pip install pyspi
 ```
 
-_pyspi_ depends on a large scientific stack (including `torch` and `cdt`), so
-installing into a dedicated environment is strongly recommended:
+_pyspi_ depends on a large scientific stack, so installing into a dedicated
+environment is strongly recommended:
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
@@ -175,8 +175,8 @@ python -m pyspi compute --data "datasets/${PBS_ARRAY_INDEX}.npy" \
 resumes from those on a re-run, so a job killed at the walltime limit picks up
 where it stopped. `PYSPI_N_JOBS` sets `n_jobs` from the environment.
 
-When `n_jobs > 1`, workers pin their nested thread pools (OpenBLAS/MKL/OpenMP,
-`cdt`, `torch`, `pyEDM`) to one thread each to avoid oversubscription. macOS is
+When `n_jobs > 1`, workers pin their nested BLAS/OpenMP thread pools to one
+thread each to avoid oversubscription. macOS is
 an exception: its Accelerate BLAS cannot be pinned this way, so prefer `n_jobs=1`
 there for a single dataset.
 

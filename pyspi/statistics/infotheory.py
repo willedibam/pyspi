@@ -648,20 +648,32 @@ def _knn_condition(X, noise_level=_KNN_NOISE_LEVEL, seed=_KNN_NOISE_SEED):
       salted per interpreter.
     * Keying on the replica index is what stops two identical columns receiving
       the *same* dither. They previously did, so the dither never broke the
-      degeneracy between them: on identical binary series the joint cloud
-      collapsed onto the diagonal, every neighbour radius stayed at the dither
-      scale, and MI came back as psi(k) - 2*psi(k+1) + psi(N) -- a number that
-      depends only on N and k. Measured 4.04, 4.73, 5.43, 6.12 nats at
-      N = 200, 400, 800, 1600, growing by ln 2 per doubling, against a true
-      value of H(X) = ln 2 = 0.693. Four-level and rounded-Gaussian duplicates
-      returned the same 4.73 at N=400, which is the giveaway: the estimate was
-      not a function of the data at all.
+      degeneracy between them, and the estimate had a closed form with no
+      dependence on the data at all. With x == y exactly, every joint L-infinity
+      distance equals the marginal one, so the kth joint neighbour radius is the
+      kth marginal radius; strict marginal counting then gives
+      n_x = n_y = k - 1, and
 
-    Symmetry survives. Two distinct columns are each replica 0, so they draw
-    exactly the noise their contents determine and `MI(x, y) == MI(y, x)`
-    identically; two identical columns draw replicas 0 and 1 in slot order, and
-    swapping the slots permutes identical values, which the estimator cannot
-    see. Nothing here touches the global RNG.
+          MI = psi(k) - 2*psi((k-1) + 1) + psi(N) = psi(N) - psi(k).
+
+      Measured 4.0397, 4.7341, 5.4279 and 6.1213 nats at N = 200, 400, 800,
+      1600 with k = 4, which is psi(N) - psi(4) to four decimals at every N.
+      The true value is H(X) = ln 2 = 0.693. Four-level and rounded-Gaussian
+      duplicates returned the same 4.7341 at N = 400, which is the giveaway.
+
+    Scope: this changes only the paths where a conditioning call contains
+    byte-identical normalised coordinate occurrences -- duplicate or exactly
+    collinear processes, and a source that equals its target. Ordinary pairs of
+    distinct coordinates are each replica 0 and draw exactly the noise their
+    contents determine. Note the *key* changed for every column when the replica
+    index was appended, yet no continuous result moved: only the integer
+    neighbour counts enter the estimate, and a 1e-8 perturbation does not change
+    which points fall inside the radius.
+
+    Symmetry survives. Two distinct columns are each replica 0, so
+    `MI(x, y) == MI(y, x)` identically; two identical columns draw replicas 0
+    and 1 in slot order, and swapping the slots permutes identical values, which
+    the estimator cannot see. Nothing here touches the global RNG.
     """
     X = np.asarray(X, dtype=np.float64)
     reshaped = X.ndim == 1

@@ -177,11 +177,12 @@ def test_antisymmetric_measures_are_labelled_as_such():
 @pytest.mark.xfail(
     strict=True,
     reason=(
-        "Open finding, not yet resolved. dspli_*_max, dswpli_*_max and one "
-        "phase_*_max variant return a constant matrix on var1_M3_T100, so "
-        "they carry no pairwise information on this fixture. Whether that "
-        "holds generally or is specific to M=3/T=100 needs checking before "
-        "any of them is removed from the shipped set."
+        "Fixture/low-data finding, not a proven universal defect. "
+        "dspli_*_max, dswpli_*_max and one phase_*_max variant return a "
+        "constant matrix on var1_M3_T100 (M=3, T=100), so on that fixture "
+        "they carry no pairwise information. Whether it holds at larger M or "
+        "T has not been established, and none of them should be removed from "
+        "the shipped set on this evidence alone."
     ),
 )
 def test_no_bundled_spi_returns_a_constant_matrix():
