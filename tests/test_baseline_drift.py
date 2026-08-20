@@ -11,10 +11,10 @@ What is ENFORCED (hard assertion failure):
     categorical regression, not drift — this fork changed NaN-on-failure
     semantics, so that is precisely the signal worth failing on.
 
-What is REPORTED but NOT enforced:
+What is also ENFORCED:
   * numerical drift in the finite entries. Exceedances are routed to a
-    session-end summary table via ``spi_warning_logger`` (see conftest.py) so
-    library/BLAS version bumps are visible without blocking CI.
+    session-end summary table via ``spi_warning_logger`` (see conftest.py) and
+    hard-fail this test.
 
 Baselines live in ``tests/data/baselines/<dataset>.npz`` (one MxM array per
 SPI identifier) and are regenerated from the *current* fork by
@@ -210,7 +210,7 @@ def test_baseline_covers_every_spi(dataset_name, baseline_tables, current_tables
 
 def test_baseline_drift(dataset_name, spi_key, baseline_tables, current_tables,
                         spi_warning_logger):
-    """Hard-fail on shape or NaN-pattern change; report numerical drift."""
+    """Hard-fail on shape, NaN-pattern, or excessive numerical drift."""
     ref = baseline_tables(dataset_name)[spi_key]
     tables, spis, _ = current_tables(dataset_name)
     assert spi_key in tables, (
