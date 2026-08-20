@@ -241,20 +241,22 @@ The previous release note claimed verification "under an identity noise covarian
 | `dcoh_*` (6) | Directed coherence weights by the *source* innovation variance, which the backend's helper cancelled out. |
 | `ccm_E-None_*` (3) | The auto-embedding search returns `argmax(rho)` instead of `max(E)`, which was pinning every process at E=10. |
 | `gd_*` (3) | Group delay is computed rather than returned all-NaN by a backend whose one-sample significance test divides by the square root of a negative number. |
-| `xcorr_*`, `xcorr-sq_*` (6) | Biased normalisation, demeaning, a symmetric lag window, a `1.96/sqrt(T)` amplitude cut, and a `sigonly` rule invariant under l → −l that returns 0 when nothing clears it. |
+| `xcorr_*`, `xcorr-sq_*` (6) | Biased normalisation, demeaning, a symmetric lag window, a `1.96/sqrt(T)` amplitude cut, and a `sigonly` rule invariant under l → −l that returns 0 when nothing clears it. On `kuramoto_M7_T100` that last change alone moves 16 of 42 pairs, each from a value the old code had itself judged below the cut (0.109–0.195) to 0. |
 | `sgc_*_fmin-0-25_*` (6) | The NaN mask is now transformed into the same orientation as the values it masks. |
 | `mi_kraskov_*`, `tlmi_kraskov_*`, `te_kraskov_*`, `di_kraskov_*` (10) | JIDT's `NORMALISE` and 1e-8 dither restored. |
 | `*_kernel_*` (9) | Reported in nats rather than bits. |
 | `mi_gaussian`, `tlmi_gaussian`, `gc_gaussian_*`, `je_gaussian`, `ce_gaussian`, `cce_gaussian_*`, `xme_gaussian_*`, `si_gaussian`, `di_gaussian_n-5` (~14, ≲1e-8 relative) | One shared Gaussian ridge across every path, proportional to each variable's own variance. |
-| `te_kraskov_NN-4_DCE-AUTO_k-max-10_tau-max-4` | Auto-embedding skips embeddings the estimator cannot support. |
+| `te_kraskov_NN-4_DCE-AUTO_MAX-CORR-AIS_*`, `te_kraskov_NN-4_MAX-CORR-AIS_*`, `gc_gaussian_MAX-CORR-AIS_*` (3) | `MAX_CORR_AIS` now selects the source embedding as well as the destination, instead of hard-coding the source to (1, 1). Auto-embedding also skips embeddings the estimator cannot support. |
+| every `kraskov` SPI (10) | The dither is drawn per coordinate *occurrence*, so duplicate columns no longer share it. |
 
-**Renamed (20)** — no value change. In every case a parameter that changes the measure was absent from, or misreported by, the identifier.
+**Renamed (23)** — no value change. In every case a parameter that changes the measure was absent from, or misreported by, the identifier.
 
 | Was | Is | Why |
 |:----|:---|:----|
 | `sgc_*_fmin-0_*` (12) | `sgc_*_fmin-1e-05_*` | Spectral GC is undefined at zero frequency, so `fmin=0` is overridden — but the identifier was built from the argument. |
 | `*_DCE` (4) | `*_DCE-AUTO` | The Theiler window's value, not just its presence: 5, 10 and `"AUTO"` shared one name. |
 | `cce_gaussian`, `cce_kernel_W-0.5`, `cce_kozachenko`, `di_gaussian` (4) | `..._n-5` | `n` changes the measure. |
+| `te_kraskov_*_k-max-*`, `gc_gaussian_k-max-*` (3) | `..._MAX-CORR-AIS_k-max-*` | The auto-embedding method changes what is computed, and `MAX_CORR_AIS` no longer means what it did. These three also change value — see below. |
 
 Symbolic transfer entropy identifiers also lose the three embedding parameters the estimator never applied: `te_symbolic_k-<k>_kt-1_l-1_lt-1` → `te_symbolic_k-<k>`. No symbolic variant is shipped, so no bundled SPI is affected.
 

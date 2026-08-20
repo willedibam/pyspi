@@ -396,9 +396,14 @@ def build_tasks(spi_keys, spis) -> list[list[str]]:
 
 MANIFEST_NAME = "run.json"
 SCHEMA_VERSION = 1
-# Bumped when a change alters computed values, so checkpoints cannot outlive
-# the algorithm that produced them.
-COMPUTATION_VERSION = "3.0.0"
+# Bumped when a change alters computed values, so checkpoints cannot outlive the
+# algorithm that produced them, and so `Calculator.run_digest` separates results
+# that differ only by implementation. `<release>.r<revision>`: the revision is a
+# counter within a release, not a version of anything -- only equality is ever
+# tested. r2 covers the KSG per-occurrence dither, full MAX_CORR_AIS, the
+# group-delay sample scaling and |r|, and the cross-correlation threshold
+# returning zero when nothing clears it.
+COMPUTATION_VERSION = "3.0.0.r2"
 
 
 def read_manifest(checkpoint_dir: Path):
