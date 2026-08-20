@@ -6,11 +6,13 @@ in ``Data._CACHE_ATTRS`` is dropped when the series change, the builder path
 works, process names track add/remove, and ``dim_order``/non-finite inputs are
 validated.
 
-What remains red is marked ``xfail(strict=True)``: CI stays green while the fix
-is outstanding, and the strict marker turns the eventual unexpected pass into a
-failure so it cannot outlive the bug.
+Nothing here is red any more -- the last outstanding one, positional
+``bivariate(data, i, j)`` binding ``i`` to ``data2``, is now rejected at the
+decorator. Any future red test in this file should be marked
+``xfail(strict=True)`` so CI stays green while the fix is outstanding and the
+eventual unexpected pass fails rather than passing silently.
 
-Do not relax an assertion to make one of these pass. Delete the marker.
+Do not relax an assertion to make one of these pass. Fix the code.
 """
 import numpy as np
 import pytest
@@ -126,18 +128,19 @@ def test_bivariate_accepts_raw_arrays():
     assert np.isfinite(val)
 
 
-@pytest.mark.xfail(strict=True, reason="bivariate(data, 0, 1) binds 0 to data2, not to i")
 def test_bivariate_rejects_indices_passed_positionally():
     """``bivariate(data, 0, 1)`` reads as (data, i, j) but binds data2=0, i=1.
 
-    The result is an obscure dimension error from deep inside an estimator
-    rather than a clear rejection, and it is easy to mistake for a numerical
-    bug in the estimator itself.
+    It used to produce an obscure dimension error from deep inside an estimator
+    -- or, worse, no error at all: ``j=None`` reached ``z[None]``, which numpy
+    reads as ``np.newaxis``, so the "pair" became the whole (1, M, T) block and
+    the SPI computed something unrelated to what was asked for. Now rejected at
+    the decorator, with a message that names the signature.
     """
     from pyspi.statistics import infotheory as it
 
     data = Data(data=_mts(m=2, t=200), dim_order="ps")
-    with pytest.raises(TypeError):
+    with pytest.raises(ValueError, match="Both i and j must be given"):
         it.MutualInfo(estimator="kraskov").bivariate(data, 0, 1)
 
 

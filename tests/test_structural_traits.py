@@ -19,8 +19,8 @@ Resolved here:
 * ``hhg`` was declared directed but is exactly symmetric; ``ce``, ``dcorrx``
   and ``mgcx`` were labelled undirected in configs but are directed.
 
-Two open findings remain, marked ``xfail(strict=True)`` with their reasoning in
-the marker. They are recorded rather than silently patched because each needs a
+One open finding remains, marked ``xfail(strict=True)`` with its reasoning in
+the marker. It is recorded rather than silently patched because it needs a
 scientific decision, not a code change.
 
 The audit reads the committed baseline matrices, so it costs no computation.

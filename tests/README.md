@@ -92,22 +92,33 @@ datasets are frozen fixtures and nearly every SPI is a deterministic function of
 them, so an exact oracle is more useful than an average that no individual run
 reproduces.
 
-## Drift is reported, not enforced
+## Drift is enforced
 
-`test_baseline_drift.py` **fails hard** on exactly three things:
+`test_baseline_drift.py` **fails** on:
 
 1. the baseline SPI set differing from the current `Calculator`'s SPI set, so a
    newly-broken or renamed SPI cannot escape by having no baseline;
 2. a matrix shape change;
-3. a change in the **NaN pattern** — a SPI going from finite to all-NaN (or
-   back) is a categorical regression, not drift.
+3. a change in the **NaN pattern** — an SPI going from finite to all-NaN (or
+   back) is a categorical regression, not drift;
+4. a baseline with no finite off-diagonal value at all, which cannot detect a
+   regression however closely the current run reproduces it;
+5. any numerical difference outside the SPI's tolerance. This used to be
+   *reported* to a session-end summary table and not fail the run, which made
+   every tolerance in the file decorative. The summary table is still printed;
+   it is now a description of the failures rather than the whole response to
+   them.
 
-Everything else — numerical differences in the finite entries — is *reported*
-to a session-end summary table (see `conftest.py`) and does **not** fail the
-run, so library and BLAS version bumps stay visible without blocking CI.
-Tolerances are split by the SPI's module: `1e-9` for the deterministic families
-and `1e-2` for `causal` and `misc`, whose estimators use randomly-initialised
-optimisers and permutation tests and are not bit-reproducible.
+Two further gates run per fixture: no SPI may raise (`calc.errors` must be
+empty) and none may produce an entirely non-finite column. The single
+documented exception lives in `KNOWN_UNESTIMABLE`, shared with the baseline
+generator so the two cannot disagree, and the suite fails if a listed exception
+starts succeeding.
+
+Tolerances are `1e-9` relative / `1e-12` absolute for every SPI. The previous
+split — `1e-2` for `causal` and `misc`, on the assumption that their optimisers
+and permutation tests were not bit-reproducible — was measured and found false;
+see `LOOSE_SPIS` in the module and `tools/measure_reproducibility.py`.
 
 ## Open findings
 

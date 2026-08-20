@@ -1135,10 +1135,13 @@ class InfoTheoryBase(Unsigned):
     base 2 for its box-kernel and discrete estimators and base e for its
     Gaussian and k-nearest-neighbour ones. Carrying that split into a single
     results table means `mi_kernel_W-0-5` and `mi_gaussian` are on axes
-    differing by a factor of ln 2 with nothing in the identifier to say so, and
-    the natural things to do with the table -- correlate the columns, rank the
-    SPIs, threshold them -- are all wrong across that boundary. Divide by
-    ln 2 to recover the JIDT-comparable value.
+    differing by a factor of ln 2 with nothing in the identifier to say so, so
+    anything comparing *magnitudes* across that boundary -- one threshold over
+    several estimators, a difference or ratio of two columns, a "which found
+    the most information" ranking across estimators -- is off by that factor.
+    (A Pearson or Spearman correlation between two columns is invariant to a
+    positive rescaling and was never affected.) Divide by ln 2 to recover the
+    JIDT-comparable value.
     """
 
     _AUTO_EMBED_METHOD_PROP_NAME = "AUTO_EMBED_METHOD"

@@ -54,13 +54,21 @@ def measure(datasets, config="full", seed=SEED):
         second, _ = _one_pass(dataset_name, config, seed)
         for key, a in first.items():
             b = second[key]
+            # Compared as masks first. Restricting to entries finite in both
+            # and reporting the numeric difference there cannot see an SPI
+            # whose NaN *pattern* moved between the two runs -- it would report
+            # a difference of 0 for a column that had gone from finite to NaN.
+            rec = out.setdefault(key, {"module": modules[key], "abs": 0.0,
+                                       "rel": 0.0})
+            if not np.array_equal(np.isfinite(a), np.isfinite(b)):
+                rec["abs"] = rec["rel"] = float("inf")
+                continue
             finite = np.isfinite(a) & np.isfinite(b)
             abs_diff = np.abs(a[finite] - b[finite])
             worst_abs = float(abs_diff.max()) if abs_diff.size else 0.0
             nonzero = np.abs(a[finite]) > 0
             worst_rel = (float((abs_diff[nonzero] / np.abs(a[finite][nonzero])).max())
                          if nonzero.any() else 0.0)
-            rec = out.setdefault(key, {"module": modules[key], "abs": 0.0, "rel": 0.0})
             rec["abs"] = max(rec["abs"], worst_abs)
             rec["rel"] = max(rec["rel"], worst_rel)
     return out
