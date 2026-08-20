@@ -1137,3 +1137,88 @@ def test_auto_embedding_selection_is_cached_per_process():
     # 4 processes, 12 ordered pairs, 24 selections without caching.
     assert len(calls) == 4, calls
     assert len(data.ais_embedding) == 4
+
+
+# ---------------------------------------------------------------------------
+# CrossCorrelation: `sigonly` is a threshold, not a test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("squared", [False, True])
+@pytest.mark.parametrize("statistic", ["max", "mean"])
+def test_sigonly_returns_zero_when_no_lag_clears_the_threshold(statistic, squared):
+    """An empty thresholded set is an association of zero, not of the window.
+
+    Falling back to the unfiltered window reported the largest of ~T/2 sample
+    correlations under the null -- for this fixture 0.128 (max), -0.105 (mean),
+    0.191 and 0.056 squared -- which is the opposite of what a threshold is for.
+
+    T is small on purpose. The cut is applied pointwise at every lag in a window
+    of about T/2, so at a nominal 5% per lag the null keeps something almost
+    surely for any moderate T: no seed in 400 produced an empty set at T=600.
+    That is itself why `sigonly` is not an inferential test.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.basic import CrossCorrelation
+
+    rng = np.random.default_rng(0)
+    Z = rng.standard_normal((2, 12))
+    data = Data(data=Z, dim_order="ps")
+    assert np.abs(np.corrcoef(Z)[0, 1]) < 1.96 / np.sqrt(12), "fixture drifted"
+
+    spi = CrossCorrelation(squared=squared, statistic=statistic, sigonly=True)
+    assert spi.bivariate(data, i=0, j=1) == 0.0
+    # ... and the unfiltered variant is emphatically not zero.
+    unfiltered = CrossCorrelation(squared=squared, statistic=statistic,
+                                  sigonly=False)
+    assert abs(unfiltered.bivariate(Data(data=Z, dim_order="ps"), i=0, j=1)) > 0.05
+
+
+@pytest.mark.parametrize("sign", [+1, -1])
+def test_cross_correlation_reports_the_sign_of_the_association(sign):
+    """`max` is a signed maximum over lags, so it tracks the largest *positive*
+    correlation; `mean` carries the sign; the squared variants carry neither.
+
+    Asserted on the returned SPI values rather than on the cached lag profile,
+    since the reduction and the thresholding are where the bugs were.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.basic import CrossCorrelation
+
+    rng = np.random.default_rng(1)
+    a = rng.standard_normal(600)
+    b = sign * a + 0.05 * rng.standard_normal(600)
+    data = lambda: Data(data=np.vstack([a, b]), dim_order="ps")
+
+    mean = CrossCorrelation(statistic="mean", sigonly=True).bivariate(
+        data(), i=0, j=1)
+    sq_max = CrossCorrelation(squared=True, statistic="max",
+                              sigonly=True).bivariate(data(), i=0, j=1)
+    assert np.sign(mean) == sign
+    assert sq_max == pytest.approx(1.0, abs=0.01)
+    if sign > 0:
+        assert CrossCorrelation(statistic="max", sigonly=True).bivariate(
+            data(), i=0, j=1) == pytest.approx(1.0, abs=0.01)
+
+
+def test_sigonly_threshold_is_the_documented_pointwise_cut():
+    """1.96/sqrt(T) on |r(l)|, applied lag by lag -- nothing more.
+
+    Checked by reconstructing the surviving set from the cached profile and
+    reducing it independently, so the test pins the rule rather than restating
+    the implementation's own filter.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.basic import CrossCorrelation
+
+    rng = np.random.default_rng(4)
+    T = 500
+    a = rng.standard_normal(T)
+    b = 0.4 * np.r_[0.0, a[:-1]] + rng.standard_normal(T)
+
+    data = Data(data=np.vstack([a, b]), dim_order="ps")
+    got = CrossCorrelation(statistic="mean", sigonly=True).bivariate(
+        data, i=0, j=1)
+    profile = data.xcorr[(0, 1)]
+    kept = profile[np.abs(profile) > 1.96 / np.sqrt(T)]
+    assert kept.size
+    assert got == pytest.approx(float(np.mean(kept)), rel=1e-12)

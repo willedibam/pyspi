@@ -84,6 +84,16 @@ class CrossCorrelation(Undirected, Signed):
     name = "Cross correlation"
     labels = ["basic", "linear", "undirected", "temporal"]
 
+    """Sample cross-correlation over lags in [-T//4, +T//4].
+
+    ``sigonly`` is a historical misnomer kept for compatibility. It is a
+    pointwise amplitude threshold -- keep the lags with
+    ``|r(l)| > 1.96/sqrt(T)`` -- and not a significance test: the band is not
+    inflated for the series' own autocorrelation, and it is not corrected for
+    being applied at every lag in the window. When no lag clears it the
+    statistic is 0.
+    """
+
     def __init__(self, squared=False, statistic="max", sigonly=True):
         self.identifier = "xcorr"
         self._squared = squared
@@ -160,31 +170,42 @@ class CrossCorrelation(Undirected, Signed):
             # return the lag profile of (i,j).
             data.xcorr[(j, i)] = r_ij[::-1]
 
-        # Reduce over the significant lags only.
+        # `sigonly` is a pointwise amplitude threshold, not an inferential
+        # test. The name is historical and kept for compatibility: it keeps
+        # only the lags whose sample cross-correlation exceeds
+        # 1.96/sqrt(T) in magnitude. That cut is the two-sided 5% band for a
+        # *single* correlation between two independent white series, and
+        # neither of the two things that would make it a significance test is
+        # done here -- the band is not inflated for the series'
+        # autocorrelation (which is what Bartlett's formula is for), and it is
+        # not corrected for having been applied at every one of the ~T/2 lags
+        # in the window. Read it as "drop the small lags", not as "these lags
+        # are significant".
         if getattr(self, "_sigonly", False):
-            # 1/sqrt(T) is the large-lag standard error of the sample
-            # cross-correlation of two independent series (Bartlett 1955), so
-            # the two-sided 5% band is 1.96/sqrt(T). The previous code used
-            # `1.96/sqrt(len(r_ij)//2)` -- the half-width of the lag *window*,
-            # T//4 -- which is twice too wide and scales with the lag cut
-            # rather than with the sample size.
+            # The previous threshold was `1.96/sqrt(len(r_ij)//2)` -- the
+            # half-width of the lag *window*, T//4 -- so it was twice too wide
+            # and moved with the lag cut rather than with the sample size.
             threshold = 1.96 / np.sqrt(T)
-            significant = np.abs(r_ij) > threshold
-            # Selecting *the significant lags*, rather than the contiguous run
-            # of them around lag zero. The previous code walked outwards from
-            # the centre, which is only the right thing when the peak is at
-            # lag 0: for a pair where i leads j by one sample, r(0) is already
-            # insignificant, so the lobe extended one way and not the other and
-            # the two orientations of an SPI declared *undirected* disagreed --
+            above = np.abs(r_ij) > threshold
+            if not above.any():
+                # Nothing clears the cut, so the thresholded association is
+                # zero. Falling back to the unfiltered window instead reported
+                # the largest of ~T/2 sample correlations under the null: on
+                # two independent length-400 series that is about 0.135 for the
+                # `max` statistic, which is the opposite of what a threshold is
+                # supposed to do at the null.
+                return 0.0
+            # Selecting *the lags above the cut*, rather than the contiguous
+            # run of them around lag zero. The previous code walked outwards
+            # from the centre, which is only right when the peak is at lag 0:
+            # for a pair where i leads j by one sample, r(0) is already below
+            # the cut, so the lobe extended one way and not the other and the
+            # two orientations of an SPI declared *undirected* disagreed --
             # measured 0.9957 against -0.0202 on a lag-1 pair. A set of lags is
             # invariant under the l -> -l reversal; a one-sided run is not.
             # (Its slice was independently wrong: `r_ij[N - fzr : N + fzf]`
             # mirrored `fzr`, which was already an absolute index.)
-            if significant.any():
-                r_ij = r_ij[significant]
-            # If nothing clears the band the pair is uncorrelated at every lag;
-            # reducing over the whole window then reports that, rather than
-            # reducing over an empty slice.
+            r_ij = r_ij[above]
 
         if self._squared:
             r_ij = r_ij ** 2
