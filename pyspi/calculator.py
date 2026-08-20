@@ -10,7 +10,7 @@ from scipy import stats
 
 # From this package
 from .data import Data
-from .utils import convert_mdf_to_ddf, inspect_calc_results
+from .utils import convert_mdf_to_ddf, inspect_calc_results, require_int
 from . import _parallel
 from ._logging import get_logger, configure as _configure_logging
 
@@ -62,15 +62,13 @@ def _merge_spi_labels(spi, family_labels=None, config_labels=None):
     # `wpli`, `psi`, `gd` and `ccm_*_diff`) does not merely mislabel it -- it
     # asks for a transform that destroys the lead/lag its sign carries. The
     # label follows the implementation, not the other way round.
-    # The SPI's *own* structural trait is authoritative over any directedness
-    # the config declares. `labels` here is the instance's list, before the
+    # The SPI's *own* structural trait is authoritative over any structural
+    # trait the config declares. `labels` here is the instance's list, before the
     # family and per-config labels are folded in, so it is what the class and
     # `__init__` decided from the shape of the matrix they produce.
     #
-    # `antisymmetric`/`asymmetric` are a third category and replace both
-    # `directed` and `undirected`; a self-declared `undirected` or `directed`
-    # displaces the other. Without this, `gd_*` carried the class's
-    # `antisymmetric` and the config's `directed` at once, and
+    # Exactly one of the four traits survives. Without this, `gd_*` carried the
+    # class's `antisymmetric` and the config's `directed` at once, and
     # `gd_*_rvalue` -- symmetric by construction, since it stores |r| -- came
     # back both `undirected` and `directed` when loaded through YAML, so
     # `filter_spis` answered either way for the same SPI.
@@ -78,9 +76,10 @@ def _merge_spi_labels(spi, family_labels=None, config_labels=None):
     own = [label for label in _DIRECTEDNESS if label in labels]
     if own:
         trait = own[0]
-        displaced = {"directed", "undirected"} if trait in (
-            "antisymmetric", "asymmetric") else {"directed", "undirected"} - {trait}
-        merged = [label for label in merged if label not in displaced]
+        merged = [
+            label for label in merged
+            if label not in _DIRECTEDNESS or label == trait
+        ]
 
     issigned = getattr(spi, "issigned", None)
     if issigned is not None:
@@ -350,9 +349,7 @@ def _expand_lagged_correlation_configs(configs):
         if "max_tau" in params:
             if "tau" in params:
                 raise ValueError("LaggedCorrelation config cannot set both tau and max_tau.")
-            max_tau = int(params["max_tau"])
-            if max_tau < 1:
-                raise ValueError("max_tau must be >= 1.")
+            max_tau = require_int("max_tau", params["max_tau"], minimum=1)
             base = {key: value for key, value in params.items() if key != "max_tau"}
             for tau in range(1, max_tau + 1):
                 entry = dict(base)

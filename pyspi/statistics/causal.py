@@ -8,6 +8,7 @@ from sklearn.gaussian_process import GaussianProcessRegressor
 from pyspi.lib.pairwise_causal import (
     cds_score, igci_score, normalized_hsic, reci_score,
 )
+from pyspi.utils import require_int
 
 from pyspi.base import Directed, Unsigned, Signed, parse_bivariate, parse_multivariate
 
@@ -160,7 +161,10 @@ class ConvergentCrossMapping(Directed, Signed):
 
     def __init__(self, statistic="mean", embedding_dimension=None):
         self._statistic = statistic
-        self._E = embedding_dimension
+        self._E = (
+            None if embedding_dimension is None
+            else require_int("embedding_dimension", embedding_dimension, minimum=1)
+        )
 
         # The "diff" statistic is ccm(i->j) - ccm(j->i), so A[i,j] == -A[j,i]
         # by construction. That is antisymmetric, not merely directed: the two
@@ -169,7 +173,7 @@ class ConvergentCrossMapping(Directed, Signed):
         if statistic == "diff":
             self.labels = [l for l in self.labels if l != "directed"] + ["antisymmetric"]
 
-        self.identifier += f"_E-{embedding_dimension}_{statistic}"
+        self.identifier += f"_E-{self._E}_{statistic}"
 
     @property
     def key(self):

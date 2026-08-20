@@ -10,7 +10,7 @@ result or stored baseline is affected. This is a latent API defect — it bites
 anyone hand-writing a config — not a corruption of the current numbers. The
 tests are still blockers, because the failure is silent and scientific.
 
-See tests/test_state_integrity.py for the xfail(strict=True) rationale.
+The rejecting constructors are asserted directly; no xfail remains here.
 """
 import numpy as np
 import pytest
@@ -913,12 +913,7 @@ def test_ksg_mi_of_a_variable_with_itself_is_its_discrete_entropy(n):
 
 
 def test_ksg_dither_is_symmetric_and_repeatable_including_duplicates():
-    """Distinct columns are each replica 0, so the noise is content-determined.
-
-    Identical columns take replicas 0 and 1 in slot order, and swapping the
-    slots permutes identical values -- which the estimator cannot see. Both
-    orders must therefore agree exactly, not approximately.
-    """
+    """Symmetry is a property of the conditioned geometry, including ties."""
     from pyspi.statistics.infotheory import _ksg_mi_pair
 
     rng = np.random.default_rng(3)
@@ -929,6 +924,53 @@ def test_ksg_dither_is_symmetric_and_repeatable_including_duplicates():
     for u, v in ((z, y), (b, b.copy())):
         assert _ksg_mi_pair(u, v, 4, 0) == _ksg_mi_pair(v, u, 4, 0)
         assert _ksg_mi_pair(u, v, 4, 0) == _ksg_mi_pair(u, v, 4, 0)
+
+
+@pytest.mark.parametrize("seed", [0, 42, 53])
+def test_knn_condition_is_affine_and_permutation_covariant(seed):
+    """Exercise the conditioning contract itself, before any KSG formula.
+
+    The first two coordinates deliberately collide at 12 decimals after
+    standardisation. Reordering them must reorder their conditioned values,
+    not reassign replica noise by position. Reflections must reflect the dither
+    as well as the data. Exact replicas still need different noise.
+    """
+    from pyspi.statistics.infotheory import _knn_condition
+
+    rng = np.random.default_rng(53)
+    x = rng.integers(0, 4, 100).astype(float)
+    near = 1000 * x + 1e-11 * rng.standard_normal(x.size)
+    binary = rng.integers(0, 2, x.size).astype(float)
+    X = np.column_stack([x, near, binary])
+
+    base = _knn_condition(X, seed=seed)
+    order = [2, 1, 0]
+    assert np.array_equal(
+        _knn_condition(X[:, order], seed=seed), base[:, order]
+    )
+
+    scales = np.array([-3.0, 7.0, -0.25])
+    offsets = np.array([2.0, -5.0, 9.0])
+    moved = _knn_condition(X * scales + offsets, seed=seed)
+    assert np.array_equal(moved, base * np.sign(scales))
+
+    duplicate = _knn_condition(np.column_stack([binary, binary]), seed=seed)
+    assert not np.array_equal(duplicate[:, 0], duplicate[:, 1])
+
+
+def test_ksg_near_collision_is_exactly_symmetric():
+    """Regression for the 12-decimal key collision at N=100/seed=53.
+
+    Position-based replicas moved this estimate by 5.263e-4 when the two
+    arguments were reversed. This is not estimator error: KSG MI's joint and
+    marginal spaces are merely permuted, so the two computations must agree.
+    """
+    from pyspi.statistics.infotheory import _ksg_mi_pair
+
+    rng = np.random.default_rng(53)
+    x = rng.integers(0, 4, 100).astype(float)
+    y = 1000 * x + 1e-11 * rng.standard_normal(x.size)
+    assert _ksg_mi_pair(x, y, 4, 0) == _ksg_mi_pair(y, x, 4, 0)
 
 
 def test_duplicated_processes_do_not_break_the_derived_ksg_measures():
@@ -955,6 +997,25 @@ def test_duplicated_processes_do_not_break_the_derived_ksg_measures():
         pytest.approx(0.0, abs=0.1)
     assert it.DirectedInfo(estimator="kraskov", n=5).multivariate(data)[0, 1] == \
         pytest.approx(5 * ln2, abs=0.5)
+
+    # Exact replicas have no content identity with which the primitive could
+    # label its two independent dithers. What is observable is the KSG
+    # geometry: reordering processes must only reorder every result matrix.
+    Z = data.to_numpy(squeeze=True)
+    order = [2, 0, 1]
+    for spi in (
+        it.MutualInfo(estimator="kraskov"),
+        it.TimeLaggedMutualInfo(estimator="kraskov"),
+        it.TransferEntropy(estimator="kraskov"),
+        it.DirectedInfo(estimator="kraskov", n=2),
+    ):
+        base = np.asarray(spi.multivariate(Data(data=Z, dim_order="ps",
+                                                zscore=False)), float)
+        moved = np.asarray(spi.multivariate(Data(data=Z[order], dim_order="ps",
+                                                 zscore=False)), float)
+        assert np.array_equal(
+            base[np.ix_(order, order)], moved, equal_nan=True
+        ), spi.identifier
 
 
 @pytest.mark.parametrize("scale", [1e-3, 1.0, 1e3])
@@ -1346,6 +1407,7 @@ def _integral_constructors():
     """(label, ctor, minimum) for every public parameter contracted as integral."""
     import pyspi.statistics.infotheory as it
     from pyspi.statistics.basic import LaggedCorrelation
+    from pyspi.statistics.causal import ConvergentCrossMapping
     from pyspi.statistics.distance import (CrossPairwiseDistance,
                                            DynamicTimeWarping)
 
@@ -1366,7 +1428,30 @@ def _integral_constructors():
          lambda v: DynamicTimeWarping(global_constraint="sakoe_chiba",
                                       sakoe_chiba_radius=v), 1),
         ("CrossPairwiseDistance.tau", lambda v: CrossPairwiseDistance(tau=v), 0),
+        ("embedding_dimension",
+         lambda v: ConvergentCrossMapping(embedding_dimension=v), 1),
     ]
+
+
+@pytest.mark.parametrize("bad", [2.7, 1.0, True, False, "3", float("nan"),
+                                 float("inf"), -float("inf")])
+def test_lagged_correlation_max_tau_rejects_coercion(bad):
+    from pyspi.calculator import _expand_lagged_correlation_configs
+
+    with pytest.raises((TypeError, ValueError), match="max_tau"):
+        _expand_lagged_correlation_configs([{"max_tau": bad}])
+
+
+def test_valid_integer_max_tau_and_ccm_dimension_are_canonicalised():
+    from pyspi.calculator import _expand_lagged_correlation_configs
+    from pyspi.statistics.causal import ConvergentCrossMapping
+
+    assert _expand_lagged_correlation_configs([{"max_tau": np.int64(2)}]) == [
+        {"tau": 1}, {"tau": 2}
+    ]
+    spi = ConvergentCrossMapping(embedding_dimension=np.int64(2))
+    assert spi._E == 2 and type(spi._E) is int
+    assert spi.identifier == "ccm_E-2_mean"
 
 
 @pytest.mark.parametrize("bad", [2.7, 1.0, True, False, "3", float("nan"),
@@ -1486,5 +1571,58 @@ def test_ksg_is_exactly_invariant_to_rescaling_on_tied_data_too():
         x = rng.integers(0, levels, 256).astype(float)
         y = rng.integers(0, levels, 256).astype(float)
         base = _ksg_mi_pair(x, y, 4, 0)
-        for sx, sy in ((1e-3, 1e3), (1e3, 1e-3), (7.0, 0.125)):
-            assert _ksg_mi_pair(sx * x, sy * y, 4, 0) == base, (levels, sx, sy)
+        for sx, sy, ox, oy in (
+            (1e-3, 1e3, 0.0, 0.0),
+            (1e3, -1e-3, 4.0, -7.0),
+            (-7.0, -0.125, 2.0, 9.0),
+        ):
+            assert _ksg_mi_pair(sx * x + ox, sy * y + oy, 4, 0) == base, (
+                levels, sx, sy, ox, oy)
+
+
+@pytest.mark.parametrize("seed", [0, 53])
+def test_ksg_paths_are_affine_and_process_permutation_covariant(seed):
+    """The shared conditioning contract reaches MI, TLMI, AIS, TE and DI.
+
+    Binary and four-level coordinates keep this on the dither-sensitive path;
+    equality is exact because affine changes only reflect conditioned axes and
+    process reordering only relabels the result matrix.
+    """
+    from pyspi.statistics.infotheory import (
+        DirectedInfo, MutualInfo, TimeLaggedMutualInfo, TransferEntropy,
+        _ksg_ais,
+    )
+
+    rng = np.random.default_rng(seed)
+    n = 128
+    binary = rng.integers(0, 2, n).astype(float)
+    four_level = (
+        np.roll(binary, 1) + rng.integers(0, 4, n)
+    ).astype(float) % 4
+    other = rng.integers(0, 4, n).astype(float)
+    Z = np.vstack([binary, four_level, other])
+    scales = np.array([-3.0, 7.0, 0.25])[:, None]
+    offsets = np.array([2.0, -5.0, 9.0])[:, None]
+    order = [2, 0, 1]
+
+    spis = (
+        MutualInfo(estimator="kraskov"),
+        TimeLaggedMutualInfo(estimator="kraskov"),
+        TransferEntropy(estimator="kraskov", k_history=2, l_history=2),
+        DirectedInfo(estimator="kraskov", n=2),
+    )
+    base_data = Data(data=Z, dim_order="ps", zscore=False)
+    moved_data = Data(data=scales * Z + offsets, dim_order="ps", zscore=False)
+    permuted_data = Data(data=Z[order], dim_order="ps", zscore=False)
+    for spi in spis:
+        base = np.asarray(spi.multivariate(base_data), float)
+        moved = np.asarray(spi.multivariate(moved_data), float)
+        permuted = np.asarray(spi.multivariate(permuted_data), float)
+        assert np.array_equal(base, moved, equal_nan=True), spi.identifier
+        assert np.array_equal(
+            base[np.ix_(order, order)], permuted, equal_nan=True
+        ), spi.identifier
+
+    assert _ksg_ais(four_level, 2, 1, 4) == _ksg_ais(
+        -3.0 * four_level + 2.0, 2, 1, 4
+    )

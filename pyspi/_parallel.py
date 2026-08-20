@@ -409,7 +409,11 @@ SCHEMA_VERSION = 1
 #         nothing (only the integer neighbour counts enter the estimate), but on
 #         tied or quantised data a different dither separates the ties
 #         differently, so values there can move.
-COMPUTATION_VERSION = "3.0.0.r3"
+#   r4 -- KSG uses the rounded coordinate in its geometry, canonicalises
+#         reflections, and assigns numerical key collisions by content rather
+#         than coordinate order. Tied/quantised and tolerance-boundary values
+#         can move.
+COMPUTATION_VERSION = "3.0.0.r4"
 
 
 def read_manifest(checkpoint_dir: Path):

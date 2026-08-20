@@ -343,6 +343,40 @@ def test_group_delay_traits_survive_a_yaml_family_label(tmp_path):
         assert spi.issigned() is signed, identifier
 
 
+def test_yaml_cannot_add_a_competing_structural_trait(tmp_path):
+    """The instance's one structural trait displaces all YAML competitors."""
+    from pyspi.calculator import load_spis_from_yaml
+
+    config = tmp_path / "conflicting_traits.yaml"
+    config.write_text(
+        ".statistics.infotheory:\n"
+        "  MutualInfo:\n"
+        "    configs:\n"
+        "      - {estimator: gaussian, labels: [directed, antisymmetric, asymmetric]}\n"
+        "  TransferEntropy:\n"
+        "    configs:\n"
+        "      - {estimator: gaussian, labels: [undirected, antisymmetric, asymmetric]}\n"
+        ".statistics.spectral:\n"
+        "  CoherencePhase:\n"
+        "    configs:\n"
+        "      - {statistic: mean, fmin: 0, fmax: 0.5, labels: [directed, undirected, asymmetric]}\n"
+        "      - {statistic: max, fmin: 0, fmax: 0.5, labels: [directed, undirected, antisymmetric]}\n"
+    )
+    expected = {
+        "mi_gaussian": "undirected",
+        "gc_gaussian_k-1_kt-1_l-1_lt-1": "directed",
+        "phase_multitaper_mean_fs-1_fmin-0_fmax-0-5": "antisymmetric",
+        "phase_multitaper_max_fs-1_fmin-0_fmax-0-5": "asymmetric",
+    }
+    spis = load_spis_from_yaml(str(config), quiet=True)
+    assert set(spis) == set(expected)
+    for identifier, trait in expected.items():
+        assert set(spis[identifier].labels) & set(_TRAITS) == {
+            trait,
+            "signed" if trait in {"antisymmetric", "asymmetric"} else "unsigned",
+        }
+
+
 def test_no_spi_in_any_bundled_config_declares_two_directedness_traits():
     from pyspi.calculator import bundled_configs, load_spis_from_yaml, resolve_config
 
@@ -350,10 +384,10 @@ def test_no_spi_in_any_bundled_config_declares_two_directedness_traits():
         for identifier, spi in load_spis_from_yaml(resolve_config(name),
                                                    quiet=True).items():
             labels = set(spi.labels)
-            assert not {"directed", "undirected"} <= labels, f"{name}/{identifier}"
-            if {"antisymmetric", "asymmetric"} & labels:
-                assert not {"directed", "undirected"} & labels, \
-                    f"{name}/{identifier}"
+            structural = labels & {
+                "directed", "undirected", "antisymmetric", "asymmetric"
+            }
+            assert len(structural) == 1, f"{name}/{identifier}: {structural}"
 
 
 # --------------------------------------------------------------------------
