@@ -53,10 +53,13 @@ dependencies = [
     "spectral-connectivity>=1.1,<3",
     "nitime>=0.10",
     "hyppo>=0.4",
-    "cdt>=0.6",
-    # cdt internally imports torch.utils.data at module load but doesn't declare
-    # it as a Requires-Dist. Keep torch explicit so pip/uv doesn't miss it.
-    "torch>=2.0",
+    # cdt and torch are gone. pyspi used four functions from
+    # cdt.causality.pairwise (the ANM independence score, CDS, RECI, IGCI);
+    # they are transcribed in pyspi/lib/pairwise_causal.py and produce
+    # bit-identical values (verified against cdt 0.6 before removal, and frozen
+    # in tests/data/fixtures/cdt_pairwise_reference.npz). torch was never used
+    # for any pyspi computation -- it entered only because cdt eagerly imports
+    # its Torch-backed models at package load.
     "tslearn>=0.6",
     "dtaidistance>=2.3",
     # >=2.5 dropped the `import pkg_resources` that previously forced a
@@ -122,4 +125,5 @@ pyspi = [
     "configs/*.yaml",
     "data/*.npy",
 ]
+"pyspi.lib" = ["LICENSE-cdt.txt"]
 "pyspi.lib.ids" = ["LICENSE.txt"]

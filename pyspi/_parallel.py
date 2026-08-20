@@ -177,9 +177,12 @@ def _pin_worker_thread_pools():
     n_jobs workers each running a library that itself spawns cpu_count() threads
     = quadratic blow-up. Pinning BLAS alone is not enough. The pools:
       - BLAS + OpenMP (numpy/scipy/sklearn): threadpool_limits, all user APIs.
-      - cdt (causal discovery toolbox, transitive dep): autosets SETTINGS.NJOBS
-        to cpu_count() at import; drives ANM/CDS/RECI/IGCI.
-      - torch (drives InterDependenceScore): intra- and inter-op thread counts.
+    That is now the whole list. cdt used to be here (it autoset SETTINGS.NJOBS
+    to cpu_count() at import) and torch with it, but both are gone: the four
+    pairwise causal scores are in pyspi/lib/pairwise_causal.py, and torch never
+    drove any pyspi computation -- InterDependenceScore is NumPy, and torch
+    entered only because cdt eagerly imports its Torch-backed models.
+
     pyEDM (drives ConvergentCrossMapping) is process-based, not thread-based, so
     it can't be pinned here — it is instead switched off unconditionally at the
     call site in statistics/causal.py, for correctness rather than scheduling.
@@ -189,17 +192,6 @@ def _pin_worker_thread_pools():
         from threadpoolctl import threadpool_limits
         _THREADPOOL_LIMITER = threadpool_limits(limits=1)  # blas + openmp
     except ImportError:
-        pass
-    try:
-        import cdt
-        cdt.SETTINGS.NJOBS = 1
-    except Exception:
-        pass
-    try:
-        import torch
-        torch.set_num_threads(1)
-        torch.set_num_interop_threads(1)
-    except Exception:
         pass
 
 
@@ -231,8 +223,8 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, pro
     else:
         spis = load_spis_from_yaml(configfile)
 
-    # Pin nested thread pools AFTER SPI modules import (cdt autosets NJOBS to
-    # cpu_count() on import; we override it back to 1 here).
+    # Pin nested thread pools AFTER the SPI modules import: a library that
+    # sizes its pool at import time has to be pinned once it exists.
     _pin_worker_thread_pools()
 
     _WORKER_STATE["data"] = data

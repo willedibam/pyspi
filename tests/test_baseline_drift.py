@@ -75,7 +75,8 @@ TIGHT = (1e-12, 1e-9)   # (atol, rtol)
 LOOSE = (1e-6, 1e-2)
 
 # Per-SPI, not per-module. The previous version applied LOOSE to every SPI in
-# the `causal` and `misc` modules on the assumption that cdt's optimisers, GP
+# the `causal` and `misc` modules on the assumption that the causal-discovery
+# optimisers, GP
 # restarts and randomised independence tests made them irreproducible. Measured,
 # that is false: `tests/tools/measure_reproducibility.py` computes the full
 # config twice per fixture and, on all three fixtures, **325 of 325 SPIs
@@ -93,7 +94,7 @@ LOOSE = (1e-6, 1e-2)
 # and add an entry here -- keyed by SPI identifier, valued (atol, rtol) -- for
 # anything that comes back non-zero, with the mechanism named. The tier stays
 # defined because a genuinely stochastic SPI (an unpinned permutation test, a
-# GPU-backed cdt estimator) is a plausible future addition, and it needs a home
+# GPU-backed estimator) is a plausible future addition, and it needs a home
 # that is not "the whole module it happens to live in".
 LOOSE_SPIS = {}          # e.g. {"some_stochastic_spi": LOOSE}
 

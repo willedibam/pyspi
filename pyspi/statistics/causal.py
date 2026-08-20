@@ -1,9 +1,11 @@
 import numpy as np
 import pandas as pd
-from cdt.causality.pairwise import ANM, CDS, IGCI, RECI
 import pyEDM
 from sklearn.gaussian_process import GaussianProcessRegressor
-from cdt.causality.pairwise.ANM import normalized_hsic
+
+from pyspi.lib.pairwise_causal import (
+    cds_score, igci_score, normalized_hsic, reci_score,
+)
 
 from pyspi.base import Directed, Unsigned, Signed, parse_bivariate, parse_multivariate
 
@@ -13,20 +15,20 @@ class AdditiveNoiseModel(Directed, Unsigned):
     name = "Additive noise model"
     identifier = "anm"
     labels = ["unsigned", "causal", "unordered", "linear", "directed"]
-    
-    # monkey-patch the anm_score function, see cdt PR #155
-    def corrected_anm_score(self, x, y):
-        gp = GaussianProcessRegressor(random_state=42).fit(x, y)
-        y_predict = gp.predict(x).reshape(-1, 1) 
-        indepscore = normalized_hsic(y_predict - y, x)
-        return indepscore
-    
-    ANM.anm_score = corrected_anm_score
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
+        """HSIC between x and the residual of a GP fit of y on x.
+
+        This was already pyspi's own scoring function, monkey-patched over
+        cdt's (which regressed the wrong way round -- cdt PR #155); only the
+        HSIC came from cdt, and it is now `pyspi.lib.pairwise_causal`.
+        """
         z = data.to_numpy()
-        return ANM().anm_score(z[i], z[j])
+        x, y = z[i], z[j]
+        gp = GaussianProcessRegressor(random_state=42).fit(x, y)
+        y_predict = gp.predict(x).reshape(-1, 1)
+        return normalized_hsic(y_predict - y, x)
 
 
 class ConditionalDistributionSimilarity(Directed, Unsigned):
@@ -38,7 +40,7 @@ class ConditionalDistributionSimilarity(Directed, Unsigned):
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
         z = data.to_numpy()
-        return CDS().cds_score(z[i], z[j])
+        return cds_score(z[i], z[j])
 
 
 class RegressionErrorCausalInference(Directed, Unsigned):
@@ -50,7 +52,7 @@ class RegressionErrorCausalInference(Directed, Unsigned):
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
         z = data.to_numpy()
-        return RECI().b_fit_score(z[i], z[j])
+        return reci_score(z[i], z[j])
 
 
 class InformationGeometricConditionalIndependence(Directed, Unsigned):
@@ -62,7 +64,7 @@ class InformationGeometricConditionalIndependence(Directed, Unsigned):
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
         z = data.to_numpy()
-        return IGCI().predict_proba((z[i], z[j]))
+        return igci_score(z[i], z[j])
 
 
 def _optimal_embedding_dimension(df, column, lib_pred, max_e=10):

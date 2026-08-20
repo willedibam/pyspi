@@ -175,7 +175,7 @@ def warn_partial_cache_buckets(spis):
     if not any(bkey[0] in EXPENSIVE for bkey in kept):
         # Nothing this advisory could say anything about. Checked before the
         # `full` config is touched: building it instantiates 325 SPIs and pulls
-        # in cdt and torch, which is a second or two of import for a check that
+        # a heavy dependency tree, which is real import time for a check that
         # only ever comments on `ccm` and `barycenter`.
         return
     try:
@@ -782,7 +782,7 @@ class Calculator:
             progress (bool): Show a tqdm progress bar (default True).
 
         Backend threading: when ``n_jobs>1`` each worker pins its nested pools
-        (OpenMP/OpenBLAS/MKL, cdt, torch, pyEDM) to one thread/process so the
+        (OpenMP/OpenBLAS/MKL, pyEDM) to one thread/process so the
         workers don't oversubscribe the cores. macOS is an exception — its
         Accelerate BLAS cannot be thread-pinned by threadpoolctl, so on macOS
         ``n_jobs>1`` can oversubscribe BLAS-heavy SPIs; prefer ``n_jobs=1``

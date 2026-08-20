@@ -128,23 +128,30 @@ def test_failure_isolation(dataset):
             f"Sibling SPI '{sibling}' has unexpected NaNs after isolated failure."
 
 
-def test_pin_worker_thread_pools_pins_cdt():
-    """Worker pinning must reach cdt, which autosets NJOBS=cpu_count() at import.
+def test_pin_worker_thread_pools_installs_the_blas_limiter():
+    """Worker pinning must reach the BLAS/OpenMP pools.
 
-    Was a check on the PYSPI_PIN_BACKENDS env var, whose only consumer was
-    pyEDM's nested pool in statistics/causal.py. That pool is now off
-    unconditionally (it re-imports the caller's __main__), so the flag had no
-    reader left; cdt is the pool this function can still actually pin.
+    It used to also pin cdt's NJOBS and torch's thread counts; both
+    dependencies are gone, and threadpoolctl is what is left to pin. n_jobs
+    workers each fanning out to cpu_count() BLAS threads is the quadratic
+    blow-up this exists to prevent.
+
+    The limiter object is what is asserted, not `threadpool_info()`: that comes
+    back empty where no threadpoolctl-visible BLAS is loaded (macOS Accelerate,
+    for one), so keying the test on it would make it pass vacuously on some
+    machines and fail on others.
     """
-    import cdt
+    from threadpoolctl import threadpool_info
 
     from pyspi import _parallel
-    before = cdt.SETTINGS.NJOBS
+
+    _parallel._pin_worker_thread_pools()
     try:
-        _parallel._pin_worker_thread_pools()
-        assert cdt.SETTINGS.NJOBS == 1
+        assert _parallel._THREADPOOL_LIMITER is not None
+        assert all(pool["num_threads"] == 1 for pool in threadpool_info())
     finally:
-        cdt.SETTINGS.NJOBS = before
+        _parallel._THREADPOOL_LIMITER.unregister()
+        _parallel._THREADPOOL_LIMITER = None
 
 
 def test_cli_module_importable():
