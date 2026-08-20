@@ -221,6 +221,28 @@ def test_conditional_entropy_label_matches_implementation():
 # Wavelet PSI band statistics
 # --------------------------------------------------------------------------
 
+def test_circular_nanmean_refuses_unresolved_resultants_and_preserves_wraparound():
+    from pyspi.statistics.spectral import _circular_nanmean
+
+    # Exact cancellation leaves only sin(pi)'s floating-point residue. Tiling
+    # it exercises the count-scaled error bound rather than one special pair.
+    assert np.isnan(_circular_nanmean(np.array([0.0, np.pi]), axis=0))
+    cancellation = np.tile([0.0, np.pi], 64)
+    assert np.isnan(_circular_nanmean(cancellation, axis=0))
+    assert np.isnan(_circular_nanmean(np.array([np.nan, np.nan]), axis=0))
+
+    # +/-pi denote the same circular location and therefore cannot supply a
+    # unique signed orientation in an ordinary-float antisymmetric matrix.
+    assert np.isnan(_circular_nanmean(np.array([np.pi, np.pi]), axis=0))
+    assert np.isnan(_circular_nanmean(np.array([-np.pi, -np.pi]), axis=0))
+
+    wrapped = np.array([np.pi - 0.1, -np.pi + 0.1, np.pi - 0.05])
+    expected = np.angle(np.mean(np.exp(1j * wrapped)))
+    got = _circular_nanmean(wrapped, axis=0)
+    assert np.isfinite(got)
+    assert got == pytest.approx(expected)
+
+
 def test_wavelet_coherence_phase_uses_a_circular_mean_and_negates_orientation():
     from pyspi.statistics.wavelet import CoherencePhase
 
@@ -268,6 +290,20 @@ def test_wavelet_coherence_phase_is_process_permutation_covariant():
     base = calculate([0, 1, 2])
     moved = calculate(order)
     assert np.allclose(base[np.ix_(order, order)], moved, equal_nan=True)
+
+
+def test_wavelet_coherence_phase_refuses_exact_antiphase():
+    from pyspi.statistics.wavelet import CoherencePhase
+
+    phase = np.zeros((2, 2, 3))
+    phase[1, 0] = np.pi
+    lower = np.exp(1j * phase)
+    lower[np.triu_indices(2, 1)] = 0
+    spi = CoherencePhase(statistic="mean", fmin=0, fmax=0.5)
+    spi._get_cache = lambda unused: (lower, np.arange(3))
+    got = spi.multivariate(Data(data=np.ones((2, 8)), dim_order="ps",
+                                zscore=False))
+    assert np.isnan(got[0, 1]) and np.isnan(got[1, 0])
 
 
 def test_spectral_coherence_phase_uses_a_circular_mean_and_is_permutation_covariant():
@@ -320,6 +356,22 @@ def test_spectral_coherence_phase_var_fixture_is_exactly_antisymmetric_and_covar
     order = [2, 0, 1]
     moved = calculate(raw[:, order])
     assert np.allclose(base[np.ix_(order, order)], moved, equal_nan=True)
+
+
+def test_spectral_coherence_phase_actual_backend_refuses_exact_antiphase():
+    from pyspi.statistics.spectral import CoherencePhase
+
+    x = np.random.default_rng(0).standard_normal(256)
+
+    def calculate(values):
+        return CoherencePhase(
+            statistic="mean", fs=1, fmin=0, fmax=0.5
+        ).multivariate(Data(data=values, dim_order="ps", zscore=False))
+
+    base = calculate(np.vstack([x, -x]))
+    moved = calculate(np.vstack([-x, x]))
+    assert np.isnan(base[0, 1]) and np.isnan(base[1, 0])
+    assert np.allclose(base[::-1, ::-1], moved, equal_nan=True)
 
 
 def test_coherence_phase_refuses_branch_dependent_maximum():

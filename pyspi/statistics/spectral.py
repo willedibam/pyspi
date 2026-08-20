@@ -82,14 +82,27 @@ def _circular_nanmean(angles, axis):
 
     Wrapped phase is averaged through its unit phasors, not as real numbers;
     e.g. values just below +pi and just above -pi average near pi rather than
-    zero. The result is the principal argument in [-pi, pi].
+    zero. A zero resultant has no circular mean. An antipodal mean (+/-pi) has
+    a circular location but no unique sign in pyspi's ordinary-float,
+    numerically antisymmetric representation, so both cases return NaN.
+
+    For ``n`` unit phasors, the normalised error of their floating-point sum is
+    O(n * eps). Eight times that bound covers the complex exponential plus the
+    real and imaginary reductions without treating a resolvable resultant as
+    zero. The same bound decides whether an antipodal resultant's imaginary
+    component is distinguishable from round-off.
     """
     phasors = np.exp(1j * angles)
     count = np.sum(~np.isnan(angles), axis=axis)
     total = np.nansum(phasors, axis=axis)
     mean = np.full(np.shape(total), np.nan + 0j, dtype=complex)
     np.divide(total, count, out=mean, where=count > 0)
-    return np.angle(mean)
+
+    roundoff = 8.0 * np.finfo(float).eps * np.maximum(count, 1)
+    zero_resultant = np.abs(mean) <= roundoff
+    antipodal = (mean.real < 0) & (np.abs(mean.imag) <= roundoff)
+    undefined = (count == 0) | zero_resultant | antipodal
+    return np.where(undefined, np.nan, np.angle(mean))
 
 
 class NonparametricSpectral(Unsigned):

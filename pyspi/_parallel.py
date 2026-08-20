@@ -418,7 +418,9 @@ SCHEMA_VERSION = 1
 #         breaking and the artificial 12-decimal conditioning boundary.
 #   r6 -- KSG strict marginal counts use the immediately preceding
 #         representable radius instead of shrinking epsilon by 1e-10.
-COMPUTATION_VERSION = "3.0.0.r6"
+#   r7 -- coherence phase uses a circular mean and refuses zero-resultant and
+#         antipodal locations that have no unique signed float orientation.
+COMPUTATION_VERSION = "3.0.0.r7"
 
 
 def read_manifest(checkpoint_dir: Path):
