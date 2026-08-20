@@ -400,10 +400,16 @@ SCHEMA_VERSION = 1
 # algorithm that produced them, and so `Calculator.run_digest` separates results
 # that differ only by implementation. `<release>.r<revision>`: the revision is a
 # counter within a release, not a version of anything -- only equality is ever
-# tested. r2 covers the KSG per-occurrence dither, full MAX_CORR_AIS, the
-# group-delay sample scaling and |r|, and the cross-correlation threshold
-# returning zero when nothing clears it.
-COMPUTATION_VERSION = "3.0.0.r2"
+# tested.
+#   r2 -- the KSG per-occurrence dither, full MAX_CORR_AIS, the group-delay
+#         sample scaling and |r|, and the cross-correlation threshold returning
+#         zero when nothing clears it.
+#   r3 -- the KSG dither key is taken from the normalised column rounded to 12
+#         decimals rather than its exact bytes. On tie-free data that changes
+#         nothing (only the integer neighbour counts enter the estimate), but on
+#         tied or quantised data a different dither separates the ties
+#         differently, so values there can move.
+COMPUTATION_VERSION = "3.0.0.r3"
 
 
 def read_manifest(checkpoint_dir: Path):

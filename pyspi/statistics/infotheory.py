@@ -689,7 +689,18 @@ def _knn_condition(X, noise_level=_KNN_NOISE_LEVEL, seed=_KNN_NOISE_SEED):
         # being the thing that raises.
         col = (col - col.mean()) / (sd if sd > 0 else 1.0)
         if noise_level:
-            key = np.ascontiguousarray(col).tobytes()
+            # Keyed on the column rounded to 12 decimals, not on its exact
+            # bytes. After normalisation the values are O(1), so 1e-12 is far
+            # below anything that distinguishes two series and far above float
+            # noise -- and float noise is otherwise enough to re-draw the whole
+            # dither. `x` and `1000 * x` normalise to columns differing by one
+            # ulp (1.1e-16), which flipped the digest, and on *tied* data a
+            # different dither separates the ties differently: MI moved by
+            # 0.0375 nats on a binary pair under a rescaling the estimator is
+            # supposed to be invariant to. Rounding makes that invariance
+            # exact. Two columns agreeing to 12 decimals are treated as
+            # replicas and separated, which is the safe direction.
+            key = np.ascontiguousarray(np.round(col, 12)).tobytes()
             replica = replicas.get(key, 0)
             replicas[key] = replica + 1
             digest = hashlib.blake2b(

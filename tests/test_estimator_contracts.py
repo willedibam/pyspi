@@ -1447,21 +1447,44 @@ def test_the_dither_realisation_does_not_move_a_continuous_estimate():
 
     The key changed for every column, not just for duplicates -- but only the
     *integer* neighbour counts enter the estimate, and a 1e-8 perturbation does
-    not change which points fall inside the radius. The dither breaks ties; it
-    does not participate in the arithmetic.
+    not change which points fall inside the radius. The dither breaks ties; on
+    tie-free data it does not participate in the arithmetic.
+
+    The seed is passed to `_knn_condition` explicitly. Patching the module
+    attribute `_KNN_NOISE_SEED` would do nothing: it is a *default argument*,
+    bound when the function was defined, so a test written that way asserts
+    that a function returns the same value when called twice with the same
+    arguments.
     """
-    import pyspi.statistics.infotheory as it
+    from pyspi.statistics.infotheory import _knn_condition, _ksg_mi_pair
 
     rng = np.random.default_rng(0)
     z = rng.standard_normal(300)
     y = 0.7 * z + 0.7 * rng.standard_normal(300)
 
-    original = it._KNN_NOISE_SEED
-    try:
-        values = []
-        for seed in (42, 43, 12345, 99999):
-            it._KNN_NOISE_SEED = seed
-            values.append(it._ksg_mi_pair(z, y, 4, 0))
-    finally:
-        it._KNN_NOISE_SEED = original
-    assert len(set(values)) == 1, values
+    reference = _ksg_mi_pair(z, y, 4, 0)
+    for seed in (43, 12345, 99999):
+        conditioned = _knn_condition(np.column_stack([z, y]), seed=seed)
+        assert _brute_force_ksg_mi(conditioned[:, 0], conditioned[:, 1], 4) == \
+            pytest.approx(reference, abs=1e-12), seed
+
+
+def test_ksg_is_exactly_invariant_to_rescaling_on_tied_data_too():
+    """Invariance must survive float noise in the normalisation.
+
+    `x` and `1000 * x` normalise to columns differing by one ulp (1.1e-16).
+    That flipped the dither key, and on *tied* data a different dither
+    separates the ties differently -- MI moved by 0.0375 nats on a binary pair
+    under a rescaling the estimator is supposed to be invariant to. The key is
+    now taken from the column rounded to 12 decimals: far below anything that
+    distinguishes two series, far above float noise.
+    """
+    from pyspi.statistics.infotheory import _ksg_mi_pair
+
+    rng = np.random.default_rng(0)
+    for levels in (2, 4):
+        x = rng.integers(0, levels, 256).astype(float)
+        y = rng.integers(0, levels, 256).astype(float)
+        base = _ksg_mi_pair(x, y, 4, 0)
+        for sx, sy in ((1e-3, 1e3), (1e3, 1e-3), (7.0, 0.125)):
+            assert _ksg_mi_pair(sx * x, sy * y, 4, 0) == base, (levels, sx, sy)
