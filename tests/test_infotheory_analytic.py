@@ -414,3 +414,179 @@ def test_gaussian_ridge_is_equivariant_to_per_variable_rescaling():
     Z_scaled[0] *= 1e6
     scaled = mi.multivariate(Data(data=Z_scaled, dim_order="ps", zscore=False))
     assert np.allclose(base, scaled, atol=1e-12, equal_nan=True)
+
+
+# ---------------------------------------------------------------------------
+# Transfer-entropy auto-embedding
+# ---------------------------------------------------------------------------
+
+def _ols_residual_variance(y, X):
+    """Residual variance of an OLS fit with an intercept, computed directly."""
+    design = np.column_stack([np.ones(len(y)), X]) if X.size else np.ones((len(y), 1))
+    beta, *_ = np.linalg.lstsq(design, y, rcond=None)
+    resid = y - design @ beta
+    return float(resid @ resid / len(y))
+
+
+def _lagged(series, dim, delay, end):
+    """Columns [x_{t}, x_{t-delay}, ..., x_{t-(dim-1)delay}] ending at `end`."""
+    start = (dim - 1) * delay
+    return np.column_stack([series[start - i * delay: end - i * delay]
+                            for i in range(dim)])
+
+
+def _ols_ais(series, dim, delay):
+    """Bias-corrected Gaussian AIS from OLS residual variances.
+
+    Independent of pyspi's log-determinant machinery: AIS is
+    0.5*log(var(Y) / var(Y | Y_past)), and each variance comes from an explicit
+    least-squares fit. The k/(2N) correction is the mean of the chi-squared null
+    of the in-sample estimate, the same term JIDT subtracts.
+    """
+    T = len(series)
+    start, end = (dim - 1) * delay, T - 1
+    if start >= end:
+        return -np.inf
+    future = series[start + 1: end + 1]
+    past = _lagged(series, dim, delay, end)
+    n = future.size
+    return 0.5 * np.log(_ols_residual_variance(future, np.empty((n, 0)))
+                        / _ols_residual_variance(future, past)) - dim / (2.0 * n)
+
+
+def test_gaussian_ais_matches_an_ols_residual_variance_oracle():
+    """Same quantity, assembled from least squares instead of log-determinants."""
+    from pyspi.statistics.infotheory import _gaussian_ais
+
+    rng = np.random.default_rng(0)
+    T = 800
+    x = np.zeros(T)
+    for t in range(2, T):
+        x[t] = 0.6 * x[t - 1] - 0.3 * x[t - 2] + rng.standard_normal()
+
+    for dim in (1, 2, 3, 5):
+        for delay in (1, 2):
+            assert _gaussian_ais(x, dim, delay) == pytest.approx(
+                _ols_ais(x, dim, delay), abs=1e-7), (dim, delay)
+
+
+def test_embedding_search_is_a_brute_force_argmax_of_the_scorer():
+    """Selection, separately from the criterion it maximises.
+
+    Ties go to the smaller dimension and then the smaller delay -- the AIS
+    objective plateaus often enough at finite sample that this matters. No
+    assertion here that a particular AR order is recovered: it need not be.
+    """
+    from pyspi.statistics.infotheory import _select_embedding
+
+    rng = np.random.default_rng(1)
+    series = rng.standard_normal(400)
+    scores = {}
+
+    def scorer(_series, dim, delay):
+        scores[(dim, delay)] = float(rng.standard_normal())
+        return scores[(dim, delay)]
+
+    dim, delay, score = _select_embedding(series, scorer, 5, 3)
+    assert (dim, delay) == max(scores, key=lambda kd: (scores[kd], -kd[0], -kd[1]))
+    assert score == scores[(dim, delay)]
+
+    flat = _select_embedding(series, lambda *_: 1.0, 5, 3)
+    assert flat[:2] == (1, 1), "a flat objective must not drift to the maximum"
+
+
+def test_max_corr_ais_selects_source_and_destination_independently():
+    """All four selected values must reach the estimator.
+
+    `MAX_CORR_AIS` searched the destination only and hard-coded the source
+    embedding to (1, 1), while its name denotes selection for both. An injected
+    scorer that deliberately prefers different embeddings for the two series
+    makes the difference observable.
+    """
+    import pyspi.statistics.infotheory as it
+
+    rng = np.random.default_rng(2)
+    src = rng.standard_normal(600)
+    targ = rng.standard_normal(600)
+    data = Data(data=np.vstack([src, targ]), dim_order="ps", zscore=False)
+
+    # Scores the source's preferred embedding at (3, 2) and the destination's
+    # at (2, 1); the two series are told apart by their first sample.
+    def injected(_estimator, _k_nn=None, _w=0):
+        def score(series, dim, delay):
+            want = (3, 2) if series[0] == pytest.approx(data.to_numpy(
+                squeeze=True)[0][0]) else (2, 1)
+            return 1.0 if (dim, delay) == want else 0.0
+        return score
+
+    captured = {}
+    real = it._gaussian_te_bivariate
+
+    def spy(s, t, k_history, k_tau, l_history, l_tau):
+        captured.update(k_history=k_history, k_tau=k_tau,
+                        l_history=l_history, l_tau=l_tau)
+        return real(s, t, k_history, k_tau, l_history, l_tau)
+
+    spi = it.TransferEntropy(estimator="gaussian",
+                             auto_embed_method="MAX_CORR_AIS",
+                             k_search_max=4, tau_search_max=3)
+    spi._embedding_scorer = staticmethod(injected)
+    it._gaussian_te_bivariate = spy
+    try:
+        spi.bivariate(data, i=0, j=1)
+    finally:
+        it._gaussian_te_bivariate = real
+
+    assert captured == {"k_history": 2, "k_tau": 1, "l_history": 3, "l_tau": 2}
+
+
+def test_max_corr_ais_dest_only_keeps_the_supplied_source_embedding():
+    import pyspi.statistics.infotheory as it
+
+    rng = np.random.default_rng(3)
+    data = Data(data=rng.standard_normal((2, 400)), dim_order="ps", zscore=False)
+
+    captured = {}
+    real = it._gaussian_te_bivariate
+
+    def spy(s, t, k_history, k_tau, l_history, l_tau):
+        captured.update(l_history=l_history, l_tau=l_tau)
+        return real(s, t, k_history, k_tau, l_history, l_tau)
+
+    spi = it.TransferEntropy(estimator="gaussian",
+                             auto_embed_method="MAX_CORR_AIS_DEST_ONLY",
+                             k_search_max=4, tau_search_max=2,
+                             l_history=3, l_tau=2)
+    it._gaussian_te_bivariate = spy
+    try:
+        spi.bivariate(data, i=0, j=1)
+    finally:
+        it._gaussian_te_bivariate = real
+    assert captured == {"l_history": 3, "l_tau": 2}
+
+
+def test_gaussian_transfer_entropy_matches_an_ols_oracle_at_a_fixed_embedding():
+    """TE is the log ratio of two residual variances, so OLS gives it directly."""
+    from pyspi.statistics.infotheory import _gaussian_te_bivariate
+
+    rng = np.random.default_rng(4)
+    T = 2000
+    s = np.zeros(T)
+    t = np.zeros(T)
+    for n in range(3, T):
+        s[n] = 0.7 * s[n - 1] + rng.standard_normal()
+        t[n] = 0.4 * t[n - 1] + 0.5 * s[n - 2] + rng.standard_normal()
+
+    k, k_tau, l, l_tau = 2, 1, 3, 1
+    lookback = max((k - 1) * k_tau, l * l_tau)
+    end = T - 1
+    future = t[lookback + 1: end + 1]
+    t_past = _lagged(t, k, k_tau, end)[-future.size:]
+    s_past = np.column_stack([s[lookback - i * l_tau: end - i * l_tau]
+                              for i in range(1, l + 1)])[-future.size:]
+
+    expected = 0.5 * np.log(_ols_residual_variance(future, t_past)
+                            / _ols_residual_variance(
+                                future, np.column_stack([t_past, s_past])))
+    got = _gaussian_te_bivariate(s, t, k, k_tau, l, l_tau)
+    assert got == pytest.approx(expected, rel=2e-3), f"{got} vs {expected}"

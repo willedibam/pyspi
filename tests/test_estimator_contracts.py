@@ -1016,3 +1016,124 @@ def test_ksg_results_survive_the_parallel_boundary(tmp_path):
         tables.append({k: calc.table[k].to_numpy() for k in calc.spis})
     for key in tables[0]:
         assert np.array_equal(tables[0][key], tables[1][key], equal_nan=True), key
+
+
+# ---------------------------------------------------------------------------
+# Transfer-entropy auto-embedding: the support matrix
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("estimator", ["kernel", "symbolic"])
+@pytest.mark.parametrize("kwargs", [
+    {"auto_embed_method": "MAX_CORR_AIS"},
+    {"k_search_max": 5},
+    {"tau_search_max": 3},
+])
+def test_auto_embedding_is_refused_by_the_estimators_that_cannot_do_it(
+        estimator, kwargs):
+    """No AIS criterion exists for the box-kernel or ordinal estimators.
+
+    Both accepted `auto_embed_method` and the search bounds and then ran a fixed
+    embedding, so the argument said an embedding had been selected and none had.
+    """
+    import pyspi.statistics.infotheory as it
+
+    with pytest.raises(ValueError, match="not implemented for estimator"):
+        it.TransferEntropy(estimator=estimator, k_history=2, **kwargs)
+
+
+@pytest.mark.parametrize("fixed", ["k_history", "k_tau", "l_history", "l_tau"])
+def test_full_max_corr_ais_refuses_a_fixed_embedding(fixed):
+    """It selects all four, so accepting a fixed one would mean ignoring it."""
+    import pyspi.statistics.infotheory as it
+
+    with pytest.raises(ValueError, match="conflicts with auto_embed_method"):
+        it.TransferEntropy(estimator="gaussian",
+                           auto_embed_method="MAX_CORR_AIS", **{fixed: 2})
+
+
+@pytest.mark.parametrize("fixed,allowed", [
+    ("k_history", False), ("k_tau", False), ("l_history", True), ("l_tau", True),
+])
+def test_dest_only_refuses_a_fixed_destination_and_accepts_a_fixed_source(
+        fixed, allowed):
+    import pyspi.statistics.infotheory as it
+
+    build = lambda: it.TransferEntropy(
+        estimator="gaussian", auto_embed_method="MAX_CORR_AIS_DEST_ONLY",
+        **{fixed: 2})
+    if allowed:
+        assert f"_{'l' if fixed == 'l_history' else 'lt'}-2" in build().identifier
+    else:
+        with pytest.raises(ValueError, match="conflicts with auto_embed_method"):
+            build()
+
+
+@pytest.mark.parametrize("bound", ["k_search_max", "tau_search_max"])
+def test_search_bounds_are_refused_without_an_auto_method(bound):
+    """They reached the identifier only under the auto branch, so with a fixed
+    embedding they were accepted and silently discarded."""
+    import pyspi.statistics.infotheory as it
+
+    with pytest.raises(ValueError, match="requires auto_embed_method"):
+        it.TransferEntropy(estimator="gaussian", **{bound: 5})
+
+
+def test_auto_embedding_identifiers_name_the_method_and_resolved_bounds():
+    """`MAX_CORR_AIS` changed meaning, so the identifier has to say which it is.
+
+    It previously searched the destination only while carrying a name that
+    denotes selection for both, and the identifier recorded neither. Defaults
+    are resolved before the identifier is built, so an omitted bound still
+    appears with the value actually used.
+    """
+    import pyspi.statistics.infotheory as it
+
+    assert it.TransferEntropy(
+        estimator="kraskov", auto_embed_method="MAX_CORR_AIS",
+        k_search_max=10, tau_search_max=4
+    ).identifier == "te_kraskov_NN-4_MAX-CORR-AIS_k-max-10_tau-max-4"
+    # Omitted bounds resolve to 10 and 4 and are still named.
+    assert it.TransferEntropy(
+        estimator="kraskov", auto_embed_method="MAX_CORR_AIS"
+    ).identifier == "te_kraskov_NN-4_MAX-CORR-AIS_k-max-10_tau-max-4"
+    assert it.TransferEntropy(
+        estimator="gaussian", auto_embed_method="MAX_CORR_AIS_DEST_ONLY",
+        k_search_max=6, tau_search_max=2, l_history=3
+    ).identifier == "gc_gaussian_MAX-CORR-AIS-DEST-ONLY_k-max-6_tau-max-2_l-3_lt-1"
+
+
+@pytest.mark.parametrize("bad", [
+    {"k_history": 2.0}, {"k_history": True}, {"k_tau": np.float64(1)},
+    {"k_search_max": 1.5, "auto_embed_method": "MAX_CORR_AIS"},
+])
+def test_embedding_parameters_must_be_integral_and_not_boolean(bad):
+    """`bool` subclasses `int`, so `k_history=True` would pass as 1, and
+    `int(2.7)` silently truncates a parameter the caller meant otherwise."""
+    import pyspi.statistics.infotheory as it
+
+    with pytest.raises(TypeError, match="positive integer"):
+        it.TransferEntropy(estimator="gaussian", **bad)
+
+
+def test_auto_embedding_selection_is_cached_per_process():
+    """One search per (process, estimator, bounds, Theiler window), not per pair."""
+    import pyspi.statistics.infotheory as it
+    from pyspi.data import Data
+
+    rng = np.random.default_rng(0)
+    data = Data(data=rng.standard_normal((4, 400)), dim_order="ps", zscore=False)
+    spi = it.TransferEntropy(estimator="gaussian",
+                             auto_embed_method="MAX_CORR_AIS",
+                             k_search_max=4, tau_search_max=2)
+
+    calls = []
+    real = it._select_embedding
+    it._select_embedding = lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    try:
+        spi.multivariate(data)
+    finally:
+        it._select_embedding = real
+
+    # 4 processes, 12 ordered pairs, 24 selections without caching.
+    assert len(calls) == 4, calls
+    assert len(data.ais_embedding) == 4

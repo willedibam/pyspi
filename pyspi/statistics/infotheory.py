@@ -894,7 +894,11 @@ def _gaussian_ais(targ, k, tau):
     future is 1-D). Without this correction the criterion increases monotonically
     in k and saturates at k_max. Subtracting k/(2N) gives an interior maximum and
     matches JIDT's ActiveInfoStorageCalculatorGaussian.computeAdditionalBiasToRemove.
-    Ref: Ragwitz & Kantz (2002); Wibral et al. (2014); Lizier JIDT.
+
+    This is the *maximum corrected AIS* criterion (Wibral et al. 2014; JIDT's
+    AUTO_EMBED_METHOD_MAX_CORR_AIS). It is not the Ragwitz criterion, which
+    selects by local-prediction error (Ragwitz & Kantz 2002) and is not
+    implemented here.
     """
     T = len(targ)
     start = (k - 1) * tau
@@ -934,15 +938,57 @@ def _ksg_ais(targ, k, tau, k_nn, w=0):
     return _ksg_mi_general(Y_f, Y_p, k_nn, w)
 
 
-def _auto_embed_gaussian_te(src, targ, k_max, tau_max):
-    """Gaussian TE with Ragwitz-style AIS auto-embedding on target."""
-    best_k, best_tau, best_ais = 1, 1, -np.inf
-    for k in range(1, k_max + 1):
-        for tau in range(1, tau_max + 1):
-            ais = _gaussian_ais(targ, k, tau)
-            if ais > best_ais:
-                best_ais, best_k, best_tau = ais, k, tau
-    return _gaussian_te_bivariate(src, targ, best_k, best_tau, 1, 1)
+def _ais_scorer(estimator, k_nn=None, w=0):
+    """``f(series, dim, delay) -> score`` for the estimator that will run the TE.
+
+    Factored out so the source and the destination embeddings are chosen by the
+    same code, with the same estimator, and so a test can substitute a scorer
+    that deliberately picks different values for the two and check that all four
+    reach the final estimate.
+
+    Selecting with the estimator that will do the work is the point: scoring a
+    KSG transfer entropy's embedding by a Gaussian AIS picks the embedding with
+    the best *linear* predictability, which is not what the final estimator
+    measures.
+    """
+    if estimator == "gaussian":
+        return lambda series, dim, delay: _gaussian_ais(series, dim, delay)
+    if estimator == "kraskov":
+        def score(series, dim, delay):
+            n_eff = len(series) - (dim - 1) * delay
+            try:
+                _validate_ksg_sample(n_eff, k_nn, w)
+            except ValueError:
+                # Skip candidates the estimator cannot support rather than
+                # ranking them and failing on the winner: on kuramoto M7/T100
+                # an invalid (k=10, tau=4, w=33) candidate won and the whole
+                # SPI then failed, though valid smaller embeddings existed.
+                return -np.inf
+            return _ksg_ais(series, dim, delay, k_nn, w)
+        return score
+    raise NotImplementedError(
+        f"No active-information-storage criterion for estimator {estimator!r}."
+    )
+
+
+def _select_embedding(series, scorer, dim_max, tau_max):
+    """``(dimension, delay, score)`` maximising the scorer.
+
+    Ties go to the smaller dimension and then the smaller delay: a
+    lower-dimensional embedding that stores as much information is the better
+    model, and the finite-sample AIS objective plateaus often enough that ties
+    are not rare.
+
+    Returns ``(1, 1, -inf)`` when no candidate is scorable, which is the
+    smallest embedding and the one the fixed-embedding path would have used.
+    """
+    best = (1, 1, -np.inf)
+    for dim in range(1, dim_max + 1):
+        for delay in range(1, tau_max + 1):
+            score = scorer(series, dim, delay)
+            if score > best[2]:
+                best = (dim, delay, score)
+    return best
 
 
 def _gaussian_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau):
@@ -1062,9 +1108,31 @@ def _kraskov_te_bivariate(src, targ, k_history, k_tau, l_history, l_tau, k_nn, w
 
 _ESTIMATORS = frozenset({"gaussian", "kraskov", "kernel", "kozachenko", "symbolic"})
 
+
+def _require_positive_int(name, value):
+    """Reject non-integral, boolean and non-finite values, not just <= 0.
+
+    `bool` is a subclass of `int`, so `k_history=True` would otherwise sail
+    through as 1, and `int(2.7)` silently truncates a parameter the caller
+    plainly meant as something else.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise TypeError(f"{name} must be a positive integer, got {value!r}.")
+    if value < 1:
+        raise ValueError(f"{name} must be >= 1, got {value!r}.")
+
 # Auto-embedding selection criteria that are actually implemented. The search
 # maximises active information storage under the destination's own estimator.
-_AUTO_EMBED_METHODS = frozenset({"MAX_CORR_AIS"})
+# Auto-embedding selection criteria that are actually implemented, and what
+# each one selects. Both maximise the bias-corrected active information storage
+# of a series over (dimension, delay); they differ only in which series.
+#   MAX_CORR_AIS            -- destination *and* source, chosen independently.
+#   MAX_CORR_AIS_DEST_ONLY  -- destination only; the source embedding is the
+#                              caller's fixed l_history/l_tau.
+# Ragwitz local-prediction selection is a different criterion and is not
+# implemented.
+_AUTO_EMBED_METHODS = frozenset({"MAX_CORR_AIS", "MAX_CORR_AIS_DEST_ONLY"})
+_AUTO_EMBED_DEST_ONLY = "MAX_CORR_AIS_DEST_ONLY"
 
 
 class InfoTheoryBase(Unsigned):
@@ -1558,7 +1626,7 @@ class TransferEntropy(InfoTheoryBase, Directed):
         auto_embed_method=None,
         k_search_max=None,
         tau_search_max=None,
-        k_history=1,
+        k_history=None,
         k_tau=None,
         l_history=None,
         l_tau=None,
@@ -1573,34 +1641,18 @@ class TransferEntropy(InfoTheoryBase, Directed):
             # took the auto-embed branch, so a typo silently ran MAX_CORR_AIS.
             raise ValueError(
                 f"Unknown auto_embed_method {auto_embed_method!r}; implemented: "
-                f"{sorted(_AUTO_EMBED_METHODS)}. (Ragwitz-style local-prediction "
-                f"selection is not implemented; the search here maximises AIS.)"
+                f"{sorted(_AUTO_EMBED_METHODS)}. Ragwitz local-prediction "
+                f"selection is a different criterion and is not implemented."
             )
 
-        if self._estimator == "symbolic" and int(k_history) < 2:
-            # An ordinal pattern of length 1 has exactly one possible symbol, so
-            # every entropy term is zero and TE is identically zero. It is not a
-            # degenerate edge case, it is a guaranteed-null statistic.
-            raise ValueError(
-                "estimator='symbolic' requires k_history >= 2: a length-1 "
-                "ordinal pattern has a single symbol, so the transfer entropy "
-                "is identically zero."
-            )
-
-        # The symbolic and kernel estimators implement a single history length
-        # at unit delay. The symbolic calculator reads only k_HISTORY and uses
-        # that one ordinal-pattern length for *both* source and destination;
-        # the kernel calculator likewise. Both previously accepted k_tau,
-        # l_history and l_tau, and the symbolic branch even wrote them into the
-        # identifier -- so `te_symbolic_k-3_kt-1_l-1_lt-1` advertised a
-        # destination history of 3 and a source history of 1 while computing 3
-        # for both. Sentinel defaults distinguish "not supplied" from "supplied
-        # with the value that happens to be the default", so the unsupported
-        # ones can be refused instead of silently dropped.
+        # Only the two estimators with a genuine embedding implement any of
+        # this. The symbolic and kernel calculators read one history length at
+        # unit delay and nothing else, so every embedding and search argument
+        # is refused rather than accepted and dropped.
         _EMBEDDING_ONLY = ("gaussian", "kraskov")
+        supplied = {"k_tau": k_tau, "l_history": l_history, "l_tau": l_tau}
         if self._estimator not in _EMBEDDING_ONLY:
-            for name, value in (("k_tau", k_tau), ("l_history", l_history),
-                                ("l_tau", l_tau)):
+            for name, value in supplied.items():
                 if value is not None:
                     raise ValueError(
                         f"{name}={value!r} is not used by "
@@ -1610,39 +1662,94 @@ class TransferEntropy(InfoTheoryBase, Directed):
                         f"estimator='gaussian'/'kraskov' for independently "
                         f"aligned source and destination embeddings."
                     )
+            for name, value in (("auto_embed_method", auto_embed_method),
+                                ("k_search_max", k_search_max),
+                                ("tau_search_max", tau_search_max)):
+                if value is not None:
+                    raise ValueError(
+                        f"{name}={value!r} is not implemented for "
+                        f"estimator={self._estimator!r}: there is no active-"
+                        f"information-storage criterion for it, so no embedding "
+                        f"can be selected. Use a fixed k_history, or "
+                        f"estimator='gaussian'/'kraskov'."
+                    )
+
+        if auto_embed_method is None:
+            # Search bounds with nothing to search are not a harmless default:
+            # they reached the identifier under the auto branch only, so here
+            # they were accepted and silently discarded.
+            for name, value in (("k_search_max", k_search_max),
+                                ("tau_search_max", tau_search_max)):
+                if value is not None:
+                    raise ValueError(
+                        f"{name}={value!r} requires auto_embed_method to be set; "
+                        f"with a fixed embedding there is nothing to search."
+                    )
+        else:
+            # A selected embedding and a supplied one cannot both be honoured.
+            # Silently ignoring the supplied value is how the identifier came to
+            # advertise parameters the estimator never used.
+            fixed = {"k_history": k_history, "k_tau": k_tau}
+            if auto_embed_method != _AUTO_EMBED_DEST_ONLY:
+                fixed.update({"l_history": l_history, "l_tau": l_tau})
+            for name, value in fixed.items():
+                if value is not None:
+                    raise ValueError(
+                        f"{name}={value!r} conflicts with "
+                        f"auto_embed_method={auto_embed_method!r}, which selects "
+                        f"it. Drop {name}, or drop auto_embed_method."
+                        + ("" if auto_embed_method == _AUTO_EMBED_DEST_ONLY else
+                           f" ({_AUTO_EMBED_DEST_ONLY} selects the destination "
+                           f"embedding only and does accept a fixed source one.)")
+                    )
+
+        # Defaults resolved before anything is validated or named, so the
+        # identifier reports what is computed rather than what was typed.
+        k_history = 1 if k_history is None else k_history
         k_tau = 1 if k_tau is None else k_tau
         l_history = 1 if l_history is None else l_history
         l_tau = 1 if l_tau is None else l_tau
+        k_search_max = 10 if k_search_max is None else k_search_max
+        tau_search_max = 4 if tau_search_max is None else tau_search_max
 
         for name, value in (("k_history", k_history), ("k_tau", k_tau),
-                            ("l_history", l_history), ("l_tau", l_tau)):
-            if int(value) < 1:
-                raise ValueError(f"{name} must be >= 1, got {value!r}.")
+                            ("l_history", l_history), ("l_tau", l_tau),
+                            ("k_search_max", k_search_max),
+                            ("tau_search_max", tau_search_max)):
+            _require_positive_int(name, value)
+
+        if self._estimator == "symbolic" and k_history < 2:
+            # An ordinal pattern of length 1 has exactly one possible symbol, so
+            # every entropy term is zero and TE is identically zero. It is not a
+            # degenerate edge case, it is a guaranteed-null statistic.
+            raise ValueError(
+                "estimator='symbolic' requires k_history >= 2: a length-1 "
+                "ordinal pattern has a single symbol, so the transfer entropy "
+                "is identically zero."
+            )
 
         self._calc = self._getcalc("TransferEntropy")
 
         # Store embedding params for numpy path
         self._auto_embed_method = auto_embed_method
-        self._k_search_max = k_search_max if k_search_max is not None else 10
-        self._tau_search_max = tau_search_max if tau_search_max is not None else 4
+        self._k_search_max = k_search_max
+        self._tau_search_max = tau_search_max
         self._k_history = k_history
         self._k_tau = k_tau
         self._l_history = l_history
         self._l_tau = l_tau
 
-        # Auto-embedding
         if auto_embed_method is not None:
             self._calc.setProperty(self._AUTO_EMBED_METHOD_PROP_NAME, auto_embed_method)
             self._calc.setProperty(self._K_SEARCH_MAX_PROP_NAME, str(k_search_max))
-            if self._estimator != "kernel":
-                self.identifier = self.identifier + "_k-max-{}_tau-max-{}".format(
-                    k_search_max, tau_search_max
-                )
-                self._calc.setProperty(
-                    self._TAU_SEARCH_MAX_PROP_NAME, str(tau_search_max)
-                )
-            else:
-                self.identifier = self.identifier + "_k-max-{}".format(k_search_max)
+            self._calc.setProperty(self._TAU_SEARCH_MAX_PROP_NAME, str(tau_search_max))
+            # The method is in the identifier because it changes what is
+            # computed: MAX_CORR_AIS selects the source embedding too, and used
+            # to name a search that only ever touched the destination.
+            self.identifier += "_{}_k-max-{}_tau-max-{}".format(
+                auto_embed_method.replace("_", "-"), k_search_max, tau_search_max)
+            if auto_embed_method == _AUTO_EMBED_DEST_ONLY:
+                self.identifier += "_l-{}_lt-{}".format(l_history, l_tau)
         else:
             self._calc.setProperty(self._K_HISTORY_PROP_NAME, str(k_history))
             if self._estimator in _EMBEDDING_ONLY:
@@ -1660,6 +1767,33 @@ class TransferEntropy(InfoTheoryBase, Directed):
     def __setstate__(self, state):
         super().__setstate__(state)
         self._calc = self._getcalc("TransferEntropy")
+
+    # Overridable so a test can inject a scorer that deliberately picks
+    # different source and destination embeddings and check that all four
+    # selected values reach the final estimator.
+    _embedding_scorer = staticmethod(_ais_scorer)
+
+    def _selected_embedding(self, data, process, series, scorer, w):
+        """``(dimension, delay)`` for one series, cached on the Data object.
+
+        Selection depends on the series, the estimator, the search bounds and
+        the Theiler window -- not on which pair the series appears in, nor on
+        whether it is the source or the destination there: the criterion is the
+        series' own active information storage either way. With
+        ``dyn_corr_excl="AUTO"`` the window *is* pair-dependent, so it is part
+        of the key; otherwise one search per process serves every pair in both
+        roles, instead of 2*(M-1) identical searches.
+        """
+        key = (process, self._estimator, self._prop_k, w,
+               self._k_search_max, self._tau_search_max)
+        cache = getattr(data, "ais_embedding", None)
+        if cache is None:
+            cache = data.ais_embedding = {}
+        if key not in cache:
+            dim, delay, _ = _select_embedding(
+                series, scorer, self._k_search_max, self._tau_search_max)
+            cache[key] = (dim, delay)
+        return cache[key]
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None, verbose=False):
@@ -1683,37 +1817,26 @@ class TransferEntropy(InfoTheoryBase, Directed):
                     self._l_history, self._l_tau, k_nn, w
                 )
 
-        # Auto-embedding via AIS criterion (Ragwitz-style)
+        # Auto-embedding by the maximum corrected AIS criterion.
         if est in ('gaussian', 'kraskov') and auto is not None:
-            k_max = self._k_search_max
-            tau_max = self._tau_search_max
-            if est == 'gaussian':
-                return _auto_embed_gaussian_te(src, targ, k_max, tau_max)
+            w = self._resolve_theiler(data, i, j)
+            k_nn = int(self._prop_k) if est == 'kraskov' else None
+            scorer = self._embedding_scorer(est, k_nn, w)
+
+            k_history, k_tau = self._selected_embedding(data, j, targ, scorer, w)
+            if auto == _AUTO_EMBED_DEST_ONLY:
+                l_history, l_tau = self._l_history, self._l_tau
             else:
-                # Estimator-consistent: select the embedding by maximising the
-                # KSG AIS (same estimator as the final TE), then run kraskov TE.
-                # Using Gaussian AIS here would pick the embedding by *linear*
-                # predictability for a nonlinear estimator (Wibral et al. 2014;
-                # JIDT MAX_CORR_AIS uses the destination's own estimator).
-                k_nn = int(self._prop_k)
-                w = self._resolve_theiler(data, i, j)
-                best_k, best_tau, best_ais = 1, 1, -np.inf
-                for k in range(1, k_max + 1):
-                    for tau in range(1, tau_max + 1):
-                        # Skip candidates the estimator cannot support, instead
-                        # of ranking them and rejecting the winner afterwards.
-                        # On kuramoto M7/T100 an invalid (k=10, tau=4, w=33)
-                        # candidate won and the whole SPI then failed, even
-                        # though valid smaller embeddings existed.
-                        n_eff = targ.size - (k - 1) * tau
-                        try:
-                            _validate_ksg_sample(n_eff, k_nn, w)
-                        except ValueError:
-                            continue
-                        ais = _ksg_ais(targ, k, tau, k_nn, w)
-                        if ais > best_ais:
-                            best_ais, best_k, best_tau = ais, k, tau
-                return _kraskov_te_bivariate(src, targ, best_k, best_tau, 1, 1, k_nn, w)
+                # Selected from the *source*, independently and by the same
+                # criterion. The previous implementation hard-coded (1, 1) here
+                # while the method name claimed selection for both.
+                l_history, l_tau = self._selected_embedding(data, i, src, scorer, w)
+
+            if est == 'gaussian':
+                return _gaussian_te_bivariate(src, targ, k_history, k_tau,
+                                              l_history, l_tau)
+            return _kraskov_te_bivariate(src, targ, k_history, k_tau,
+                                         l_history, l_tau, k_nn, w)
 
         # kernel/symbolic path: numpy calculators
         if est in ('kernel', 'symbolic'):
