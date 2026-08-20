@@ -230,8 +230,8 @@
     dependencies:
     configs:
 
-  # Information-geometric conditional independence
-  # InformationGeometricConditionalIndependence:
+  # Information-geometric causal inference (disabled heuristic)
+  # InformationGeometricCausalInference:
   #   labels:
   #     - directed
   #     - nonlinear
@@ -1426,4 +1426,3 @@
       - terms: 6
         pnorm: 'max'
         bandwidth: 0.5
-        

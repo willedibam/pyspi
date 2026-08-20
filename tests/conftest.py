@@ -25,7 +25,7 @@ def pytest_sessionfinish(session, exitstatus):
     header_line = "=" * 90
     content_line = "-" * 90
     footer_line = "=" * 90
-    header = " SPI DRIFT SUMMARY (abs/rel tolerance vs regenerated baseline) "
+    header = " SPI DRIFT SUMMARY (abs/rel tolerance vs frozen baseline) "
     footer = f" Session completed with exit status: {exitstatus} "
 
     print("\n")

@@ -24,6 +24,8 @@ What is asserted, by kind:
 * **Explicit rejection** on input a statistic cannot support, rather than a
   number.
 """
+import re
+
 import numpy as np
 import pytest
 
@@ -159,20 +161,28 @@ def _representative_spis():
     ]
 
 
-# Documented exceptions to "no entirely empty output". Group delay is defined
-# only where the coherence is significant, so on i.i.d. noise with no
-# cross-spectral structure the correct answer is that there is no delay to
-# report. Measured, deterministically, on both seeds at both lengths: these four
-# fixtures give 0 finite off-diagonals and the other five give 2-6. At the
-# Calculator level this surfaces as an explicit `calc.errors` entry ("SPI
-# returned no finite off-diagonal values"), which is the right user-facing
-# signal -- an empty column that nobody is told about is the failure mode, not
-# an empty column as such.
-EXPECTED_EMPTY = {
-    ("gd_delay", "independent_gaussian"),
-    ("gd_delay", "binary"),
-    ("gd_delay", "four_level"),
-    ("gd_delay", "heavy_tailed"),
+# Frozen observations, not claims that these input families must always make
+# GroupDelay empty. On precisely these deterministic fixtures the significance
+# gate keeps no frequency cluster. Pinning the full case makes any future change
+# visible instead of treating every sample from the family as guaranteed-empty.
+OBSERVED_EMPTY_CASES = {
+    ("gd_delay", name, seed, T)
+    for name in ("independent_gaussian", "binary", "four_level", "heavy_tailed")
+    for seed in SEEDS
+    for T in (T_SHORT, T_LONG)
+}
+
+# (SPI label, fixture, seed, T) -> (exception class, message regex).
+# DirectedCoherence may explicitly fail its spectral factorisation on three
+# singular duplicate-process cases (the backend's random fallback sometimes
+# converges, so success is also accepted). No other refusal is accepted.
+EXPECTED_REFUSALS = {
+    ("dcoh_mean", "duplicate_and_collinear", 0, 64):
+        (np.linalg.LinAlgError, r"^Singular matrix$"),
+    ("dcoh_mean", "duplicate_and_collinear", 0, 256):
+        (np.linalg.LinAlgError, r"^Singular matrix$"),
+    ("dcoh_mean", "duplicate_and_collinear", 7, 64):
+        (np.linalg.LinAlgError, r"^Singular matrix$"),
 }
 
 
@@ -180,10 +190,9 @@ EXPECTED_EMPTY = {
 def test_representative_spis_give_a_result_or_an_explicit_refusal(name, seed, T):
     """No unexplained exception, infinity, or entirely empty output.
 
-    A refusal must be a `ValueError`/`NotImplementedError` naming the cause --
-    the estimator declining input it cannot support. An `IndexError`, a
-    `LinAlgError`, or a table of infinities is the failure mode this contract
-    exists to exclude.
+    A refusal is accepted only when its exact case, exception type and message
+    pattern appear in `EXPECTED_REFUSALS`. An arbitrary nonempty exception is
+    not evidence that the estimator declined for the intended reason.
     """
     import warnings
 
@@ -194,23 +203,28 @@ def test_representative_spis_give_a_result_or_an_explicit_refusal(name, seed, T)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 table = np.asarray(factory().multivariate(data), dtype=float)
-        except (ValueError, NotImplementedError) as err:
-            if not str(err).strip():
-                problems.append(f"{label}: refused without a reason")
-            continue
         except Exception as err:                       # noqa: BLE001
-            problems.append(f"{label}: {type(err).__name__}: {err}")
+            expected = EXPECTED_REFUSALS.get((label, name, seed, T))
+            if expected is None:
+                problems.append(f"{label}: {type(err).__name__}: {err}")
+            else:
+                error_type, message = expected
+                if type(err) is not error_type or re.search(message, str(err)) is None:
+                    problems.append(
+                        f"{label}: expected {error_type.__name__} /{message}/, "
+                        f"got {type(err).__name__}: {err}"
+                    )
             continue
 
         off = _off(table)
         if np.isinf(off).any():
             problems.append(f"{label}: infinite values")
         elif not np.isfinite(off).any():
-            if (label, name) not in EXPECTED_EMPTY:
+            if (label, name, seed, T) not in OBSERVED_EMPTY_CASES:
                 problems.append(f"{label}: no finite off-diagonal value")
-        elif (label, name) in EXPECTED_EMPTY:
-            problems.append(f"{label}: listed in EXPECTED_EMPTY but produced a "
-                            f"value; remove the exception")
+        elif (label, name, seed, T) in OBSERVED_EMPTY_CASES:
+            problems.append(f"{label}: frozen empty observation now produced a "
+                            f"value; review the observation table")
     assert not problems, f"[{name} seed={seed} T={T}]\n  " + "\n  ".join(problems)
 
 
@@ -258,9 +272,9 @@ def test_ksg_mi_of_a_duplicated_quantised_process_is_its_entropy(seed, levels,
 def test_group_delay_recovers_the_oscillation_lag(seed):
     """A known lag on a genuinely narrowband signal, at T=256.
 
-    At T=64 the multitaper band has too few independent frequencies for the
-    significance gate to keep a cluster, and the correct answer there is NaN --
-    which the contract test above already accepts.
+    On the T=64 instances used here the significance gate keeps no cluster;
+    that is a fixture observation covered by the contract test, not a theorem
+    that short records must return NaN.
     """
     from pyspi.statistics.spectral import GroupDelay
 
@@ -352,13 +366,9 @@ def test_ksg_measures_are_invariant_to_per_process_rescaling(name, seed, T):
                 it.TimeLaggedMutualInfo(estimator="kraskov")):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            try:
-                base = spi.multivariate(Data(data=Z, dim_order="ps",
-                                             zscore=False))
-                moved = spi.multivariate(Data(data=Z * scale, dim_order="ps",
-                                              zscore=False))
-            except (ValueError, NotImplementedError):
-                continue                    # refusal is covered elsewhere
+            base = spi.multivariate(Data(data=Z, dim_order="ps", zscore=False))
+            moved = spi.multivariate(Data(data=Z * scale, dim_order="ps",
+                                          zscore=False))
         assert np.allclose(np.asarray(base, float), np.asarray(moved, float),
                            equal_nan=True, atol=1e-12), spi.identifier
 
@@ -367,15 +377,13 @@ def test_ksg_measures_are_invariant_to_per_process_rescaling(name, seed, T):
 def test_causal_scores_are_invariant_to_affine_rescaling(seed):
     """CDS, RECI and IGCI scale their inputs internally, so units must not matter.
 
-    ANM is deliberately excluded: it is **not** scale-invariant, and that is a
-    property of the method rather than of this implementation (it matches
-    cdt 0.6 bit-for-bit). The independence test standardises its arguments, but
-    the *fit* is a `GaussianProcessRegressor` on the raw values with a default
-    RBF whose length scale starts at 1.0 within bounds (1e-5, 1e5), so
-    rescaling the input moves the fitted kernel and hence the residual --
-    measured 0.27 on this fixture under `4x + 3`. pyspi z-scores by default,
-    which is what removes the dependence in the shipped pipeline; with
-    `zscore=False` the caller's units reach the kernel.
+    ANM is deliberately excluded because this implementation is scale-
+    dependent: scikit-learn's default `GaussianProcessRegressor` uses a fixed
+    unit ConstantKernel*RBF kernel when no kernel is supplied (both bounds are
+    "fixed"). The fit sees raw values while the later independence score
+    standardises its arguments. This is a pyspi/CDT implementation choice, not
+    a scale-dependence theorem about additive-noise models. pyspi's default
+    z-scoring removes the material dependence in the shipped pipeline.
     """
     import pyspi.statistics.causal as causal
 
@@ -411,9 +419,8 @@ def test_anm_is_scale_dependent_and_z_scoring_is_what_fixes_it(seed):
 
     # With pyspi's default z-scoring the difference collapses from ~0.27 to
     # ~4e-5. Not to zero: z-scoring `Z` and `4Z + 3` agrees only to float
-    # precision, and the GP's length-scale optimiser amplifies that. The point
-    # is the four orders of magnitude, which is what makes the scale dependence
-    # irrelevant in the default pipeline.
+    # precision. The point is the four orders of magnitude, which makes the
+    # implementation's scale dependence irrelevant in the default pipeline.
     a = np.asarray(anm.multivariate(Data(data=Z, dim_order="ps")), float)
     b = np.asarray(anm.multivariate(Data(data=4.0 * Z + 3.0, dim_order="ps")),
                    float)
@@ -448,11 +455,13 @@ def test_anm_prefers_the_true_direction_on_the_nonlinear_fixture(seed):
 
     RECI is **not** asserted here, and that is a finding rather than an
     omission: on this saturating `tanh` pair it prefers the wrong direction at
-    both seeds (0.0225 vs 0.0087, 0.0155 vs 0.0095). Its guarantee rests on the
-    cause being close to uniform after min-max scaling, which a tanh-saturated
-    effect violates; on the cubic pair in `tests/test_pairwise_causal.py` it
-    gets the direction right. CDS and IGCI are absent for the same reason --
-    neither is a consistent estimator.
+    both seeds (0.0225 vs 0.0087, 0.0155 vs 0.0095). On the cubic pair in
+    `tests/test_pairwise_causal.py` it gets the direction right. RECI is a
+    regression-error heuristic whose
+    published argument needs assumptions about the input distribution,
+    mechanism and regression; it does not impose a simple "near-uniform cause"
+    precondition. CDS and IGCI are absent for the same reason -- this fixture
+    supplies no general direction oracle for them.
     """
     import pyspi.statistics.causal as causal
 

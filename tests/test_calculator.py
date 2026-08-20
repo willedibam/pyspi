@@ -22,9 +22,9 @@ def test_whether_calculator_computes():
     """
     # A coupled VAR(1), not i.i.d. noise. Some SPIs are *defined* only where
     # there is structure to measure -- `gd_*` needs a significant coherence
-    # band and correctly yields nothing on independent noise (see
-    # test_group_delay_of_independent_processes_is_undefined) -- so white noise
-    # is a degenerate input to assert cleanliness on, not a neutral one.
+    # band and yielded nothing on the tested independent-noise fixture (not a
+    # universal guarantee) -- so white noise is a poor input on which to assert
+    # that every configured SPI is nonempty.
     rng = np.random.default_rng(0)
     A = np.array([[0.5, 0.0, 0.0], [0.7, 0.4, 0.0], [0.0, 0.6, 0.3]])
     data = np.zeros((3, 200))

@@ -126,14 +126,9 @@ split — `1e-2` for `causal` and `misc`, on the assumption that their optimiser
 and permutation tests were not bit-reproducible — was measured and found false;
 see `LOOSE_SPIS` in the module and `tools/measure_reproducibility.py`.
 
-## Open findings
+## Open finding
 
-Two `xfail(strict=True)` markers remain, each recording a decision rather than a
-pending code fix; the reasoning is in the marker:
-
-* `ce_gaussian`, `lmfit_*` and `gpfit_DotProduct` declare `directed` but are
-  symmetric on z-scored data.
-* Seven `max`-statistic SPIs return a constant matrix on `var1_M3_T100`.
-
-One more marks a usability trap rather than a defect: `bivariate(data, 0, 1)`
-binds `0` to `data2`, not to `i`.
+One `xfail(strict=True)` marker remains. Seven `max`-statistic SPIs return a
+constant matrix on `var1_M3_T100`; the marker records that fixture observation
+without claiming a universal defect. Positional `bivariate(data, 0, 1)` is no
+longer xfailed: it is rejected with a message explaining the signature.

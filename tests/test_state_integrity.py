@@ -6,11 +6,9 @@ in ``Data._CACHE_ATTRS`` is dropped when the series change, the builder path
 works, process names track add/remove, and ``dim_order``/non-finite inputs are
 validated.
 
-Nothing here is red any more -- the last outstanding one, positional
+Nothing here is red or xfailed any more -- the last outstanding one, positional
 ``bivariate(data, i, j)`` binding ``i`` to ``data2``, is now rejected at the
-decorator. Any future red test in this file should be marked
-``xfail(strict=True)`` so CI stays green while the fix is outstanding and the
-eventual unexpected pass fails rather than passing silently.
+decorator.
 
 Do not relax an assertion to make one of these pass. Fix the code.
 """

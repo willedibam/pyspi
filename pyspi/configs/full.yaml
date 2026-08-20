@@ -474,8 +474,8 @@
     dependencies:
     configs:
 
-  # Information-geometric conditional independence
-  # InformationGeometricConditionalIndependence:
+  # Information-geometric causal inference (disabled heuristic)
+  # InformationGeometricCausalInference:
   #   labels:
   #     - directed
   #     - nonlinear
@@ -724,7 +724,7 @@
         labels:
           - M14
 
-      # Gaussian estimator doesn't have DCE (aka Bartlett corrections) yet
+      # Gaussian estimation has no Theiler/dynamic-correlation exclusion option
       - estimator: gaussian
         auto_embed_method: MAX_CORR_AIS
         k_search_max: 10
