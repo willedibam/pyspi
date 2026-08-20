@@ -801,6 +801,11 @@ def _ksg_mi_general(A, B, k_nn, w=0, condition=True):
     if condition:
         A, B = np.split(_knn_condition(np.column_stack([A, B])), [A.shape[1]], axis=1)
     N = A.shape[0]
+    # Validated here, on the aligned arrays, not only by whatever built them.
+    # This is the estimator's own precondition: with fewer usable neighbours
+    # than k, `tree.query(..., k=k_nn+1)` pads with infinities and the digamma
+    # assembly returns a finite number that is not an estimate of anything.
+    _validate_ksg_sample(N, k_nn, w, context="mutual information")
     AB = np.column_stack([A, B])
     tree_ab = cKDTree(AB)
     tree_a = cKDTree(A)
@@ -955,7 +960,16 @@ def _ais_scorer(estimator, k_nn=None, w=0):
         return lambda series, dim, delay: _gaussian_ais(series, dim, delay)
     if estimator == "kraskov":
         def score(series, dim, delay):
-            n_eff = len(series) - (dim - 1) * delay
+            # `T - 1 - (dim-1)*delay`, not `T - (dim-1)*delay`. `_ksg_ais`
+            # aligns a one-step-ahead future against the embedding, so it
+            # spends a sample on the shift as well as on the lookback. The
+            # off-by-one let a candidate that the estimator cannot support be
+            # scored: at T=5, k_nn=4, dim=1 the guard saw N=5 (usable
+            # neighbours 4, exactly k) and passed, while the aligned arrays
+            # have N=4 (usable 3) -- and `_ksg_mi_general` had no guard of its
+            # own, so it returned a finite 0.0 for a candidate with fewer
+            # neighbours than k.
+            n_eff = len(series) - 1 - (dim - 1) * delay
             try:
                 _validate_ksg_sample(n_eff, k_nn, w)
             except ValueError:
@@ -979,15 +993,27 @@ def _select_embedding(series, scorer, dim_max, tau_max):
     model, and the finite-sample AIS objective plateaus often enough that ties
     are not rare.
 
-    Returns ``(1, 1, -inf)`` when no candidate is scorable, which is the
-    smallest embedding and the one the fixed-embedding path would have used.
+    Raises when *no* candidate is scorable. Returning ``(1, 1)`` there would
+    hand the estimator an embedding that had itself been rejected, and the
+    caller would get a number rather than the reason there isn't one -- which
+    on a short series is the difference between "transfer entropy at the
+    selected embedding" and "there is not enough data to select an embedding".
+    A non-finite score counts as unscorable, so a candidate whose covariance is
+    degenerate cannot win by default either.
     """
-    best = (1, 1, -np.inf)
+    best = (None, None, -np.inf)
     for dim in range(1, dim_max + 1):
         for delay in range(1, tau_max + 1):
             score = scorer(series, dim, delay)
-            if score > best[2]:
+            if np.isfinite(score) and score > best[2]:
                 best = (dim, delay, score)
+    if best[0] is None:
+        raise ValueError(
+            f"No (dimension, delay) in 1..{dim_max} x 1..{tau_max} can be "
+            f"scored on a series of {len(series)} observations: every "
+            f"candidate leaves too few aligned samples for the estimator. "
+            f"Lower the search bounds, or use a fixed embedding."
+        )
     return best
 
 

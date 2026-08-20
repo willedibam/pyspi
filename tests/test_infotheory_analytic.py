@@ -565,28 +565,185 @@ def test_max_corr_ais_dest_only_keeps_the_supplied_source_embedding():
     assert captured == {"l_history": 3, "l_tau": 2}
 
 
+def _te_design(src, targ, k, k_tau, l, l_tau):
+    """Independent transcription of `_te_build_embeddings`' declared alignment.
+
+    lookback = max((k-1)*k_tau, (l-1)*l_tau); for each t in [lookback, T-1):
+
+        target future  targ[t+1]
+        target past    targ[t], targ[t - k_tau], ...   (k columns, lag 0 first)
+        source past    src[t],  src[t - l_tau], ...    (l columns, lag 0 first)
+
+    The source past starts at lag **0**, contemporaneous with the newest target
+    history sample. An earlier version of this oracle used lags 1..l and a
+    lookback of `l*l_tau`, i.e. source columns one sample older throughout. It
+    still passed at rel=2e-3, because on a smoothly autocorrelated source the
+    two lag sets carry nearly the same predictive information -- which is
+    exactly why the fixture below is chosen to make the difference large.
+    """
+    T = len(src)
+    lookback = max((k - 1) * k_tau, (l - 1) * l_tau)
+    end = T - 1
+    t = np.arange(lookback, end)
+    future = targ[t + 1]
+    t_past = np.column_stack([targ[t - i * k_tau] for i in range(k)])
+    s_past = np.column_stack([src[t - i * l_tau] for i in range(l)])
+    return future, t_past, s_past
+
+
 def test_gaussian_transfer_entropy_matches_an_ols_oracle_at_a_fixed_embedding():
-    """TE is the log ratio of two residual variances, so OLS gives it directly."""
+    """TE is the log ratio of two residual variances, so OLS gives it directly.
+
+    The fixture is deliberately discriminative: the source is white noise, so
+    src[t] and src[t-1] are independent, and the target is driven by src[t-1]
+    only. Using lags 1..l instead of the declared 0..l-1 therefore moves TE by a
+    large factor rather than a rounding, and the tolerance can be tight.
+
+    The residual is the Gaussian ridge -- `_gaussian_log_det` adds 1e-8 of each
+    variable's own variance -- which is why the comparison is at 1e-6 relative
+    rather than machine precision.
+    """
     from pyspi.statistics.infotheory import _gaussian_te_bivariate
 
     rng = np.random.default_rng(4)
-    T = 2000
-    s = np.zeros(T)
-    t = np.zeros(T)
-    for n in range(3, T):
-        s[n] = 0.7 * s[n - 1] + rng.standard_normal()
-        t[n] = 0.4 * t[n - 1] + 0.5 * s[n - 2] + rng.standard_normal()
+    T = 4000
+    s = rng.standard_normal(T)              # white: src[t] tells nothing of src[t-1]
+    t_ = np.zeros(T)
+    for n in range(2, T):
+        t_[n] = 0.4 * t_[n - 1] + 0.9 * s[n - 1] + 0.3 * rng.standard_normal()
 
-    k, k_tau, l, l_tau = 2, 1, 3, 1
-    lookback = max((k - 1) * k_tau, l * l_tau)
-    end = T - 1
-    future = t[lookback + 1: end + 1]
-    t_past = _lagged(t, k, k_tau, end)[-future.size:]
-    s_past = np.column_stack([s[lookback - i * l_tau: end - i * l_tau]
-                              for i in range(1, l + 1)])[-future.size:]
+    k, k_tau, l, l_tau = 2, 1, 2, 1
+    future, t_past, s_past = _te_design(s, t_, k, k_tau, l, l_tau)
+    expected = 0.5 * np.log(
+        _ols_residual_variance(future, t_past)
+        / _ols_residual_variance(future, np.column_stack([t_past, s_past])))
 
-    expected = 0.5 * np.log(_ols_residual_variance(future, t_past)
-                            / _ols_residual_variance(
-                                future, np.column_stack([t_past, s_past])))
-    got = _gaussian_te_bivariate(s, t, k, k_tau, l, l_tau)
-    assert got == pytest.approx(expected, rel=2e-3), f"{got} vs {expected}"
+    got = _gaussian_te_bivariate(s, t_, k, k_tau, l, l_tau)
+    assert got == pytest.approx(expected, rel=1e-6), f"{got} vs {expected}"
+
+    # The misaligned design the previous oracle used, kept as a live
+    # demonstration that this fixture can tell them apart.
+    t = np.arange(max((k - 1) * k_tau, l * l_tau), T - 1)
+    shifted = np.column_stack([s[t - i * l_tau] for i in range(1, l + 1)])
+    misaligned = 0.5 * np.log(
+        _ols_residual_variance(t_[t + 1], np.column_stack([t_[t - i] for i in range(k)]))
+        / _ols_residual_variance(t_[t + 1], np.column_stack(
+            [np.column_stack([t_[t - i] for i in range(k)]), shifted])))
+    assert abs(misaligned - expected) > 0.2 * abs(expected), (
+        f"fixture is not discriminative: aligned {expected:.4f} vs "
+        f"misaligned {misaligned:.4f}")
+
+
+def _brute_force_ksg_mi_general(A, B, k):
+    """O(N^2) multivariate KSG estimator 1, written from the paper.
+
+    Marginals may have any number of columns, so this can score an AIS
+    candidate `MI(Y_future; Y_past_embedding)` directly. Shares no code with
+    the cKDTree implementation it checks.
+    """
+    from scipy.special import digamma
+
+    A = np.atleast_2d(np.asarray(A, float))
+    B = np.atleast_2d(np.asarray(B, float))
+    if A.shape[0] == 1 and A.shape[1] != B.shape[0]:
+        A = A.T
+    n = A.shape[0]
+
+    def chebyshev(M):
+        return np.abs(M[:, None, :] - M[None, :, :]).max(axis=-1)
+
+    dA, dB = chebyshev(A), chebyshev(B)
+    dJ = np.maximum(dA, dB)
+    np.fill_diagonal(dJ, np.inf)
+    eps = np.sort(dJ, axis=1)[:, k - 1]
+    n_a = (dA < eps[:, None]).sum(axis=1) - 1
+    n_b = (dB < eps[:, None]).sum(axis=1) - 1
+    return float(digamma(k) + digamma(n)
+                 - np.mean(digamma(n_a + 1) + digamma(n_b + 1)))
+
+
+@pytest.mark.parametrize("dim,delay", [(1, 1), (2, 1), (3, 2), (4, 1)])
+def test_ksg_ais_matches_an_independent_multivariate_reference(dim, delay):
+    """The AIS candidate score, against a brute-force multivariate KSG.
+
+    Continuous and tie-free, so the 1e-8 dither is far below the estimator's
+    own resolution and both implementations see the same geometry.
+    """
+    from pyspi.statistics.infotheory import _knn_condition, _ksg_ais
+
+    rng = np.random.default_rng(11)
+    T = 260
+    x = np.zeros(T)
+    for t in range(2, T):
+        x[t] = 0.6 * x[t - 1] - 0.3 * x[t - 2] + rng.standard_normal()
+
+    start, end = (dim - 1) * delay, T - 1
+    future = x[start + 1:end + 1].reshape(-1, 1)
+    past = np.column_stack([x[start - i * delay:end - i * delay]
+                            for i in range(dim)])
+    conditioned = _knn_condition(np.column_stack([future, past]))
+    expected = _brute_force_ksg_mi_general(conditioned[:, :1], conditioned[:, 1:], 4)
+
+    assert _ksg_ais(x, dim, delay, 4, 0) == pytest.approx(expected, abs=1e-12)
+
+
+def test_ksg_embedding_selection_matches_the_reference_scores():
+    """The winner is the argmax of independently computed candidate scores.
+
+    No assertion that a particular AR order is recovered -- the finite-sample
+    AIS objective plateaus, and asserting an order would pin luck.
+    """
+    from pyspi.statistics.infotheory import (_ais_scorer, _knn_condition,
+                                             _select_embedding)
+
+    rng = np.random.default_rng(12)
+    T = 300
+    x = np.zeros(T)
+    for t in range(3, T):
+        x[t] = 0.5 * x[t - 1] + 0.4 * x[t - 3] + rng.standard_normal()
+
+    scores = {}
+    for dim in range(1, 5):
+        for delay in range(1, 3):
+            start, end = (dim - 1) * delay, T - 1
+            future = x[start + 1:end + 1].reshape(-1, 1)
+            past = np.column_stack([x[start - i * delay:end - i * delay]
+                                    for i in range(dim)])
+            c = _knn_condition(np.column_stack([future, past]))
+            scores[(dim, delay)] = _brute_force_ksg_mi_general(c[:, :1], c[:, 1:], 4)
+
+    dim, delay, _ = _select_embedding(x, _ais_scorer("kraskov", 4, 0), 4, 2)
+    assert (dim, delay) == max(scores, key=lambda kd: (scores[kd], -kd[0], -kd[1]))
+
+
+def test_ais_scorer_rejects_a_candidate_that_leaves_too_few_samples():
+    """`T - 1 - (dim-1)*delay`, not `T - (dim-1)*delay`.
+
+    `_ksg_ais` aligns a one-step-ahead future against the embedding, so it
+    spends a sample on the shift as well as on the lookback. With the
+    off-by-one, T=5 / kNN=4 / dimension 1 passed the guard on a claimed N=5
+    while the aligned arrays have N=4 -- and `_ksg_mi_general` had no guard of
+    its own, so `tree.query(..., k=5)` padded with infinities and the candidate
+    scored a finite 0.0.
+    """
+    from pyspi.statistics.infotheory import _ais_scorer, _ksg_mi_general
+
+    rng = np.random.default_rng(13)
+    series = rng.standard_normal(5)
+    assert _ais_scorer("kraskov", 4, 0)(series, 1, 1) == -np.inf
+
+    # The general path refuses the same input on its own account.
+    with pytest.raises(ValueError, match="usable neighbour"):
+        _ksg_mi_general(rng.standard_normal((4, 1)), rng.standard_normal((4, 1)),
+                        4, 0)
+
+
+def test_embedding_selection_raises_when_no_candidate_is_scorable():
+    """Not a silent fall back to (1, 1) -- that is an embedding the scorer just
+    rejected, and the caller would get a number instead of the reason."""
+    from pyspi.statistics.infotheory import _ais_scorer, _select_embedding
+
+    rng = np.random.default_rng(14)
+    with pytest.raises(ValueError, match="can be scored"):
+        _select_embedding(rng.standard_normal(5), _ais_scorer("kraskov", 4, 0),
+                          3, 2)
