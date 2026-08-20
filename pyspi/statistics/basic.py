@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 from pyspi.base import Undirected, Signed, parse_bivariate, parse_multivariate
+from pyspi.utils import require_int
 
 
 class Estimators(Undirected, Signed):
@@ -315,9 +316,7 @@ class LaggedCorrelation(Undirected, Signed):
         else:
             self.labels = LaggedCorrelation.labels + ["signed"]
             suffix = ""
-        self._tau = int(tau)
-        if self._tau < 0:
-            raise ValueError("tau must be >= 0.")
+        self._tau = require_int("tau", tau, minimum=0)
         self.identifier = f"corr_{est}_tau-{self._tau}{suffix}"
 
     def _corr(self, x, y):

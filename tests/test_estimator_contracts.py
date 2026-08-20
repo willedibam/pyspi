@@ -1323,3 +1323,107 @@ def test_rmse_suffix_is_the_normalisation_label_not_a_metric_claim():
     for metric in ("euclidean", "cityblock", "cosine", "canberra", "braycurtis"):
         assert PairwiseDistance(metric=metric,
                                 normalise=True).identifier.endswith("_rmse")
+
+
+# ---------------------------------------------------------------------------
+# Strict validation of the public numeric surface
+# ---------------------------------------------------------------------------
+
+def _integral_constructors():
+    """(label, ctor, minimum) for every public parameter contracted as integral."""
+    import pyspi.statistics.infotheory as it
+    from pyspi.statistics.basic import LaggedCorrelation
+    from pyspi.statistics.distance import (CrossPairwiseDistance,
+                                           DynamicTimeWarping)
+
+    return [
+        ("prop_k", lambda v: it.MutualInfo(estimator="kraskov", prop_k=v), 1),
+        ("dyn_corr_excl",
+         lambda v: it.MutualInfo(estimator="kraskov", dyn_corr_excl=v), 0),
+        ("n (CausalEntropy)", lambda v: it.CausalEntropy(n=v), 1),
+        ("n (DirectedInfo)", lambda v: it.DirectedInfo(n=v), 1),
+        ("k_history", lambda v: it.TransferEntropy(estimator="gaussian",
+                                                   k_history=v), 1),
+        ("k_search_max",
+         lambda v: it.TransferEntropy(estimator="gaussian",
+                                      auto_embed_method="MAX_CORR_AIS",
+                                      k_search_max=v), 1),
+        ("LaggedCorrelation.tau", lambda v: LaggedCorrelation(tau=v), 0),
+        ("sakoe_chiba_radius",
+         lambda v: DynamicTimeWarping(global_constraint="sakoe_chiba",
+                                      sakoe_chiba_radius=v), 1),
+        ("CrossPairwiseDistance.tau", lambda v: CrossPairwiseDistance(tau=v), 0),
+    ]
+
+
+@pytest.mark.parametrize("bad", [2.7, 1.0, True, False, "3", float("nan"),
+                                 float("inf"), -float("inf"), None.__class__])
+def test_integral_parameters_reject_non_integral_values(bad):
+    """`int(2.7)` is 2 and `int(True)` is 1, so a permissive cast turns a
+    plainly wrong argument into a plausible one."""
+    for label, ctor, _ in _integral_constructors():
+        with pytest.raises((TypeError, ValueError)):
+            ctor(bad)
+
+
+@pytest.mark.parametrize("value", [0, -1, -5])
+def test_integral_parameters_reject_values_below_their_minimum(value):
+    for label, ctor, minimum in _integral_constructors():
+        if value >= minimum:
+            assert ctor(value) is not None, label     # legitimately accepted
+            continue
+        with pytest.raises(ValueError, match=">="):
+            ctor(value)
+
+
+@pytest.mark.parametrize("bad", [True, False, "0.5", float("nan"),
+                                 float("inf"), 0, -0.5])
+def test_continuous_parameters_reject_non_finite_and_non_positive(bad):
+    """`kernel_width` and `sakoe_chiba_ratio` are genuinely continuous, so a
+    fractional value is legitimate -- but bool, NaN, infinity and <= 0 are not.
+    """
+    import pyspi.statistics.infotheory as it
+    from pyspi.statistics.distance import DynamicTimeWarping
+
+    for ctor in (lambda v: it.MutualInfo(estimator="kernel", kernel_width=v),
+                 lambda v: DynamicTimeWarping(global_constraint="sakoe_chiba",
+                                              sakoe_chiba_ratio=v)):
+        with pytest.raises((TypeError, ValueError)):
+            ctor(bad)
+
+
+def test_continuous_parameters_accept_a_fractional_value():
+    """The converse: strictness must not have broken the legitimate case."""
+    import pyspi.statistics.infotheory as it
+    from pyspi.statistics.distance import DynamicTimeWarping
+
+    assert "W-0.25" in it.MutualInfo(estimator="kernel",
+                                     kernel_width=0.25).identifier
+    assert "ratio-0.1" in DynamicTimeWarping(
+        global_constraint="sakoe_chiba", sakoe_chiba_ratio=0.1).identifier
+
+
+def test_dyn_corr_excl_accepts_only_none_integers_and_exact_auto():
+    import pyspi.statistics.infotheory as it
+
+    assert it.MutualInfo(estimator="kraskov",
+                         dyn_corr_excl="AUTO").identifier.endswith("_DCE-AUTO")
+    assert it.MutualInfo(estimator="kraskov",
+                         dyn_corr_excl=7).identifier.endswith("_DCE-7")
+    # 0 is "no window", which is what None already means, so it stays unnamed.
+    assert it.MutualInfo(estimator="kraskov",
+                         dyn_corr_excl=0).identifier == "mi_kraskov_NN-4"
+    for bad in ("auto", "Auto", "AUTO ", "10"):
+        with pytest.raises(ValueError, match="AUTO"):
+            it.MutualInfo(estimator="kraskov", dyn_corr_excl=bad)
+
+
+def test_validated_value_is_the_one_used_in_identifier_and_cache_key():
+    """A numpy integer must canonicalise, not leak its type into the name."""
+    import pyspi.statistics.infotheory as it
+
+    spi = it.MutualInfo(estimator="kraskov", prop_k=np.int64(6),
+                        dyn_corr_excl=np.int32(3))
+    assert spi.identifier == "mi_kraskov_NN-6_DCE-3"
+    assert spi._getkey() == ("kraskov", 6, 3)
+    assert all(type(v) is int for v in spi._getkey()[1:])

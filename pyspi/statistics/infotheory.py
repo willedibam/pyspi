@@ -1214,21 +1214,26 @@ class InfoTheoryBase(Unsigned):
         self._estimator = estimator
         # Defaults applied after validation so "not supplied" stays
         # distinguishable from "supplied with the default value".
-        self._kernel_width = 0.5 if kernel_width is None else float(kernel_width)
-        self._prop_k = 4 if prop_k is None else int(prop_k)
-        # Checked here rather than discovered downstream: a non-positive box
-        # kernel half-width counts only the point itself, so every log ratio is
-        # log(N) and the "estimate" is a constant; k < 1 has no kth neighbour.
-        if self._kernel_width <= 0:
-            raise ValueError(
-                f"kernel_width must be > 0, got {self._kernel_width!r}.")
-        if self._prop_k < 1:
-            raise ValueError(f"prop_k must be >= 1, got {self._prop_k!r}.")
-        if dyn_corr_excl is not None and dyn_corr_excl != "AUTO":
-            if int(dyn_corr_excl) < 0:
+        # Validated, not coerced. `float(True)` is 1.0 and `int(2.7)` is 2, so
+        # a permissive cast turns a plainly wrong argument into a plausible one:
+        # a non-positive box-kernel half-width counts only the point itself, so
+        # every log ratio is log(N) and the "estimate" is a constant, and k < 1
+        # has no kth neighbour at all.
+        self._kernel_width = (0.5 if kernel_width is None
+                              else utils.require_positive_float("kernel_width",
+                                                                kernel_width))
+        self._prop_k = (4 if prop_k is None
+                        else utils.require_int("prop_k", prop_k, minimum=1))
+        if dyn_corr_excl is not None and not (
+                isinstance(dyn_corr_excl, str) and dyn_corr_excl == "AUTO"):
+            # `None` and the exact string "AUTO" are the only non-integer
+            # values; everything else is a Theiler window in samples.
+            if isinstance(dyn_corr_excl, str):
                 raise ValueError(
-                    f"dyn_corr_excl must be >= 0 or 'AUTO', got "
-                    f"{dyn_corr_excl!r}.")
+                    f"dyn_corr_excl must be an integer >= 0, None, or the "
+                    f"string 'AUTO'; got {dyn_corr_excl!r}.")
+            dyn_corr_excl = utils.require_int("dyn_corr_excl", dyn_corr_excl,
+                                              minimum=0)
         self._dyn_corr_excl = dyn_corr_excl
         self._entropy_calc = self._getcalc("entropy")
 
@@ -1928,9 +1933,7 @@ class CausalEntropy(InfoTheoryBase, Directed):
 
     def __init__(self, n=5, **kwargs):
         super().__init__(**kwargs)
-        if int(n) < 1:
-            raise ValueError(f"Horizon n must be >= 1, got {n}.")
-        self._n = int(n)
+        self._n = utils.require_int("n", n, minimum=1)
         # n changes the measure, so it must reach the identifier.
         self.identifier += f"_n-{self._n}"
 

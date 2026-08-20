@@ -30,6 +30,33 @@ def require_int(name, value, minimum=1):
     return int(value)
 
 
+def require_positive_float(name, value):
+    """Return ``value`` as a strictly positive finite ``float``.
+
+    The companion to :func:`require_int` for the genuinely continuous
+    parameters -- kernel bandwidths, band fractions. Rejects ``bool`` (which
+    ``float()`` happily turns into 1.0), NaN and the infinities, and anything
+    that is not a real number at all.
+    """
+    if isinstance(value, bool) or isinstance(value, (str, bytes)):
+        raise TypeError(
+            f"{name} must be a positive real number, got {value!r} "
+            f"({type(value).__name__})."
+        )
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        raise TypeError(
+            f"{name} must be a positive real number, got {value!r} "
+            f"({type(value).__name__})."
+        ) from None
+    if not np.isfinite(value):
+        raise ValueError(f"{name} must be finite, got {value!r}.")
+    if value <= 0:
+        raise ValueError(f"{name} must be > 0, got {value!r}.")
+    return value
+
+
 def acf(x, mode='positive'):
     """Return the autocorrelation function using FFT-based computation.
 

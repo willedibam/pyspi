@@ -25,7 +25,7 @@ from pyspi.base import (
     parse_bivariate,
     parse_multivariate,
 )
-from pyspi.utils import fmt_param, require_int
+from pyspi.utils import fmt_param, require_int, require_positive_float
 
 
 # ---------------------------------------------------------------------------
@@ -237,14 +237,15 @@ class DynamicTimeWarping(TimeWarping):
     ):
         if sakoe_chiba_radius is not None and sakoe_chiba_ratio is not None:
             raise ValueError("Set only one of sakoe_chiba_radius or sakoe_chiba_ratio.")
+        # Validated, not coerced: `int(2.7)` silently becomes a band of 2 and
+        # `float(True)` a ratio of 1.0, both of which look like the caller's
+        # intent and are not.
         if sakoe_chiba_radius is not None:
-            sakoe_chiba_radius = int(sakoe_chiba_radius)
-            if sakoe_chiba_radius < 1:
-                raise ValueError("sakoe_chiba_radius must be >= 1.")
+            sakoe_chiba_radius = require_int("sakoe_chiba_radius",
+                                             sakoe_chiba_radius, minimum=1)
         if sakoe_chiba_ratio is not None:
-            sakoe_chiba_ratio = float(sakoe_chiba_ratio)
-            if sakoe_chiba_ratio <= 0:
-                raise ValueError("sakoe_chiba_ratio must be > 0.")
+            sakoe_chiba_ratio = require_positive_float("sakoe_chiba_ratio",
+                                                       sakoe_chiba_ratio)
 
         super().__init__(global_constraint=global_constraint, **kwargs)
         self._simfn = tslearn.metrics.dtw
