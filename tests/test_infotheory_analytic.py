@@ -664,14 +664,14 @@ def _brute_force_ksg_mi_general(A, B, k):
 def test_ksg_ais_matches_an_independent_multivariate_reference(dim, delay):
     """The AIS candidate score, against a brute-force multivariate KSG.
 
-    Continuous and tie-free, so the 1e-8 dither is far below the estimator's
-    own resolution and both implementations see the same geometry.
+    Continuous and tie-free, so both implementations see the same unambiguous
+    neighbour geometry.
     """
     from pyspi.statistics.infotheory import _knn_condition, _ksg_ais
 
     rng = np.random.default_rng(11)
     T = 260
-    x = np.zeros(T)
+    x = rng.standard_normal(T)
     for t in range(2, T):
         x[t] = 0.6 * x[t - 1] - 0.3 * x[t - 2] + rng.standard_normal()
 
@@ -696,7 +696,7 @@ def test_ksg_embedding_selection_matches_the_reference_scores():
 
     rng = np.random.default_rng(12)
     T = 300
-    x = np.zeros(T)
+    x = rng.standard_normal(T)
     for t in range(3, T):
         x[t] = 0.5 * x[t - 1] + 0.4 * x[t - 3] + rng.standard_normal()
 

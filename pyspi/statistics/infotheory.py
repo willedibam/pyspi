@@ -6,7 +6,6 @@ Frontiers in Robotics and AI), which served as the reference implementation the
 port was validated against; the version used for validation was JIDT 1.6.1.
 """
 
-import hashlib
 import math
 import numpy as np
 from pyspi import utils
@@ -589,153 +588,62 @@ def _numpy_delay_embedding(x, dim):
 
 
 # ---------------------------------------------------------------------------
-# k-NN input conditioning (JIDT's NORMALISE and NOISE_LEVEL_TO_ADD)
+# k-NN input conditioning
 # ---------------------------------------------------------------------------
 
 # JIDT switches both of these on by default for every KSG-family calculator:
 # MutualInfoCalculatorMultiVariateKraskov, ConditionalMutualInfoCalculator-
 # MultiVariateKraskov and EntropyCalculatorMultiVariateKozachenko all set
 # `addNoise = true; noiseLevel = 1e-8` in their constructors ("to match the
-# noise order in MILCA toolkit"), and `normalise = true` is the default on
-# MutualInfoMultiVariateCommon / ConditionalMutualInfoMultiVariateCommon.
-# Noise is added *after* normalisation, so 1e-8 is in standard deviations.
-#
-# pyspi 2.x ran JIDT with both defaults active -- it set NOISE_SEED=42 and
-# never touched NORMALISE or NOISE_LEVEL_TO_ADD. The pure-NumPy port carried
-# the seed over but implemented neither policy, which is not a rounding
-# difference:
-#
-#   ties      Independent binary marginals (N=400, k=4) returned MI = -3.35;
-#             four-level, -1.96; one-decimal-rounded Gaussians, *+0.90* -- a
-#             confident false positive on independent data. Every kth-nearest-
-#             neighbour radius is zero, so the digamma counts saturate on the
-#             tie structure and the estimate measures quantisation.
-#   scale     KSG's L-infinity radius is not invariant to per-coordinate
-#             rescaling. With zscore=False, scaling one of a correlated
-#             Gaussian pair (true MI 0.50) by 1e-3 or 1e3 collapsed the
-#             estimate from 0.49 to 0.05 and 0.06.
-#
-# Normalisation fixes the second outright. Dither fixes the first in the
-# limit that matters: for independent additive noise, I(X+eps*xi; Y+eps*eta)
-# -> I(X; Y) as eps -> 0, so a tiny dither recovers the discrete answer
-# instead of the tie artefact (Kraskov et al. 2004, Phys. Rev. E 69, 066138,
-# recommend exactly this).
-#
-# The same argument does *not* extend to differential entropy, and pyspi
-# deliberately parts company with JIDT there: H(X + eps*xi) -> -inf as
-# eps -> 0 for discrete X, so dithered Kozachenko entropy on quantised data
-# reports the dither level, not the data. KLEntropyCalculator keeps its
-# explicit error instead (see its docstring).
-#
-# Both are fixed implementation policy, not tunable parameters, so neither
-# appears in SPI identifiers; they belong to the algorithm version that
-# `run_digest` binds to.
-_KNN_NOISE_LEVEL = 1e-8
-_KNN_NOISE_SEED = 42
-_KNN_NORMALISE_DECIMALS = 12
+# noise order in MILCA toolkit"); `normalise = true` is inherited from their
+# common base. pyspi retains normalisation but intentionally does not copy the
+# random-noise policy.
+# KSG estimator 1 is a continuous-density estimator. Exact coordinate ties
+# make the kth-neighbour radius/counting convention ambiguous; deterministic
+# jitter merely replaces that ambiguity with dependence on an arbitrary noise
+# realisation, and content-derived jitter additionally depends on sample order.
+# pyspi therefore refuses tied coordinates instead of pretending to recover a
+# discrete information measure. Per-coordinate standardisation remains: the
+# joint L-infinity geometry is then covariant under nonzero affine marginal
+# changes, including reflections, without rounding or random state.
 
 
-def _knn_condition(X, noise_level=_KNN_NOISE_LEVEL, seed=_KNN_NOISE_SEED):
-    """Standardise, quantise, and independently dither each KSG coordinate.
+def _knn_condition(X):
+    """Validate continuous KSG input and standardise each coordinate.
 
-    This is the numerical contract shared by KSG MI, AIS, TE and DI:
+    Every coordinate must be tie-free. Quantised/discrete data requires a
+    discrete plug-in information estimator; adding deterministic jitter does
+    not turn KSG into one and can make the result depend on sample order.
 
-    * Each coordinate is centred and divided by its sample standard deviation.
-      The result is rounded to ``_KNN_NORMALISE_DECIMALS`` decimal places
-      (currently 12) *and that rounded value is used by the estimator*. At the
-      resulting O(1) scale the 5e-13 quantisation error is four orders of
-      magnitude below the 1e-8 dither, while absorbing ordinary floating-point
-      differences from a nonzero affine change of units.
-    * A coordinate and its reflection share one canonical key. Its dither is
-      reflected with it, so Chebyshev distances are unchanged by a negative as
-      well as a positive affine marginal transformation.
-    * Coordinates in the same quantisation cell receive distinct replica
-      dithers. Distinct near-collisions are ordered by reflection-canonical
-      ranks and finer standardised values, not by their input positions.
-      Exact replicas remain indistinguishable, but swapping their replica
-      noises only permutes equal coordinate axes and therefore leaves the KSG
-      L-infinity geometry unchanged.
-
-    The key uses BLAKE2 rather than Python's process-salted ``hash`` and no
-    global RNG state. Thus calls are deterministic and process-order covariant.
-    This contract supports affine marginal invariance to the stated numerical
-    tolerance; it does not make a finite-sample KSG estimate invariant under an
-    arbitrary nonlinear transformation.
+    Standardisation uses an observed origin before mean/std calculation to
+    reduce cancellation under affine offsets. No rounding, dither, seed, or
+    global RNG state participates in the estimator.
     """
     X = np.asarray(X, dtype=np.float64)
     reshaped = X.ndim == 1
     if reshaped:
         X = X.reshape(-1, 1)
 
-    quantised = np.empty_like(X)
-    orientations = np.ones(X.shape[1], dtype=np.int8)
-    keys = []
-    canonical_exact = []
+    out = np.empty_like(X)
     for c in range(X.shape[1]):
         col = X[:, c]
+        n_unique = np.unique(col).size
+        if n_unique != col.size:
+            raise ValueError(
+                f"KSG requires continuous, tie-free coordinates: coordinate "
+                f"{c} has {n_unique} unique value(s) among {col.size} "
+                f"observations. Deterministic jitter would make the estimate "
+                f"depend on arbitrary noise. Use a discrete plug-in "
+                f"information estimator for quantised/discrete data, or "
+                f"remove measurement rounding only when scientifically "
+                f"justified."
+            )
         # Subtract an observed origin before taking the mean/std. This is
         # algebraically identical, but avoids needless cancellation when an
         # affine transform adds an offset large relative to the variation.
         shifted = col - col[0]
         sd = shifted.std(ddof=1)      # JIDT MatrixUtils.stdDevs: sample std
-        # A constant column has no scale to normalise by. The KSG entry points
-        # reject that input outright; leaving it centred keeps this helper from
-        # being the thing that raises.
-        normalised = (shifted - shifted.mean()) / (sd if sd > 0 else 1.0)
-        rounded = np.round(normalised, _KNN_NORMALISE_DECIMALS)
-        rounded[rounded == 0] = 0.0  # canonicalise the sign bit of zero
-        quantised[:, c] = rounded
-
-        nonzero = np.flatnonzero(rounded)
-        orientation = (
-            1 if nonzero.size == 0 or rounded[nonzero[0]] > 0 else -1
-        )
-        orientations[c] = orientation
-        canonical = orientation * rounded
-        canonical[canonical == 0] = 0.0
-        keys.append(np.ascontiguousarray(canonical).tobytes())
-
-        exact = orientation * normalised
-        exact[exact == 0] = 0.0
-        canonical_exact.append(exact)
-
-    groups: dict[bytes, list[int]] = {}
-    for c, key in enumerate(keys):
-        groups.setdefault(key, []).append(c)
-    replicas = np.empty(X.shape[1], dtype=np.int64)
-    for columns in groups.values():
-        if len(columns) > 1:
-            # Consulted only for a 12-decimal collision. Ranks are exactly
-            # affine/reflection invariant unless the operation itself loses a
-            # floating-point distinction; finer values break the remaining
-            # tie deterministically.
-            order_keys = {}
-            for c in columns:
-                exact = canonical_exact[c]
-                ranks = np.argsort(
-                    np.argsort(exact, kind="stable"), kind="stable"
-                )
-                fine = np.round(exact, 15)
-                fine[fine == 0] = 0.0
-                order_keys[c] = (
-                    np.ascontiguousarray(ranks).tobytes(),
-                    np.ascontiguousarray(fine).tobytes(),
-                    np.ascontiguousarray(exact).tobytes(),
-                )
-            columns.sort(key=order_keys.__getitem__)
-        for replica, c in enumerate(columns):
-            replicas[c] = replica
-
-    out = quantised.copy()
-    if noise_level:
-        for c, key in enumerate(keys):
-            digest = hashlib.blake2b(
-                key + int(replicas[c]).to_bytes(8, "little"), digest_size=8
-            ).digest()
-            rng = np.random.default_rng(int.from_bytes(digest, "little") ^ seed)
-            out[:, c] += (
-                orientations[c] * noise_level * rng.standard_normal(X.shape[0])
-            )
+        out[:, c] = (shifted - shifted.mean()) / sd
     return out.reshape(-1) if reshaped else out
 
 
@@ -772,9 +680,8 @@ def _ksg_mi_pair(x, y, k, w):
     N = len(x)
     _validate_ksg_sample(N, k, w, context="mutual information")
     # A constant marginal carries no information, but it is almost always a
-    # broken input rather than a result the caller wants: the estimate would be
-    # of the dither `_knn_condition` adds, not of the data. Checked before
-    # conditioning, which is what makes it detectable at all.
+    # broken input rather than a result the caller wants. Checked before
+    # conditioning so the error can name the marginal directly.
     for name, v in (("x", x), ("y", y)):
         if np.ptp(v) == 0:
             raise ValueError(
@@ -1100,9 +1007,8 @@ def _ksg_cmi(A, B, C, k_nn, w=0, condition=True):
     A = np.atleast_2d(A)
     B = np.atleast_2d(B)
     N = A.shape[0]
-    # Tied/quantised inputs give a zero k-th neighbour radius, which makes the
-    # digamma counts saturate and returns a large negative "CMI" -- binary
-    # inputs produced -2.36. Reject rather than report it.
+    # Constant columns have no continuous density. Other ties are rejected by
+    # the shared conditioning primitive below.
     for name, arr in (("A", A), ("B", B)):
         if np.ptp(arr, axis=0).min() == 0:
             raise ValueError(f"KSG cannot estimate: {name} has a constant column.")

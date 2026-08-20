@@ -413,7 +413,10 @@ SCHEMA_VERSION = 1
 #         reflections, and assigns numerical key collisions by content rather
 #         than coordinate order. Tied/quantised and tolerance-boundary values
 #         can move.
-COMPUTATION_VERSION = "3.0.0.r4"
+#   r5 -- KSG refuses tied coordinates and no longer rounds or dithers valid
+#         continuous inputs. This removes arbitrary order-dependent tie
+#         breaking and the artificial 12-decimal conditioning boundary.
+COMPUTATION_VERSION = "3.0.0.r5"
 
 
 def read_manifest(checkpoint_dir: Path):

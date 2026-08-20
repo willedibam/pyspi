@@ -413,7 +413,7 @@ def test_ccm_auto_embedding_maximises_skill_rather_than_returning_max_e():
 
 
 # ---------------------------------------------------------------------------
-# KSG input conditioning: JIDT's NORMALISE and NOISE_LEVEL_TO_ADD
+# KSG input conditioning: standardisation and an explicit no-ties policy
 # ---------------------------------------------------------------------------
 
 def _correlated_pair(n=2000, rho=0.8, seed=0):
@@ -424,7 +424,7 @@ def _correlated_pair(n=2000, rho=0.8, seed=0):
 
 @pytest.mark.parametrize("scale", [1e-3, 1.0, 1e3])
 def test_ksg_mi_is_invariant_to_per_coordinate_rescaling(scale):
-    """MI is invariant under any smooth invertible marginal transform.
+    """MI is invariant under nonzero affine marginal transformations.
 
     The KSG estimator's L-infinity neighbour radius is not, which is why JIDT
     normalises each column by default (``normalise = true`` on
@@ -444,15 +444,8 @@ def test_ksg_mi_is_invariant_to_per_coordinate_rescaling(scale):
 
 @pytest.mark.parametrize("w", [0, 5])
 @pytest.mark.parametrize("levels", [2, 4, None])
-def test_ksg_mi_of_independent_quantised_marginals_is_near_zero(levels, w):
-    """Ties must not be read as dependence.
-
-    Every kth-nearest-neighbour radius is zero on quantised data, so the
-    digamma counts saturate on the tie structure. Measured before the 1e-8
-    dither JIDT adds by default: independent binary marginals (N=400, k=4)
-    gave -3.35, four-level -1.96, and one-decimal-rounded Gaussians *+0.90* --
-    a confident false positive on independent data.
-    """
+def test_ksg_mi_refuses_quantised_marginals(levels, w):
+    """Continuous KSG must not turn arbitrary tie-breaking into a result."""
     from pyspi.statistics.infotheory import _ksg_mi_pair
 
     rng = np.random.default_rng(0)
@@ -461,42 +454,23 @@ def test_ksg_mi_of_independent_quantised_marginals_is_near_zero(levels, w):
             return np.round(rng.standard_normal(400), 1)
         return rng.integers(0, levels, 400).astype(float)
 
-    mi = _ksg_mi_pair(draw(), draw(), 4, w)
-    assert abs(mi) < 0.1, f"independent quantised marginals gave MI = {mi:+.4f}"
+    with pytest.raises(ValueError, match="continuous, tie-free coordinates"):
+        _ksg_mi_pair(draw(), draw(), 4, w)
 
 
-def test_ksg_mi_recovers_the_discrete_mutual_information_of_tied_data():
-    """Dither is not just a tie-breaker; the limit is the right one.
-
-    For independent additive noise, I(X + e*xi; Y + e*eta) -> I(X; Y) as
-    e -> 0, so the dithered estimate targets the discrete MI rather than a
-    quantisation artefact. Checked against the plug-in estimate on the same
-    sample, so the comparison is not confounded by sampling error.
-    """
+def test_ksg_refusal_directs_discrete_data_to_a_discrete_estimator():
     from pyspi.statistics.infotheory import _ksg_mi_pair
 
     rng = np.random.default_rng(1)
     x = (rng.random(4000) < 0.5)
     y = np.where(rng.random(4000) < 0.8, x, ~x)
 
-    joint = np.array([[np.mean((x == a) & (y == b)) for b in (False, True)]
-                      for a in (False, True)])
-    px, py = joint.sum(1), joint.sum(0)
-    plug_in = float(np.sum(joint * np.log(joint / np.outer(px, py))))
-
-    got = _ksg_mi_pair(x.astype(float), y.astype(float), 4, 0)
-    assert abs(got - plug_in) < 0.05, f"KSG {got:.4f} vs plug-in {plug_in:.4f}"
+    with pytest.raises(ValueError, match="discrete plug-in information estimator"):
+        _ksg_mi_pair(x.astype(float), y.astype(float), 4, 0)
 
 
-def test_ksg_dither_is_reproducible_and_independent_of_call_context():
-    """The dither must be a pure function of the series.
-
-    A per-call RNG would make ``bivariate(data, i, j)`` disagree with
-    ``multivariate(data)[i, j]``, break serial/parallel equality, and put a
-    stochastic term in every frozen baseline. The seed is derived from a digest
-    of the (normalised) column instead, so the same series always draws the
-    same noise however many processes it is passed alongside.
-    """
+def test_ksg_is_deterministic_and_independent_of_call_context():
+    """No random state or surrounding processes participate in conditioning."""
     import pyspi.statistics.infotheory as it
     from pyspi.data import Data
 
@@ -511,11 +485,11 @@ def test_ksg_dither_is_reproducible_and_independent_of_call_context():
         assert np.array_equal(spi.multivariate(data), table, equal_nan=True)
 
 
-def test_kraskov_spis_are_finite_on_the_quantised_bundled_dataset():
+def test_kraskov_spis_refuse_the_quantised_bundled_dataset():
     """`forex` has a process with 24 distinct values in 250 samples.
 
-    That is exactly the regime where zero neighbour radii used to dominate, and
-    it ships with the package, so it is a fixture rather than a hypothetical.
+    It ships with the package, so the no-ties contract must be explicit rather
+    than an accidental low-level neighbour-count failure.
     """
     import pyspi.statistics.infotheory as it
     from pyspi.data import load_dataset
@@ -525,21 +499,17 @@ def test_kraskov_spis_are_finite_on_the_quantised_bundled_dataset():
                 it.TimeLaggedMutualInfo(estimator="kraskov"),
                 it.TransferEntropy(estimator="kraskov"),
                 it.DirectedInfo(estimator="kraskov")):
-        table = spi.multivariate(data)
-        off = ~np.eye(table.shape[0], dtype=bool)
-        assert np.isfinite(table[off]).all(), f"{spi.identifier} has non-finite values"
-        assert np.abs(table[off]).max() < 10, f"{spi.identifier} is implausibly large"
+        with pytest.raises(ValueError, match="continuous, tie-free coordinates"):
+            spi.bivariate(data, i=0, j=1)
 
 
 def test_kozachenko_entropy_still_refuses_tied_data_rather_than_dithering():
     """A deliberate divergence from JIDT, and the reason is not stylistic.
 
-    JIDT dithers its Kozachenko calculator with the same 1e-8 it uses for KSG.
-    That is safe for mutual information, whose dithered limit is the discrete
-    value, but not for differential entropy: H(X + e*xi) -> -inf as e -> 0 for
-    discrete X, so a dithered estimate on quantised data reports the dither
-    level. pyspi names the problem instead of returning a number set by an
-    implementation constant.
+    JIDT dithers its Kozachenko calculator. For differential entropy,
+    H(X + e*xi) -> -inf as e -> 0 for discrete X, so a dithered estimate on
+    quantised data reports the dither level. pyspi names the problem instead
+    of returning a number set by an implementation constant.
     """
     import pyspi.statistics.infotheory as it
     from pyspi.data import load_dataset
@@ -828,7 +798,7 @@ def test_infotheory_parameters_are_validated_at_construction(kwargs):
 
 
 # ---------------------------------------------------------------------------
-# KSG dither: one draw per coordinate occurrence
+# KSG conditioning and independent continuous reference
 # ---------------------------------------------------------------------------
 
 def _brute_force_ksg_mi(x, y, k):
@@ -859,9 +829,8 @@ def _brute_force_ksg_mi(x, y, k):
 def test_ksg_matches_an_independent_brute_force_reference():
     """Tie-free continuous data, where both implementations are unambiguous.
 
-    The dither is 1e-8 standard deviations, so on tie-free data the two agree to
-    far better than the estimator's own error; this pins the neighbour counting
-    and the digamma assembly, not the tie policy.
+    This pins the neighbour counting and digamma assembly independently of the
+    implementation's cKDTree path.
     """
     from pyspi.statistics.infotheory import _knn_condition, _ksg_mi_pair
 
@@ -876,146 +845,64 @@ def test_ksg_matches_an_independent_brute_force_reference():
         assert _ksg_mi_pair(x, y, k, 0) == pytest.approx(expected, abs=1e-12), k
 
 
-@pytest.mark.parametrize("n", [200, 400, 800, 1600])
-def test_ksg_mi_of_a_variable_with_itself_is_its_discrete_entropy(n):
-    """Duplicate columns must not share a dither.
-
-    They did, so the dither never broke the degeneracy. With x == y exactly,
-    every joint L-infinity distance equals the marginal one, so the kth joint
-    radius is the kth marginal radius and strict counting gives
-    n_x = n_y = k - 1; the estimate collapses to psi(N) - psi(k), with no
-    dependence on the data. Measured 4.0397, 4.7341, 5.4279 and 6.1213 nats at
-    N = 200, 400, 800, 1600 with k = 4 -- psi(N) - psi(4) to four decimals at
-    every N -- and *identical* (4.7341 at N=400) for binary, four-level and
-    rounded-Gaussian duplicates.
-
-    For a discrete X the finite oracle is exact: I(X + eps*a; X + eps*b) -> H(X)
-    as eps -> 0 with independent a, b. No such oracle exists for identical
-    *continuous* variables, whose differential mutual information is infinite,
-    which is why this test is quantised.
-    """
-    from pyspi.statistics.infotheory import _ksg_mi_pair
-
-    from scipy.special import digamma
-
-    rng = np.random.default_rng(0)
-    for levels in (2, 4):
-        x = rng.integers(0, levels, n).astype(float)
-        counts = np.bincount(x.astype(int), minlength=levels) / n
-        entropy = float(-np.sum(counts[counts > 0] * np.log(counts[counts > 0])))
-        got = _ksg_mi_pair(x, x.copy(), 4, 0)
-        assert got == pytest.approx(entropy, abs=0.12), (
-            f"{levels}-level duplicate at N={n}: {got:.4f} vs H(X)={entropy:.4f}")
-        # ... and emphatically not the shared-dither closed form.
-        degenerate = float(digamma(n) - digamma(4))
-        assert abs(got - degenerate) > 1.0, (
-            f"still on the psi(N) - psi(k) = {degenerate:.4f} branch")
-
-
-def test_ksg_dither_is_symmetric_and_repeatable_including_duplicates():
-    """Symmetry is a property of the conditioned geometry, including ties."""
-    from pyspi.statistics.infotheory import _ksg_mi_pair
-
-    rng = np.random.default_rng(3)
-    z = rng.standard_normal(500)
-    y = 0.6 * z + 0.8 * rng.standard_normal(500)
-    b = (rng.random(400) < 0.5).astype(float)
-
-    for u, v in ((z, y), (b, b.copy())):
-        assert _ksg_mi_pair(u, v, 4, 0) == _ksg_mi_pair(v, u, 4, 0)
-        assert _ksg_mi_pair(u, v, 4, 0) == _ksg_mi_pair(u, v, 4, 0)
-
-
 @pytest.mark.parametrize("seed", [0, 42, 53])
-def test_knn_condition_is_affine_and_permutation_covariant(seed):
-    """Exercise the conditioning contract itself, before any KSG formula.
-
-    The first two coordinates deliberately collide at 12 decimals after
-    standardisation. Reordering them must reorder their conditioned values,
-    not reassign replica noise by position. Reflections must reflect the dither
-    as well as the data. Exact replicas still need different noise.
-    """
+def test_knn_condition_is_affine_and_process_permutation_covariant(seed):
+    """Exercise valid conditioning before any KSG formula."""
     from pyspi.statistics.infotheory import _knn_condition
 
-    rng = np.random.default_rng(53)
-    x = rng.integers(0, 4, 100).astype(float)
-    near = 1000 * x + 1e-11 * rng.standard_normal(x.size)
-    binary = rng.integers(0, 2, x.size).astype(float)
-    X = np.column_stack([x, near, binary])
+    rng = np.random.default_rng(seed)
+    X = rng.standard_normal((100, 3))
 
-    base = _knn_condition(X, seed=seed)
+    base = _knn_condition(X)
     order = [2, 1, 0]
-    assert np.array_equal(
-        _knn_condition(X[:, order], seed=seed), base[:, order]
-    )
+    assert np.array_equal(_knn_condition(X[:, order]), base[:, order])
 
     scales = np.array([-3.0, 7.0, -0.25])
     offsets = np.array([2.0, -5.0, 9.0])
-    moved = _knn_condition(X * scales + offsets, seed=seed)
-    assert np.array_equal(moved, base * np.sign(scales))
-
-    duplicate = _knn_condition(np.column_stack([binary, binary]), seed=seed)
-    assert not np.array_equal(duplicate[:, 0], duplicate[:, 1])
+    moved = _knn_condition(X * scales + offsets)
+    assert np.allclose(moved, base * np.sign(scales), atol=5e-15, rtol=0)
 
 
-def test_ksg_near_collision_is_exactly_symmetric():
-    """Regression for the 12-decimal key collision at N=100/seed=53.
+def test_knn_condition_refuses_duplicates_and_affine_rounding_boundary():
+    """There is no numerical key/tolerance boundary because no key is used."""
+    from pyspi.statistics.infotheory import _knn_condition
 
-    Position-based replicas moved this estimate by 5.263e-4 when the two
-    arguments were reversed. This is not estimator error: KSG MI's joint and
-    marginal spaces are merely permuted, so the two computations must agree.
-    """
-    from pyspi.statistics.infotheory import _ksg_mi_pair
-
-    rng = np.random.default_rng(53)
-    x = rng.integers(0, 4, 100).astype(float)
-    y = 1000 * x + 1e-11 * rng.standard_normal(x.size)
-    assert _ksg_mi_pair(x, y, 4, 0) == _ksg_mi_pair(y, x, 4, 0)
+    x = np.r_[np.zeros(4), np.ones(22)]
+    for moved in (x, 0.1 * x + 0.3, -7.0 * x + 2.0):
+        with pytest.raises(ValueError, match="continuous, tie-free coordinates"):
+            _knn_condition(moved)
 
 
-def test_duplicated_processes_do_not_break_the_derived_ksg_measures():
-    """TE, TLMI and DirectedInfo all route through the same conditioning.
-
-    Each has an exactly-known answer when process 0 is duplicated at process 1
-    and the series is i.i.d. binary: MI is H(X) = ln 2; TE(0->1) is 0, because
-    the source adds nothing once the destination's own past is conditioned on;
-    and directed information over n=5 terms is 5*H(X), since each
-    I(X^i; Y_i | Y^{i-1}) reduces to H(Y_i) for an i.i.d. series.
-    """
+@pytest.mark.parametrize("seed", [0, 53])
+@pytest.mark.parametrize("kind", ["one_duplicate", "binary", "four_level"])
+def test_all_ksg_paths_consistently_refuse_tied_data(seed, kind):
+    """MI, TLMI, AIS, TE and DI share the explicit no-ties contract."""
     import pyspi.statistics.infotheory as it
     from pyspi.data import Data
 
-    rng = np.random.default_rng(0)
-    x = (rng.random(400) < 0.5).astype(float)
-    data = Data(data=np.vstack([x, x.copy(), rng.standard_normal(400)]),
+    rng = np.random.default_rng(seed)
+    if kind == "one_duplicate":
+        x = rng.standard_normal(160)
+        y = rng.standard_normal(160)
+        x[10] = x[9]
+        y[10] = y[9]
+    else:
+        levels = 2 if kind == "binary" else 4
+        x = rng.integers(0, levels, 160).astype(float)
+        y = rng.integers(0, levels, 160).astype(float)
+    data = Data(data=np.vstack([x, y, rng.standard_normal(160)]),
                 dim_order="ps", zscore=False)
 
-    ln2 = np.log(2)
-    assert it.MutualInfo(estimator="kraskov").multivariate(data)[0, 1] == \
-        pytest.approx(ln2, abs=0.1)
-    assert it.TransferEntropy(estimator="kraskov").multivariate(data)[0, 1] == \
-        pytest.approx(0.0, abs=0.1)
-    assert it.DirectedInfo(estimator="kraskov", n=5).multivariate(data)[0, 1] == \
-        pytest.approx(5 * ln2, abs=0.5)
-
-    # Exact replicas have no content identity with which the primitive could
-    # label its two independent dithers. What is observable is the KSG
-    # geometry: reordering processes must only reorder every result matrix.
-    Z = data.to_numpy(squeeze=True)
-    order = [2, 0, 1]
     for spi in (
         it.MutualInfo(estimator="kraskov"),
         it.TimeLaggedMutualInfo(estimator="kraskov"),
         it.TransferEntropy(estimator="kraskov"),
         it.DirectedInfo(estimator="kraskov", n=2),
     ):
-        base = np.asarray(spi.multivariate(Data(data=Z, dim_order="ps",
-                                                zscore=False)), float)
-        moved = np.asarray(spi.multivariate(Data(data=Z[order], dim_order="ps",
-                                                 zscore=False)), float)
-        assert np.array_equal(
-            base[np.ix_(order, order)], moved, equal_nan=True
-        ), spi.identifier
+        with pytest.raises(ValueError, match="continuous, tie-free coordinates"):
+            spi.bivariate(data, i=0, j=1)
+    with pytest.raises(ValueError, match="continuous, tie-free coordinates"):
+        it._ksg_ais(x, 2, 1, 4)
 
 
 @pytest.mark.parametrize("scale", [1e-3, 1.0, 1e3])
@@ -1033,12 +920,7 @@ def test_ksg_conditional_mi_is_invariant_to_per_coordinate_rescaling(scale):
 
 
 def test_ksg_results_survive_the_parallel_boundary(tmp_path):
-    """Serial and parallel must agree bit-for-bit; the dither uses no global RNG.
-
-    Run on a dataset with a duplicated process, so the replica index -- the part
-    of the dither key that is not simply the column's contents -- is exercised
-    across the process boundary as well.
-    """
+    """Serial and parallel must agree bit-for-bit on valid continuous data."""
     from pyspi.calculator import Calculator
     from pyspi.data import Data
 
@@ -1063,8 +945,12 @@ def test_ksg_results_survive_the_parallel_boundary(tmp_path):
     )
 
     rng = np.random.default_rng(0)
-    x = (rng.random(200) < 0.5).astype(float)
-    dataset = np.vstack([x, x.copy(), rng.standard_normal(200)])
+    x = rng.standard_normal(200)
+    dataset = np.vstack([
+        x,
+        0.6 * np.roll(x, 1) + rng.standard_normal(200),
+        rng.standard_normal(200),
+    ])
 
     tables = []
     for kwargs in ({"n_jobs": 1}, {"n_jobs": 2, "mp_context": "spawn"}):
@@ -1527,66 +1413,62 @@ def test_validated_value_is_the_one_used_in_identifier_and_cache_key():
     assert all(type(v) is int for v in spi._getkey()[1:])
 
 
-def test_the_dither_realisation_does_not_move_a_continuous_estimate():
-    """Why appending a replica index to the key moved no bundled value.
+@pytest.mark.parametrize("seed", [0, 53])
+@pytest.mark.parametrize("w", [0, 3])
+def test_ksg_mi_and_cmi_preserve_complete_time_reversal(seed, w):
+    """Reversal preserves values and every |i-j| Theiler exclusion."""
+    from pyspi.statistics.infotheory import (
+        TimeLaggedMutualInfo, _ksg_ais, _ksg_cmi, _ksg_mi_pair,
+    )
 
-    The key changed for every column, not just for duplicates -- but only the
-    *integer* neighbour counts enter the estimate, and a 1e-8 perturbation does
-    not change which points fall inside the radius. The dither breaks ties; on
-    tie-free data it does not participate in the arithmetic.
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((160, 2))
+    B = 0.5 * A[:, :1] + rng.standard_normal((160, 1))
+    C = rng.standard_normal((160, 2))
+    rev = np.arange(A.shape[0] - 1, -1, -1)
+    assert _ksg_mi_pair(A[:, 0], B[:, 0], 4, w) == pytest.approx(
+        _ksg_mi_pair(A[rev, 0], B[rev, 0], 4, w), abs=1e-12)
+    assert _ksg_cmi(A, B, C, 4, w) == pytest.approx(
+        _ksg_cmi(A[rev], B[rev], C[rev], 4, w), abs=1e-12)
+    assert _ksg_mi_pair(B[:, 0], A[:, 0], 4, w) == pytest.approx(
+        _ksg_mi_pair(A[:, 0], B[:, 0], 4, w), abs=1e-12)
+    assert _ksg_cmi(B, A, C, 4, w) == pytest.approx(
+        _ksg_cmi(A, B, C, 4, w), abs=1e-12)
 
-    The seed is passed to `_knn_condition` explicitly. Patching the module
-    attribute `_KNN_NOISE_SEED` would do nothing: it is a *default argument*,
-    bound when the function was defined, so a test written that way asserts
-    that a function returns the same value when called twice with the same
-    arguments.
-    """
-    from pyspi.statistics.infotheory import _knn_condition, _ksg_mi_pair
-
-    rng = np.random.default_rng(0)
-    z = rng.standard_normal(300)
-    y = 0.7 * z + 0.7 * rng.standard_normal(300)
-
-    reference = _ksg_mi_pair(z, y, 4, 0)
-    for seed in (43, 12345, 99999):
-        conditioned = _knn_condition(np.column_stack([z, y]), seed=seed)
-        assert _brute_force_ksg_mi(conditioned[:, 0], conditioned[:, 1], 4) == \
-            pytest.approx(reference, abs=1e-12), seed
+    Z = np.vstack([A[:, 0], B[:, 0], C[:, 0]])
+    tlmi = TimeLaggedMutualInfo(estimator="kraskov", dyn_corr_excl=w)
+    base = np.asarray(tlmi.multivariate(Data(data=Z, dim_order="ps",
+                                             zscore=False)), float)
+    reversed_ = np.asarray(tlmi.multivariate(Data(data=Z[:, ::-1],
+                                                  dim_order="ps",
+                                                  zscore=False)), float)
+    assert np.allclose(base, reversed_.T, equal_nan=True, atol=1e-12, rtol=0)
+    assert _ksg_ais(A[:, 0], 1, 1, 4, w) == pytest.approx(
+        _ksg_ais(A[::-1, 0], 1, 1, 4, w), abs=1e-12)
 
 
-def test_ksg_is_exactly_invariant_to_rescaling_on_tied_data_too():
-    """Invariance must survive float noise in the normalisation.
+@pytest.mark.parametrize("seed", [0, 53])
+def test_ksg_mi_and_cmi_preserve_joint_sample_permutations_at_w_zero(seed):
+    """At w=0 observation labels have no role in the KSG geometry."""
+    from pyspi.statistics.infotheory import _ksg_cmi, _ksg_mi_pair
 
-    `x` and `1000 * x` normalise to columns differing by one ulp (1.1e-16).
-    That flipped the dither key, and on *tied* data a different dither
-    separates the ties differently -- MI moved by 0.0375 nats on a binary pair
-    under a rescaling the estimator is supposed to be invariant to. The key is
-    now taken from the column rounded to 12 decimals: far below anything that
-    distinguishes two series, far above float noise.
-    """
-    from pyspi.statistics.infotheory import _ksg_mi_pair
-
-    rng = np.random.default_rng(0)
-    for levels in (2, 4):
-        x = rng.integers(0, levels, 256).astype(float)
-        y = rng.integers(0, levels, 256).astype(float)
-        base = _ksg_mi_pair(x, y, 4, 0)
-        for sx, sy, ox, oy in (
-            (1e-3, 1e3, 0.0, 0.0),
-            (1e3, -1e-3, 4.0, -7.0),
-            (-7.0, -0.125, 2.0, 9.0),
-        ):
-            assert _ksg_mi_pair(sx * x + ox, sy * y + oy, 4, 0) == base, (
-                levels, sx, sy, ox, oy)
+    rng = np.random.default_rng(seed)
+    A = rng.standard_normal((160, 2))
+    B = 0.5 * A[:, :1] + rng.standard_normal((160, 1))
+    C = rng.standard_normal((160, 2))
+    order = rng.permutation(A.shape[0])
+    assert _ksg_mi_pair(A[:, 0], B[:, 0], 4, 0) == pytest.approx(
+        _ksg_mi_pair(A[order, 0], B[order, 0], 4, 0), abs=1e-12)
+    assert _ksg_cmi(A, B, C, 4, 0) == pytest.approx(
+        _ksg_cmi(A[order], B[order], C[order], 4, 0), abs=1e-12)
 
 
 @pytest.mark.parametrize("seed", [0, 53])
 def test_ksg_paths_are_affine_and_process_permutation_covariant(seed):
     """The shared conditioning contract reaches MI, TLMI, AIS, TE and DI.
 
-    Binary and four-level coordinates keep this on the dither-sensitive path;
-    equality is exact because affine changes only reflect conditioned axes and
-    process reordering only relabels the result matrix.
+    Valid continuous coordinates are tested under positive/negative affine
+    marginal transformations and process relabelling.
     """
     from pyspi.statistics.infotheory import (
         DirectedInfo, MutualInfo, TimeLaggedMutualInfo, TransferEntropy,
@@ -1595,12 +1477,10 @@ def test_ksg_paths_are_affine_and_process_permutation_covariant(seed):
 
     rng = np.random.default_rng(seed)
     n = 128
-    binary = rng.integers(0, 2, n).astype(float)
-    four_level = (
-        np.roll(binary, 1) + rng.integers(0, 4, n)
-    ).astype(float) % 4
-    other = rng.integers(0, 4, n).astype(float)
-    Z = np.vstack([binary, four_level, other])
+    x = rng.standard_normal(n)
+    y = 0.5 * np.roll(x, 1) + rng.standard_normal(n)
+    other = rng.standard_normal(n)
+    Z = np.vstack([x, y, other])
     scales = np.array([-3.0, 7.0, 0.25])[:, None]
     offsets = np.array([2.0, -5.0, 9.0])[:, None]
     order = [2, 0, 1]
@@ -1618,11 +1498,10 @@ def test_ksg_paths_are_affine_and_process_permutation_covariant(seed):
         base = np.asarray(spi.multivariate(base_data), float)
         moved = np.asarray(spi.multivariate(moved_data), float)
         permuted = np.asarray(spi.multivariate(permuted_data), float)
-        assert np.array_equal(base, moved, equal_nan=True), spi.identifier
-        assert np.array_equal(
-            base[np.ix_(order, order)], permuted, equal_nan=True
-        ), spi.identifier
+        assert np.allclose(base, moved, equal_nan=True, atol=1e-12,
+                           rtol=0), spi.identifier
+        assert np.allclose(base[np.ix_(order, order)], permuted,
+                           equal_nan=True, atol=1e-12, rtol=0), spi.identifier
 
-    assert _ksg_ais(four_level, 2, 1, 4) == _ksg_ais(
-        -3.0 * four_level + 2.0, 2, 1, 4
-    )
+    assert _ksg_ais(y, 2, 1, 4) == pytest.approx(
+        _ksg_ais(-3.0 * y + 2.0, 2, 1, 4), abs=1e-12)

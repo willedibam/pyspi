@@ -14,7 +14,7 @@ about; nothing here runs the full config.
 What is asserted, by kind:
 
 * **Analytic or independent references** where one exists (Gaussian MI from
-  rho, the discrete entropy of a duplicated quantised process, a known lag).
+  rho, continuous KSG references, a known lag).
 * **Structure**: symmetry, antisymmetry, orientation, permutation covariance.
 * **Invariance** where it is mathematically required (per-coordinate rescaling
   for KSG, affine rescaling for the causal scores).
@@ -184,6 +184,15 @@ EXPECTED_REFUSALS = {
     ("dcoh_mean", "duplicate_and_collinear", 7, 64):
         (np.linalg.LinAlgError, r"^Singular matrix$"),
 }
+EXPECTED_REFUSALS.update({
+    (label, fixture, seed, T):
+        (ValueError, r"^KSG requires continuous, tie-free coordinates:")
+    for label in ("mi_kraskov", "tlmi_kraskov", "te_kraskov_fixed",
+                  "te_kraskov_auto", "di_kraskov")
+    for fixture in ("binary", "four_level")
+    for seed in SEEDS
+    for T in (T_SHORT, T_LONG)
+})
 
 
 @pytest.mark.parametrize("name,seed,T", ALL_CASES)
@@ -249,23 +258,17 @@ def test_gaussian_mi_tracks_the_sample_correlation_on_short_records(seed):
 
 
 @pytest.mark.parametrize("seed", SEEDS)
-@pytest.mark.parametrize("levels,fixture", [(2, "binary"), (4, "four_level")])
-def test_ksg_mi_of_a_duplicated_quantised_process_is_its_entropy(seed, levels,
-                                                                 fixture):
-    """The finite oracle for tied data: I(X + a; X + b) -> H(X) as the dither
-    vanishes. Only asserted at T=256 -- at T=64 a 4-level plug-in entropy is
-    itself too noisy to be an oracle."""
+@pytest.mark.parametrize("levels", [2, 4])
+def test_ksg_mi_explicitly_refuses_a_duplicated_quantised_process(seed, levels):
+    """Tied discrete coordinates require a discrete estimator, not jitter."""
     import pyspi.statistics.infotheory as it
 
     rng = np.random.default_rng(seed)
     x = rng.integers(0, levels, T_LONG).astype(float)
-    counts = np.bincount(x.astype(int), minlength=levels) / T_LONG
-    entropy = float(-np.sum(counts[counts > 0] * np.log(counts[counts > 0])))
-
     data = Data(data=np.vstack([x, x.copy(), rng.standard_normal(T_LONG)]),
                 dim_order="ps", zscore=False)
-    got = it.MutualInfo(estimator="kraskov").multivariate(data)[0, 1]
-    assert got == pytest.approx(entropy, abs=0.2), f"{got} vs H(X)={entropy}"
+    with pytest.raises(ValueError, match="continuous, tie-free coordinates"):
+        it.MutualInfo(estimator="kraskov").bivariate(data, i=0, j=1)
 
 
 @pytest.mark.parametrize("seed", SEEDS)
@@ -344,18 +347,11 @@ def test_permuting_processes_permutes_the_matrix(seed):
 # Invariance where it is mathematically required
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name,seed,T", ALL_CASES)
+@pytest.mark.parametrize("name,seed,T", [
+    case for case in ALL_CASES if case[0] not in {"binary", "four_level"}
+])
 def test_ksg_measures_are_invariant_to_per_process_rescaling(name, seed, T):
-    """MI is invariant under any smooth invertible marginal transform, and the
-    normalisation is what makes the L-infinity estimator inherit that.
-
-    Exact, including on the quantised fixtures. That needed the dither key to
-    be taken from the normalised column *rounded to 12 decimals*: `x` and
-    `1000 * x` normalise to columns differing by one ulp, which re-drew the
-    whole dither, and on tied data a different dither separates the ties
-    differently -- 0.0375 nats on a binary pair, under a rescaling the
-    estimator is supposed to be invariant to.
-    """
+    """Per-coordinate standardisation provides affine marginal covariance."""
     import warnings
 
     import pyspi.statistics.infotheory as it
@@ -496,7 +492,7 @@ def test_short_records_are_refused_with_a_reason_not_a_number():
 
 def test_constant_process_is_refused_by_the_ksg_estimators():
     """A constant marginal carries no information and is almost always a broken
-    input; the estimate would be of the dither, not the data."""
+    input for a continuous-density estimator."""
     import pyspi.statistics.infotheory as it
 
     Z = np.random.default_rng(0).standard_normal((2, 128))
@@ -506,8 +502,7 @@ def test_constant_process_is_refused_by_the_ksg_estimators():
         it.MutualInfo(estimator="kraskov").bivariate(data, i=0, j=1)
 
 
-@pytest.mark.parametrize("name", ["duplicate_and_collinear", "heavy_tailed",
-                                  "binary"])
+@pytest.mark.parametrize("name", ["heavy_tailed", "coupled_var"])
 def test_serial_and_parallel_agree_on_the_awkward_fixtures(name, tmp_path):
     """Bit-for-bit, on exactly the inputs where the estimators branch."""
     from pyspi.calculator import Calculator
