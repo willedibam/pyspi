@@ -8,7 +8,6 @@ from pyspi.base import (
 )
 import numpy as np
 import warnings
-from functools import partial
 from pyspi.utils import fmt_param
 
 
@@ -91,13 +90,6 @@ class mne(Unsigned):
         return adj
 
 
-def modify_stats(statfn, modifier):
-    def parsed_stats(stats, statfn, modifier, **kwargs):
-        return statfn(modifier(stats), **kwargs)
-
-    return partial(parsed_stats, statfn=statfn, modifier=modifier)
-
-
 class CoherenceMagnitude(mne, Undirected):
     name = "Coherence magnitude (wavelet)"
     labels = ["unsigned", "wavelet", "undirected"]
@@ -108,17 +100,45 @@ class CoherenceMagnitude(mne, Undirected):
         super().__init__(**kwargs)
 
 
-class CoherencePhase(mne, Undirected):
+class CoherencePhase(mne, Directed):
     name = "Coherence phase (wavelet)"
-    labels = ["unsigned", "wavelet", "undirected"]
+    labels = ["signed", "wavelet", "antisymmetric"]
 
     def __init__(self, **kwargs):
         self.identifier = "phase"
         self._measure = "cohy"
         super().__init__(**kwargs)
+        structural = "antisymmetric" if self._statistic == "mean" else "asymmetric"
+        self.labels = ["signed", "wavelet", structural]
 
-        # Take the angle before computing the statistic
-        self._statfn = modify_stats(self._statfn, np.angle)
+    def issigned(self):
+        return True
+
+    @parse_multivariate
+    def multivariate(self, data):
+        """Reduce the complete signed phase spectrum over the selected band.
+
+        MNE returns one triangle.  Coherency phase obeys
+        ``phase(i, j) = -phase(j, i)``, so reconstruct that triangle before
+        reducing.  This ordering matters for ``max`` because max does not
+        commute with negation; its band summary is asymmetric, while ``mean``
+        remains antisymmetric.
+        """
+        adj_freq, freq_id = self._get_cache(data)
+        phase = np.angle(adj_freq).copy()
+        ui = np.triu_indices(data.n_processes, 1)
+        phase[ui[0], ui[1], ...] = -phase[ui[1], ui[0], ...]
+        if phase.ndim == 4:
+            adj = self._statfn(phase[..., freq_id, :], axis=(2, 3))
+        elif phase.ndim == 3:
+            adj = self._statfn(phase[..., freq_id], axis=2)
+        else:
+            raise ValueError(
+                f"Expected a 3D or 4D wavelet connectivity tensor, got "
+                f"shape {phase.shape}."
+            )
+        np.fill_diagonal(adj, np.nan)
+        return adj
 
 
 class ImaginaryCoherence(mne, Undirected):

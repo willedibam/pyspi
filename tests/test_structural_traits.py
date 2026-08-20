@@ -221,6 +221,60 @@ def test_conditional_entropy_label_matches_implementation():
 # Wavelet PSI band statistics
 # --------------------------------------------------------------------------
 
+@pytest.mark.parametrize(
+    "statistic,trait", [("mean", "antisymmetric"), ("max", "asymmetric")]
+)
+def test_wavelet_coherence_phase_reconstructs_before_band_reduction(
+        statistic, trait):
+    """Phase is signed; max(-x) is -min(x), not -max(x)."""
+    from pyspi.statistics.wavelet import CoherencePhase
+
+    phase = np.zeros((3, 3, 3))
+    phase[1, 0] = [-0.7, 0.2, 0.4]
+    phase[2, 0] = [0.1, 0.3, 0.5]
+    phase[2, 1] = [-0.4, -0.2, 0.6]
+    lower = np.exp(1j * phase)
+    lower[np.triu_indices(3, 1)] = 0
+    freq = np.array([0.1, 0.2, 0.3])
+
+    spi = CoherencePhase(statistic=statistic, fmin=0, fmax=0.5)
+    spi._get_cache = lambda data: (lower, np.arange(freq.size))
+    got = spi.multivariate(Data(data=np.ones((3, 8)), dim_order="ps",
+                                zscore=False))
+
+    reducer = np.mean if statistic == "mean" else np.max
+    for i, j in ((1, 0), (2, 0), (2, 1)):
+        assert got[i, j] == pytest.approx(reducer(phase[i, j]))
+        assert got[j, i] == pytest.approx(reducer(-phase[i, j]))
+    assert set(spi.labels) & {"directed", "undirected", "antisymmetric",
+                              "asymmetric"} == {trait}
+    assert "signed" in spi.labels and spi.issigned()
+
+
+@pytest.mark.parametrize("statistic", ["mean", "max"])
+def test_wavelet_coherence_phase_is_process_permutation_covariant(statistic):
+    from pyspi.statistics.wavelet import CoherencePhase
+
+    full = np.zeros((3, 3, 3))
+    full[1, 0] = [-0.7, 0.2, 0.4]
+    full[2, 0] = [0.1, 0.3, 0.5]
+    full[2, 1] = [-0.4, -0.2, 0.6]
+    full = full - full.transpose(1, 0, 2)
+    data = Data(data=np.ones((3, 8)), dim_order="ps", zscore=False)
+
+    def calculate(order):
+        phase = full[np.ix_(order, order, np.arange(3))]
+        lower = np.exp(1j * phase)
+        lower[np.triu_indices(3, 1)] = 0
+        spi = CoherencePhase(statistic=statistic, fmin=0, fmax=0.5)
+        spi._get_cache = lambda unused: (lower, np.arange(3))
+        return spi.multivariate(data)
+
+    order = [2, 0, 1]
+    base = calculate([0, 1, 2])
+    moved = calculate(order)
+    assert np.allclose(base[np.ix_(order, order)], moved, equal_nan=True)
+
 @pytest.mark.parametrize("statistic", ["mean", "max"])
 def test_wavelet_psi_is_permutation_invariant(statistic):
     """Both band statistics must survive a permutation of the processes.

@@ -380,6 +380,10 @@ def test_correlation_frame_constructs():
     assert corr.n_datasets == 3
     assert corr.n_spis == 4
     assert not corr.mdf.empty
+    with pytest.raises(NotImplementedError, match="edges, not independent time samples"):
+        corr.get_pvalues()
+    with pytest.raises(NotImplementedError, match="Edges sharing nodes are dependent"):
+        corr.compute_significant_values()
 
 def test_normalisation_flag():
     """Test whether the normalisation flag when instantiating

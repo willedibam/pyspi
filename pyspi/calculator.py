@@ -6,7 +6,6 @@ import functools
 import hashlib, json
 from pathlib import Path
 from tqdm import tqdm
-from scipy import stats
 
 # From this package
 from .data import Data
@@ -1362,42 +1361,23 @@ class CorrelationFrame:
             self._dlabels.update(other.dlabels)
 
     def get_pvalues(self):
-        if not hasattr(self, "_pvalues"):
-            n = self.shapes["n_observations"]
-            nstats = self.mdf.shape[1]
-            ns = np.repeat(n.values, nstats**2).reshape(
-                self.mdf.shape[0], self.mdf.shape[1]
-            )
-            rsq = self.mdf.values**2
-            fval = ns * rsq / (1 - rsq)
-            self._pvalues = stats.f.sf(fval, 1, ns - 1)
-        return pd.DataFrame(
-            data=self._pvalues, index=self.mdf.index, columns=self.mdf.columns
+        raise NotImplementedError(
+            "CorrelationFrame.get_pvalues() is disabled: its observations "
+            "are process edges, not independent time samples. The previous "
+            "F test incorrectly used time-series length T as its sample size; "
+            "using the edge count would still ignore dependence between edges "
+            "that share nodes. Use an independently validated "
+            "network-preserving permutation/QAP analysis instead."
         )
 
     def compute_significant_values(self):
-        pvals = self.get_pvalues()
-        nstats = self.mdf.shape[1]
-        self._insig_ind = pvals > 0.05 / nstats / (nstats - 1) / 2
-
-        if not hasattr(self, "_insig_group"):
-            pvals = pvals.droplevel(["Dataset", "Type"])
-            group_pvalue = pd.DataFrame(
-                data=np.full([pvals.columns.size] * 2, np.nan),
-                columns=pvals.columns,
-                index=pvals.columns,
-            )
-            for f1 in pvals.columns:
-                logger.info("Computing significance for %s...", f1)
-                for f2 in [
-                    f
-                    for f in pvals.columns
-                    if f is not f1 and np.isnan(group_pvalue[f1][f])
-                ]:
-                    cp = pvals[f1][f2]
-                    group_pvalue[f1][f2] = stats.combine_pvalues(cp[~cp.isna()])[1]
-                    group_pvalue[f2][f1] = group_pvalue[f1][f2]
-            self._insig_group = group_pvalue > 0.05
+        raise NotImplementedError(
+            "CorrelationFrame.compute_significant_values() is disabled "
+            "because it depends on invalid edge-correlation p-values. Edges "
+            "sharing nodes are dependent, so neither time-series length nor "
+            "raw edge count is a valid sample size. Use an independently "
+            "validated network-preserving permutation/QAP analysis instead."
+        )
 
     def get_average_correlation(
         self, thresh=0.2, absolute=True, summary="mean", remove_insig=False
