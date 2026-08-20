@@ -835,3 +835,184 @@ def test_infotheory_parameters_are_validated_at_construction(kwargs):
 
     with pytest.raises(ValueError, match=">"):
         it.MutualInfo(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# KSG dither: one draw per coordinate occurrence
+# ---------------------------------------------------------------------------
+
+def _brute_force_ksg_mi(x, y, k):
+    """O(N^2) transcription of KSG estimator 1, written from the paper.
+
+    Independent of pyspi's cKDTree machinery: full pairwise L-infinity
+    distances, the k-th smallest excluding self, strict marginal counts, and
+    psi(k) - <psi(n_x+1) + psi(n_y+1)> + psi(N). Slow, so it is only used on
+    small continuous fixtures -- but it shares no code with the implementation
+    it checks.
+    """
+    from scipy.special import digamma
+
+    x = np.asarray(x, float)
+    y = np.asarray(y, float)
+    n = x.size
+    dx = np.abs(x[:, None] - x[None, :])
+    dy = np.abs(y[:, None] - y[None, :])
+    dz = np.maximum(dx, dy)
+    np.fill_diagonal(dz, np.inf)
+    eps = np.sort(dz, axis=1)[:, k - 1]
+    n_x = (dx < eps[:, None]).sum(axis=1) - 1     # excludes self (dx == 0)
+    n_y = (dy < eps[:, None]).sum(axis=1) - 1
+    return float(digamma(k) - np.mean(digamma(n_x + 1) + digamma(n_y + 1))
+                 + digamma(n))
+
+
+def test_ksg_matches_an_independent_brute_force_reference():
+    """Tie-free continuous data, where both implementations are unambiguous.
+
+    The dither is 1e-8 standard deviations, so on tie-free data the two agree to
+    far better than the estimator's own error; this pins the neighbour counting
+    and the digamma assembly, not the tie policy.
+    """
+    from pyspi.statistics.infotheory import _knn_condition, _ksg_mi_pair
+
+    rng = np.random.default_rng(7)
+    n = 300
+    z = rng.standard_normal(n)
+    x, y = z, 0.7 * z + np.sqrt(1 - 0.49) * rng.standard_normal(n)
+
+    for k in (1, 4, 10):
+        conditioned = _knn_condition(np.column_stack([x, y]))
+        expected = _brute_force_ksg_mi(conditioned[:, 0], conditioned[:, 1], k)
+        assert _ksg_mi_pair(x, y, k, 0) == pytest.approx(expected, abs=1e-12), k
+
+
+@pytest.mark.parametrize("n", [200, 400, 800, 1600])
+def test_ksg_mi_of_a_variable_with_itself_is_its_discrete_entropy(n):
+    """Duplicate columns must not share a dither.
+
+    They did, so the dither never broke the degeneracy: the joint cloud
+    collapsed onto the diagonal, every neighbour radius stayed at the dither
+    scale, and the estimate reduced to psi(k) - 2*psi(k+1) + psi(N) -- a
+    function of N and k with no dependence on the data. Measured 4.04, 4.73,
+    5.43 and 6.12 nats at N = 200, 400, 800, 1600, growing by ln 2 per
+    doubling, and *identical* (4.7341 at N=400) for binary, four-level and
+    rounded-Gaussian duplicates.
+
+    For a discrete X the finite oracle is exact: I(X + eps*a; X + eps*b) -> H(X)
+    as eps -> 0 with independent a, b. No such oracle exists for identical
+    *continuous* variables, whose differential mutual information is infinite,
+    which is why this test is quantised.
+    """
+    from pyspi.statistics.infotheory import _ksg_mi_pair
+
+    rng = np.random.default_rng(0)
+    for levels in (2, 4):
+        x = rng.integers(0, levels, n).astype(float)
+        counts = np.bincount(x.astype(int), minlength=levels) / n
+        entropy = float(-np.sum(counts[counts > 0] * np.log(counts[counts > 0])))
+        got = _ksg_mi_pair(x, x.copy(), 4, 0)
+        assert got == pytest.approx(entropy, abs=0.12), (
+            f"{levels}-level duplicate at N={n}: {got:.4f} vs H(X)={entropy:.4f}")
+
+
+def test_ksg_dither_is_symmetric_and_repeatable_including_duplicates():
+    """Distinct columns are each replica 0, so the noise is content-determined.
+
+    Identical columns take replicas 0 and 1 in slot order, and swapping the
+    slots permutes identical values -- which the estimator cannot see. Both
+    orders must therefore agree exactly, not approximately.
+    """
+    from pyspi.statistics.infotheory import _ksg_mi_pair
+
+    rng = np.random.default_rng(3)
+    z = rng.standard_normal(500)
+    y = 0.6 * z + 0.8 * rng.standard_normal(500)
+    b = (rng.random(400) < 0.5).astype(float)
+
+    for u, v in ((z, y), (b, b.copy())):
+        assert _ksg_mi_pair(u, v, 4, 0) == _ksg_mi_pair(v, u, 4, 0)
+        assert _ksg_mi_pair(u, v, 4, 0) == _ksg_mi_pair(u, v, 4, 0)
+
+
+def test_duplicated_processes_do_not_break_the_derived_ksg_measures():
+    """TE, TLMI and DirectedInfo all route through the same conditioning.
+
+    Each has an exactly-known answer when process 0 is duplicated at process 1
+    and the series is i.i.d. binary: MI is H(X) = ln 2; TE(0->1) is 0, because
+    the source adds nothing once the destination's own past is conditioned on;
+    and directed information over n=5 terms is 5*H(X), since each
+    I(X^i; Y_i | Y^{i-1}) reduces to H(Y_i) for an i.i.d. series.
+    """
+    import pyspi.statistics.infotheory as it
+    from pyspi.data import Data
+
+    rng = np.random.default_rng(0)
+    x = (rng.random(400) < 0.5).astype(float)
+    data = Data(data=np.vstack([x, x.copy(), rng.standard_normal(400)]),
+                dim_order="ps", zscore=False)
+
+    ln2 = np.log(2)
+    assert it.MutualInfo(estimator="kraskov").multivariate(data)[0, 1] == \
+        pytest.approx(ln2, abs=0.1)
+    assert it.TransferEntropy(estimator="kraskov").multivariate(data)[0, 1] == \
+        pytest.approx(0.0, abs=0.1)
+    assert it.DirectedInfo(estimator="kraskov", n=5).multivariate(data)[0, 1] == \
+        pytest.approx(5 * ln2, abs=0.5)
+
+
+@pytest.mark.parametrize("scale", [1e-3, 1.0, 1e3])
+def test_ksg_conditional_mi_is_invariant_to_per_coordinate_rescaling(scale):
+    """The normalisation has to reach the conditioning set too, not just A and B."""
+    from pyspi.statistics.infotheory import _ksg_cmi
+
+    rng = np.random.default_rng(5)
+    A = rng.standard_normal((500, 1))
+    C = rng.standard_normal((500, 2))
+    B = 0.6 * A + 0.4 * C[:, :1] + 0.5 * rng.standard_normal((500, 1))
+
+    base = _ksg_cmi(A, B, C, 4, 0)
+    assert _ksg_cmi(A * scale, B, C / scale, 4, 0) == pytest.approx(base, abs=1e-12)
+
+
+def test_ksg_results_survive_the_parallel_boundary(tmp_path):
+    """Serial and parallel must agree bit-for-bit; the dither uses no global RNG.
+
+    Run on a dataset with a duplicated process, so the replica index -- the part
+    of the dither key that is not simply the column's contents -- is exercised
+    across the process boundary as well.
+    """
+    from pyspi.calculator import Calculator
+    from pyspi.data import Data
+
+    config = tmp_path / "ksg.yaml"
+    config.write_text(
+        ".statistics.infotheory:\n"
+        "  MutualInfo:\n"
+        "    labels: [infotheory]\n"
+        "    configs:\n"
+        "      - estimator: kraskov\n"
+        "        prop_k: 4\n"
+        "  TransferEntropy:\n"
+        "    labels: [infotheory]\n"
+        "    configs:\n"
+        "      - estimator: kraskov\n"
+        "        prop_k: 4\n"
+        "  DirectedInfo:\n"
+        "    labels: [infotheory]\n"
+        "    configs:\n"
+        "      - estimator: kraskov\n"
+        "        prop_k: 4\n"
+    )
+
+    rng = np.random.default_rng(0)
+    x = (rng.random(200) < 0.5).astype(float)
+    dataset = np.vstack([x, x.copy(), rng.standard_normal(200)])
+
+    tables = []
+    for kwargs in ({"n_jobs": 1}, {"n_jobs": 2, "mp_context": "spawn"}):
+        calc = Calculator(dataset=Data(data=dataset, dim_order="ps"),
+                          config=str(config))
+        calc.compute(**kwargs)
+        tables.append({k: calc.table[k].to_numpy() for k in calc.spis})
+    for key in tables[0]:
+        assert np.array_equal(tables[0][key], tables[1][key], equal_nan=True), key

@@ -637,18 +637,38 @@ _KNN_NOISE_SEED = 42
 def _knn_condition(X, noise_level=_KNN_NOISE_LEVEL, seed=_KNN_NOISE_SEED):
     """Per-column z-score, then add `noise_level` standard deviations of dither.
 
-    The dither's RNG is seeded from a digest of the column itself, so the noise
-    on a given series is a pure function of its values. That is what keeps
-    `bivariate(data, i, j)` and `multivariate(data)[i, j]` identical: the noise
-    cannot depend on how many other processes happened to be passed alongside,
-    on the order they were passed in, or on which worker process ran the pair.
-    blake2b rather than `hash()`, which is salted per interpreter.
+    Each coordinate *occurrence* draws its own dither, keyed on the column's
+    values **and** on how many identical columns precede it in this call. Both
+    halves matter:
+
+    * Keying on the values is what keeps `bivariate(data, i, j)` and
+      `multivariate(data)[i, j]` identical. The noise cannot depend on how many
+      other processes were passed alongside, on the order they were passed in,
+      or on which worker ran the pair. blake2b rather than `hash()`, which is
+      salted per interpreter.
+    * Keying on the replica index is what stops two identical columns receiving
+      the *same* dither. They previously did, so the dither never broke the
+      degeneracy between them: on identical binary series the joint cloud
+      collapsed onto the diagonal, every neighbour radius stayed at the dither
+      scale, and MI came back as psi(k) - 2*psi(k+1) + psi(N) -- a number that
+      depends only on N and k. Measured 4.04, 4.73, 5.43, 6.12 nats at
+      N = 200, 400, 800, 1600, growing by ln 2 per doubling, against a true
+      value of H(X) = ln 2 = 0.693. Four-level and rounded-Gaussian duplicates
+      returned the same 4.73 at N=400, which is the giveaway: the estimate was
+      not a function of the data at all.
+
+    Symmetry survives. Two distinct columns are each replica 0, so they draw
+    exactly the noise their contents determine and `MI(x, y) == MI(y, x)`
+    identically; two identical columns draw replicas 0 and 1 in slot order, and
+    swapping the slots permutes identical values, which the estimator cannot
+    see. Nothing here touches the global RNG.
     """
     X = np.asarray(X, dtype=np.float64)
     reshaped = X.ndim == 1
     if reshaped:
         X = X.reshape(-1, 1)
     out = np.empty_like(X)
+    replicas: dict[bytes, int] = {}
     for c in range(X.shape[1]):
         col = X[:, c]
         sd = col.std(ddof=1)          # JIDT MatrixUtils.stdDevs: sample std
@@ -657,8 +677,12 @@ def _knn_condition(X, noise_level=_KNN_NOISE_LEVEL, seed=_KNN_NOISE_SEED):
         # being the thing that raises.
         col = (col - col.mean()) / (sd if sd > 0 else 1.0)
         if noise_level:
-            digest = hashlib.blake2b(np.ascontiguousarray(col).tobytes(),
-                                     digest_size=8).digest()
+            key = np.ascontiguousarray(col).tobytes()
+            replica = replicas.get(key, 0)
+            replicas[key] = replica + 1
+            digest = hashlib.blake2b(
+                key + replica.to_bytes(8, "little"), digest_size=8
+            ).digest()
             rng = np.random.default_rng(int.from_bytes(digest, "little") ^ seed)
             col = col + noise_level * rng.standard_normal(col.shape[0])
         out[:, c] = col
