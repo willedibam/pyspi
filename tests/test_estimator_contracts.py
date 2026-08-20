@@ -782,16 +782,6 @@ def test_itakura_dtw_normalisation_agrees_between_bivariate_and_multivariate():
         spi.multivariate(data)[0, 1], rel=1e-12)
 
 
-def test_rmse_naming_is_restricted_to_the_metric_it_describes():
-    """`d/sqrt(T)` is a root *mean* square only for the Euclidean norm."""
-    from pyspi.statistics.distance import PairwiseDistance
-
-    assert PairwiseDistance(metric="euclidean",
-                            normalise=True).identifier.endswith("_rmse")
-    for metric in ("cityblock", "cosine", "canberra", "braycurtis"):
-        identifier = PairwiseDistance(metric=metric, normalise=True).identifier
-        assert not identifier.endswith("_rmse"), identifier
-
 
 @pytest.mark.parametrize("kwargs,exc", [
     ({"i": 0}, ValueError),          # j omitted
@@ -1111,7 +1101,7 @@ def test_embedding_parameters_must_be_integral_and_not_boolean(bad):
     `int(2.7)` silently truncates a parameter the caller meant otherwise."""
     import pyspi.statistics.infotheory as it
 
-    with pytest.raises(TypeError, match="positive integer"):
+    with pytest.raises(TypeError, match="must be an integer"):
         it.TransferEntropy(estimator="gaussian", **bad)
 
 
@@ -1222,3 +1212,114 @@ def test_sigonly_threshold_is_the_documented_pointwise_cut():
     kept = profile[np.abs(profile) > 1.96 / np.sqrt(T)]
     assert kept.size
     assert got == pytest.approx(float(np.mean(kept)), rel=1e-12)
+
+
+# ---------------------------------------------------------------------------
+# Pairwise and cross-pairwise distances
+# ---------------------------------------------------------------------------
+
+def _xpdist_by_hand(x, y, tau, statistic):
+    """The definition written out: pair with an offset, stutter the ends."""
+    T = len(x)
+
+    def cost(s):
+        if s == 0:
+            diff = x - y
+        elif s > 0:
+            diff = np.concatenate([x[:s] - y[0], x[s:] - y[:T - s], x[T - 1] - y[T - s:]])
+        else:
+            a = -s
+            diff = np.concatenate([y[:a] - x[0], y[a:] - x[:T - a], y[T - 1] - x[T - a:]])
+        return float(np.sqrt(np.sum(diff ** 2) / T))
+
+    per_lag = [cost(0)] + [min(cost(t), cost(-t)) for t in range(1, tau + 1)]
+    return min(per_lag) if statistic == "min" else float(np.mean(per_lag))
+
+
+@pytest.mark.parametrize("statistic", ["min", "mean"])
+def test_cross_pairwise_distance_matches_the_written_out_definition(statistic):
+    from pyspi.data import Data
+    from pyspi.statistics.distance import CrossPairwiseDistance
+
+    rng = np.random.default_rng(0)
+    Z = rng.standard_normal((2, 120))
+    data = Data(data=Z, dim_order="ps", zscore=False)
+    got = CrossPairwiseDistance(tau=3, statistic=statistic).bivariate(
+        data, i=0, j=1)
+    assert got == pytest.approx(_xpdist_by_hand(Z[0], Z[1], 3, statistic),
+                                rel=1e-12)
+
+
+def test_cross_pairwise_distance_at_tau_zero_is_pairwise_euclidean_rmse():
+    """The tau=0 path is the identity alignment, so the two must coincide."""
+    from pyspi.data import Data
+    from pyspi.statistics.distance import (CrossPairwiseDistance,
+                                           PairwiseDistance)
+
+    rng = np.random.default_rng(1)
+    Z = rng.standard_normal((4, 150))
+    data = lambda: Data(data=Z, dim_order="ps", zscore=False)
+    off = ~np.eye(4, dtype=bool)
+    a = CrossPairwiseDistance(tau=0).multivariate(data())
+    b = PairwiseDistance(metric="euclidean", normalise=True).multivariate(data())
+    assert np.allclose(a[off], b[off], rtol=1e-12)
+
+
+def test_cross_pairwise_distance_is_symmetric_and_agrees_across_entry_points():
+    from pyspi.data import Data
+    from pyspi.statistics.distance import CrossPairwiseDistance
+
+    rng = np.random.default_rng(2)
+    Z = rng.standard_normal((4, 150))
+    data = lambda: Data(data=Z, dim_order="ps", zscore=False)
+    spi = CrossPairwiseDistance(tau=4, statistic="mean")
+    table = spi.multivariate(data())
+    assert np.allclose(table, table.T, equal_nan=True)
+    assert spi.bivariate(data(), i=1, j=3) == pytest.approx(table[1, 3], rel=1e-12)
+    # Permuting the processes permutes the matrix and nothing else.
+    permuted = spi.multivariate(Data(data=Z[::-1], dim_order="ps", zscore=False))
+    assert np.allclose(table, permuted[::-1, ::-1], equal_nan=True)
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_cross_pairwise_distance_upper_bounds_normalised_dtw(seed):
+    """The stuttered alignment is a valid DTW path, and DTW minimises over them.
+
+    So `dtw_rmse <= xpdist` holds by construction, not by coincidence -- which
+    is the whole reason for stuttering the boundary rather than truncating.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.distance import (CrossPairwiseDistance,
+                                           DynamicTimeWarping)
+
+    rng = np.random.default_rng(seed)
+    Z = np.cumsum(rng.standard_normal((3, 120)), axis=1)
+    data = lambda: Data(data=Z, dim_order="ps", zscore=False)
+    off = ~np.eye(3, dtype=bool)
+    xpdist = CrossPairwiseDistance(tau=5, statistic="min").multivariate(data())
+    dtw = DynamicTimeWarping(normalise=True).multivariate(data())
+    assert np.all(dtw[off] <= xpdist[off] + 1e-9)
+
+
+@pytest.mark.parametrize("bad", [1.7, True, -1, float("nan"), float("inf")])
+def test_cross_pairwise_distance_rejects_non_integral_tau(bad):
+    """`int(tau) < 0` accepted 1.7 (truncated to 1) and True (silently 1)."""
+    from pyspi.statistics.distance import CrossPairwiseDistance
+
+    with pytest.raises((TypeError, ValueError)):
+        CrossPairwiseDistance(tau=bad)
+
+
+def test_rmse_suffix_is_the_normalisation_label_not_a_metric_claim():
+    """Kept as the house label for `/sqrt(T)`, documented rather than renamed.
+
+    An earlier pass renamed it to `_norm-rootT` for non-Euclidean metrics. That
+    introduced a third suffix convention for a quantity no bundled config
+    computes, against `xpdist`'s and `dtw`'s existing use of `_rmse` for the
+    same normalisation.
+    """
+    from pyspi.statistics.distance import PairwiseDistance
+
+    for metric in ("euclidean", "cityblock", "cosine", "canberra", "braycurtis"):
+        assert PairwiseDistance(metric=metric,
+                                normalise=True).identifier.endswith("_rmse")

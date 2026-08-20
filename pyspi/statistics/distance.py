@@ -25,7 +25,7 @@ from pyspi.base import (
     parse_bivariate,
     parse_multivariate,
 )
-from pyspi.utils import fmt_param
+from pyspi.utils import fmt_param, require_int
 
 
 # ---------------------------------------------------------------------------
@@ -47,6 +47,17 @@ def _auto_sakoe_radius(length):
 
 
 class PairwiseDistance(Undirected, Unsigned):
+    """``metric`` distance between each pair of processes, optionally / sqrt(T).
+
+    ``normalise=True`` divides by ``sqrt(T)`` and adds ``_rmse`` to the
+    identifier. For ``metric="euclidean"`` that is exactly the root mean square
+    difference, ``sqrt(mean((x - y)**2))``, and the name is literal. For the
+    other metrics -- cityblock, cosine, chebyshev, canberra, braycurtis -- the
+    suffix is pyspi's house label for "divided by sqrt(T)" and nothing more:
+    those quantities are not root *mean* squares, and the division only puts
+    them on a comparable scale across record lengths. Read `_rmse` as the
+    normalisation, not as a claim about the metric.
+    """
 
     name = "Pairwise distance"
     identifier = "pdist"
@@ -57,11 +68,7 @@ class PairwiseDistance(Undirected, Unsigned):
         self._normalise = normalise
         self.identifier += f"_{metric}"
         if normalise:
-            # `d / sqrt(T)` is the root *mean* square difference only when `d`
-            # is the Euclidean norm of the difference. For cityblock, cosine,
-            # canberra or braycurtis it is just that metric divided by a
-            # constant, and calling it RMSE names a quantity it is not.
-            self.identifier += "_rmse" if metric == "euclidean" else "_norm-rootT"
+            self.identifier += "_rmse"
 
     @parse_multivariate
     def multivariate(self, data):
@@ -532,9 +539,26 @@ class GromovWasserstainTau(Undirected, Unsigned):
 # ---------------------------------------------------------------------------
 
 class CrossPairwiseDistance(Undirected, Unsigned):
-    """Cross pairwise distance: Euclidean distance at each lag t in 0..tau,
-    symmetric (min of fwd and bwd directions), report min or mean over t.
-    tau=0 returns identical value to pdist_euclidean (L2 norm).
+    """Root-T-normalised cost of a lag-shifted alignment path, over lags 0..tau.
+
+    At each lag ``t`` the two series are paired with an offset of ``t``, the
+    ``t`` samples that fall off each end are stuttered against the opposite
+    series' boundary sample, and the cost is
+    ``sqrt(sum(differences**2) / T)``. The forward and backward offsets are
+    minimised over, so the result is symmetric in the pair; ``min`` or ``mean``
+    then reduces over ``t``.
+
+    The ``_rmse`` in the identifier is the same house label
+    `PairwiseDistance` uses: divided by ``sqrt(T)``. It is **not** the
+    conventional DTW "path-length RMSE", which divides by the number of steps
+    in the path -- here the divisor is the record length, and the boundary
+    stutter means the path has ``T + t`` steps rather than ``T``. The point of
+    the stutter is that the alignment is a *valid* DTW path (monotone,
+    continuous, matched endpoints), and DTW minimises over all such paths, so
+    ``dtw_rmse <= xpdist`` holds by construction rather than empirically.
+
+    At ``tau=0`` the path is the identity alignment and the value is exactly
+    ``pdist_euclidean`` with ``normalise=True``.
     """
     name = "Cross pairwise distance"
     labels = ["distance", "nonlinear", "undirected", "temporal"]
@@ -542,16 +566,19 @@ class CrossPairwiseDistance(Undirected, Unsigned):
     def __init__(self, metric="euclidean", tau=1, statistic="min"):
         if metric != "euclidean":
             raise ValueError(f"Unsupported metric: {metric!r}. Only 'euclidean' supported.")
-        if int(tau) < 0:
-            raise ValueError("tau must be >= 0.")
+        # `int(tau) < 0` accepted `tau=1.7` (truncated to 1), `tau=True`
+        # (silently 1) and raised an opaque conversion error on nan/inf. tau
+        # counts samples, so it must be an integer.
+        tau = require_int("tau", tau, minimum=0)
         stat = str(statistic).lower()
         if stat not in {"min", "mean"}:
             raise ValueError(f"statistic must be 'min' or 'mean', got: {statistic!r}")
         self._metric = metric
-        self._tau = int(tau)
+        self._tau = tau
         self._statistic = stat
-        # _dist is RMSE-by-construction, so the identifier carries _rmse for
-        # consistency with PairwiseDistance / DynamicTimeWarping when normalise=True.
+        # `_rmse` is the house label for the sqrt(T) normalisation, shared with
+        # PairwiseDistance and DynamicTimeWarping(normalise=True). See the class
+        # docstring for what it does and does not claim.
         self.identifier = f"xpdist_{metric}_tau-{self._tau}_{stat}_rmse"
 
     @staticmethod

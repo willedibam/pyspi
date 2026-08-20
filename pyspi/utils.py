@@ -5,6 +5,31 @@ import pandas as pd
 import os
 import yaml
 
+def require_int(name, value, minimum=1):
+    """Return ``value`` as an ``int``, or say precisely why it is not one.
+
+    Strict on three things that a bare ``int(value) < minimum`` check lets past:
+
+    * ``bool`` is a subclass of ``int``, so ``k_history=True`` would arrive as 1.
+    * ``int(2.7)`` truncates, so a parameter the caller plainly meant as
+      something else is silently changed rather than rejected.
+    * ``float('nan')`` and ``float('inf')`` raise from ``int()`` with a message
+      about the conversion rather than about the parameter.
+
+    Shared by every public numeric parameter that indexes samples -- histories,
+    delays, neighbour counts, search bounds, lag windows -- so the rule is one
+    rule rather than a per-class habit.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
+        raise TypeError(
+            f"{name} must be an integer >= {minimum}, got {value!r} "
+            f"({type(value).__name__})."
+        )
+    if value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}, got {value!r}.")
+    return int(value)
+
+
 def acf(x, mode='positive'):
     """Return the autocorrelation function using FFT-based computation.
 

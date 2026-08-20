@@ -1110,16 +1110,8 @@ _ESTIMATORS = frozenset({"gaussian", "kraskov", "kernel", "kozachenko", "symboli
 
 
 def _require_positive_int(name, value):
-    """Reject non-integral, boolean and non-finite values, not just <= 0.
-
-    `bool` is a subclass of `int`, so `k_history=True` would otherwise sail
-    through as 1, and `int(2.7)` silently truncates a parameter the caller
-    plainly meant as something else.
-    """
-    if isinstance(value, bool) or not isinstance(value, (int, np.integer)):
-        raise TypeError(f"{name} must be a positive integer, got {value!r}.")
-    if value < 1:
-        raise ValueError(f"{name} must be >= 1, got {value!r}.")
+    """Thin alias for `utils.require_int(..., minimum=1)`; see it for the rules."""
+    return utils.require_int(name, value, minimum=1)
 
 # Auto-embedding selection criteria that are actually implemented. The search
 # maximises active information storage under the destination's own estimator.
