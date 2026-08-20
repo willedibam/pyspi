@@ -618,6 +618,12 @@ class GroupDelay(NonparametricSpectralMultivariate, Directed):
                 if l not in ("undirected", "directed", "unsigned")
             ] + ["antisymmetric", "signed"]
             self.issigned = lambda: True
+        else:
+            # |r| is symmetric by construction and non-negative, so it is
+            # neither directed nor signed.
+            self.labels = [
+                l for l in self.labels if l not in ("directed", "antisymmetric")
+            ] + ["undirected"]
         # Always use `_get_statistic`. The dispatcher's fallback is
         # `except TypeError`, and `Connectivity.group_delay()` accepts a
         # no-argument call, so the backend's (all-NaN, see below) result was
@@ -654,8 +660,11 @@ class GroupDelay(NonparametricSpectralMultivariate, Directed):
         The rest follows the backend's own recipe: Benjamini-Hochberg over the
         in-band frequencies, keep the largest contiguous significant run,
         subsample it to statistically independent points, require at least
-        three, and regress the unwrapped coherence phase on frequency. Slope
-        divided by 2*pi is the delay, in samples at ``fs``.
+        three, and regress the unwrapped coherence phase on frequency.
+        ``fs * slope / (2*pi)`` is the delay in samples; the unscaled
+        ``slope/(2*pi)`` would be in seconds, because the regression runs
+        against physical frequency. ``rvalue`` is |r|, which is orientation-
+        free; the signed r is not, since phase(C_ji) = -phase(C_ij).
         """
         from scipy import stats
 
@@ -697,9 +706,22 @@ class GroupDelay(NonparametricSpectralMultivariate, Directed):
                     # L in {1, 3, 5, 8} to within 0.005 samples.
                     slope[t, i, j] = -fit.slope
                     slope[t, j, i] = fit.slope
-                    r_value[t, i, j] = r_value[t, j, i] = fit.rvalue
+                    # |r|, not r. The fit is of the phase of C_ij, and
+                    # phase(C_ji) = -phase(C_ij), so the signed correlation
+                    # flips with the orientation -- while this matrix is
+                    # written symmetrically. Reversing the process order
+                    # therefore turned +0.99997 into -0.99997 at the mirrored
+                    # position, for a statistic declared symmetric. The
+                    # magnitude is what "fit quality" means here, and it is
+                    # orientation-free.
+                    r_value[t, i, j] = r_value[t, j, i] = abs(fit.rvalue)
 
-        return slope / (2 * np.pi), slope, r_value
+        # Samples, not seconds. `C.frequencies` is in Hz, so the fitted slope
+        # is radians per Hz and slope/(2*pi) is a delay in *seconds*: at fs=4 a
+        # true 4-sample lag came back as 0.9999. The API and every other lagged
+        # SPI in pyspi count samples, so the delay is scaled by fs. No change at
+        # the shipped fs=1.
+        return self._fs * slope / (2 * np.pi), slope, r_value
 
 
 class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsigned):

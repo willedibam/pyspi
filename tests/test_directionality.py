@@ -494,3 +494,81 @@ def test_spectral_gc_names_the_cause_when_order_selection_does_not_converge():
     spi = SpectralGrangerCausality(method="parametric", order=None, max_order=50)
     with pytest.raises(ValueError, match="order selection did not converge"):
         spi.multivariate(Data(data=fixture, dim_order="sp"))
+
+
+@pytest.mark.parametrize("fs", [1, 2, 4])
+def test_group_delay_is_reported_in_samples_at_every_sampling_frequency(fs):
+    """The regression runs against physical frequency, so its slope is seconds.
+
+    `C.frequencies` is in Hz, so `slope/(2*pi)` is a delay in seconds: a true
+    4-sample lag came back as 4.0, 2.0 and 1.0 at fs = 1, 2, 4 while the API and
+    every other lagged SPI in pyspi count samples. Scaling by fs makes the
+    number mean what the identifier says at any rate.
+    """
+    import warnings
+
+    from pyspi.statistics.spectral import GroupDelay
+
+    rng = np.random.default_rng(SEED)
+    lag, T_ = 4, 2000
+    x = rng.standard_normal(T_ + lag)
+    y = x[:-lag] + 0.1 * rng.standard_normal(T_)
+    data = Data(data=np.vstack([x[lag:], y]), dim_order="ps")
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        table = GroupDelay(statistic="delay", fs=fs, fmin=0,
+                           fmax=fs / 2).multivariate(data)
+    assert table[0, 1] == pytest.approx(lag, abs=0.05)
+    assert table[1, 0] == pytest.approx(-lag, abs=0.05)
+
+
+@pytest.mark.parametrize("statistic", ["delay", "slope", "rvalue"])
+def test_group_delay_is_covariant_under_process_permutation(statistic):
+    """Reversing the process order must move a value, not change it.
+
+    `rvalue` stored the *signed* regression r symmetrically. The fit is of the
+    phase of C_ij and phase(C_ji) = -phase(C_ij), so reversing the order turned
+    +0.99997 into -0.99997 at the mirrored position -- for a statistic declared
+    symmetric. It is now |r|, which is orientation-free.
+    """
+    from pyspi.statistics.spectral import GroupDelay
+
+    rng = np.random.default_rng(SEED)
+    lag, T_ = 4, 2000
+    x = rng.standard_normal(T_ + lag)
+    y = x[:-lag] + 0.1 * rng.standard_normal(T_)
+    Z = np.vstack([x[lag:], y])
+
+    spi = lambda: GroupDelay(statistic=statistic, fmin=0, fmax=0.5)
+    forward = spi().multivariate(Data(data=Z, dim_order="ps"))
+    reversed_ = spi().multivariate(Data(data=Z[::-1], dim_order="ps"))
+    assert forward[0, 1] == pytest.approx(reversed_[1, 0], rel=1e-9)
+    assert forward[1, 0] == pytest.approx(reversed_[0, 1], rel=1e-9)
+
+
+def test_group_delay_structural_labels_match_the_matrices():
+    """delay/slope are antisymmetric and signed; rvalue is symmetric and not.
+
+    And a structural trait replaces `directed`/`undirected` rather than sitting
+    beside a stale one: `gd_*` carried the class's `antisymmetric` and the
+    config's `directed` at the same time, so `filter_spis` answered both ways
+    for the same SPI.
+    """
+    from pyspi.calculator import load_spis_from_yaml, resolve_config
+    from pyspi.statistics.spectral import GroupDelay
+
+    for statistic in ("delay", "slope"):
+        spi = GroupDelay(statistic=statistic, fmin=0, fmax=0.5)
+        assert "antisymmetric" in spi.labels and spi.issigned()
+        assert not {"directed", "undirected", "unsigned"} & set(spi.labels)
+
+    r = GroupDelay(statistic="rvalue", fmin=0, fmax=0.5)
+    assert "undirected" in r.labels and not r.issigned()
+    assert "antisymmetric" not in r.labels
+
+    shipped = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    for identifier, spi in shipped.items():
+        labels = set(spi.labels)
+        if {"antisymmetric", "asymmetric"} & labels:
+            assert not {"directed", "undirected"} & labels, identifier

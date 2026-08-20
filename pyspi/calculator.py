@@ -62,6 +62,16 @@ def _merge_spi_labels(spi, family_labels=None, config_labels=None):
     # `wpli`, `psi`, `gd` and `ccm_*_diff`) does not merely mislabel it -- it
     # asks for a transform that destroys the lead/lag its sign carries. The
     # label follows the implementation, not the other way round.
+    # Structural traits are authoritative over the config's directedness label
+    # too. `antisymmetric`/`asymmetric` are a third category, derived from what
+    # the matrix actually is, and they replace both `directed` and `undirected`
+    # rather than sitting beside a stale one: `gd_*` carried the class's
+    # `antisymmetric` and the config's `directed` at once, so `filter_spis`
+    # answered both ways for the same SPI.
+    if {"antisymmetric", "asymmetric"} & set(merged):
+        merged = [label for label in merged
+                  if label not in ("directed", "undirected")]
+
     issigned = getattr(spi, "issigned", None)
     if issigned is not None:
         actual = "signed" if issigned() else "unsigned"
