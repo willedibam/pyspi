@@ -55,11 +55,13 @@ fields:
   - `category` is one of `basic | distance | causal | infotheory | spectral | wavelet | misc`
   - `labels` is the SPI's merged label list (includes `Mxx` size tags + stat-type tags)
 
-`--repeats` defaults to **2**. The 22 committed cells in `bench/results/cells/`
-were all measured with `--repeats 1` — at M=64, T=3200 a single repeat of the
-full config is already a multi-day job — so their `cell_wall_seconds.std` is 0
-by construction, and cross-cell consistency (see `report.md`) is what stands in
-for a within-cell error bar.
+`--repeats` defaults to **2**. The 22-cell reference campaign used to derive the
+tracked summaries was measured with `--repeats 1` — at M=64, T=3200 a single
+repeat of the full config is already a multi-day job — so its
+`cell_wall_seconds.std` is 0 by construction, and cross-cell consistency (see
+`report.md`) stands in for a within-cell error bar. Raw per-cell JSON is
+machine-specific and intentionally untracked; retain it locally or archive it
+externally if the campaign may need to be reanalysed.
 
 ## Cut a benchmarked config
 
@@ -92,7 +94,7 @@ variants were added back after the cut for methodological reasons. Re-running
 
 ```bash
 # Cross-cell analysis (anchor stability, scaling fits, cumulative cost).
-# With no arguments this analyses every committed cell against the full config.
+# With no arguments this analyses every local cell against the full config.
 python -m bench.analyse_cells
 
 # Explicit form
@@ -110,9 +112,6 @@ human-readable summaries are committed — `report.md`, `scaling.csv`,
 (`long_costs.csv`, `jaccard_p*.csv`, `plot_*.png`)
 are gitignored and regenerate in seconds; the Jaccard matrices are also
 read `long_costs.csv`, so run `analyse_cells` once before either.
-
-`benchmark.ipynb` is committed **without outputs** (its Plotly payloads were
-2.4 MB and do not render on GitHub). Run it locally to regenerate the figures.
 
 ## Cluster (PBS)
 
@@ -169,8 +168,7 @@ pins those defaults and delegates to `run_benchmark.pbs`.
 - **JIDT parity harness (removed)**: `bench/jidt_parity/` validated the pure-NumPy
   information-theory estimators against JIDT 1.6.1 before the Java dependency was
   dropped. Gaussian/kernel MI and symbolic TE matched to machine precision
-  (~1e-16); Kozachenko entropy to ~1e-5; the KSG (kraskov) MI/TE estimators to
-  ~2e-3–9e-3, shrinking with T at the O(1/sqrt(N)) estimator noise floor. It
-  needs `jpype` and the `infodynamics.jar` that was deleted with the Java code,
-  so it is preserved at tag `jidt-parity-final`:
-  `git checkout jidt-parity-final -- bench/jidt_parity/`.
+  (~1e-16), and Kozachenko entropy to ~1e-5. The KSG comparison used different
+  normalisation and tie policies and is historical evidence rather than a parity
+  oracle. The harness required `jpype` and the removed `infodynamics.jar`, so it
+  is not part of 3.0.0.
