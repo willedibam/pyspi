@@ -416,7 +416,9 @@ SCHEMA_VERSION = 1
 #   r5 -- KSG refuses tied coordinates and no longer rounds or dithers valid
 #         continuous inputs. This removes arbitrary order-dependent tie
 #         breaking and the artificial 12-decimal conditioning boundary.
-COMPUTATION_VERSION = "3.0.0.r5"
+#   r6 -- KSG strict marginal counts use the immediately preceding
+#         representable radius instead of shrinking epsilon by 1e-10.
+COMPUTATION_VERSION = "3.0.0.r6"
 
 
 def read_manifest(checkpoint_dir: Path):

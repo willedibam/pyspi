@@ -632,7 +632,7 @@ def test_gaussian_transfer_entropy_matches_an_ols_oracle_at_a_fixed_embedding():
         f"misaligned {misaligned:.4f}")
 
 
-def _brute_force_ksg_mi_general(A, B, k):
+def _brute_force_ksg_mi_general(A, B, k, w=0):
     """O(N^2) multivariate KSG estimator 1, written from the paper.
 
     Marginals may have any number of columns, so this can score an AIS
@@ -652,12 +652,76 @@ def _brute_force_ksg_mi_general(A, B, k):
 
     dA, dB = chebyshev(A), chebyshev(B)
     dJ = np.maximum(dA, dB)
-    np.fill_diagonal(dJ, np.inf)
+    allowed = np.abs(np.arange(n)[:, None] - np.arange(n)) > w
+    dJ[~allowed] = np.inf
     eps = np.sort(dJ, axis=1)[:, k - 1]
-    n_a = (dA < eps[:, None]).sum(axis=1) - 1
-    n_b = (dB < eps[:, None]).sum(axis=1) - 1
+    n_a = ((dA < eps[:, None]) & allowed).sum(axis=1)
+    n_b = ((dB < eps[:, None]) & allowed).sum(axis=1)
     return float(digamma(k) + digamma(n)
                  - np.mean(digamma(n_a + 1) + digamma(n_b + 1)))
+
+
+def _brute_force_ksg_cmi(A, B, C, k, w=0):
+    """O(N^2) Frenzel-Pompe CMI with exact strict comparisons."""
+    from scipy.special import digamma
+
+    A = np.atleast_2d(np.asarray(A, float))
+    B = np.atleast_2d(np.asarray(B, float))
+    C = np.atleast_2d(np.asarray(C, float))
+    n = A.shape[0]
+
+    def chebyshev(M):
+        return np.abs(M[:, None, :] - M[None, :, :]).max(axis=-1)
+
+    d_joint = chebyshev(np.column_stack([A, B, C]))
+    d_ac = chebyshev(np.column_stack([A, C]))
+    d_bc = chebyshev(np.column_stack([B, C]))
+    d_c = chebyshev(C)
+    allowed = np.abs(np.arange(n)[:, None] - np.arange(n)) > w
+    d_joint[~allowed] = np.inf
+    eps = np.sort(d_joint, axis=1)[:, k - 1]
+    n_ac = ((d_ac < eps[:, None]) & allowed).sum(axis=1)
+    n_bc = ((d_bc < eps[:, None]) & allowed).sum(axis=1)
+    n_c = ((d_c < eps[:, None]) & allowed).sum(axis=1)
+    return float(digamma(k) + np.mean(
+        digamma(n_c + 1) - digamma(n_ac + 1) - digamma(n_bc + 1)
+    ))
+
+
+@pytest.mark.parametrize("near_deterministic", [False, True])
+@pytest.mark.parametrize("w", [0, 2])
+def test_general_ksg_mi_matches_exact_pairwise_strict_counts(
+        w, near_deterministic):
+    from pyspi.statistics.infotheory import _knn_condition, _ksg_mi_general
+
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((24, 2))
+    if near_deterministic:
+        B = A[:, :1] + 1e-10 * rng.standard_normal((24, 1))
+    else:
+        B = rng.standard_normal((24, 1))
+    conditioned = _knn_condition(np.column_stack([A, B]))
+    A_c, B_c = conditioned[:, :2], conditioned[:, 2:]
+    expected = _brute_force_ksg_mi_general(A_c, B_c, 1, w)
+    assert _ksg_mi_general(A, B, 1, w) == pytest.approx(expected, abs=1e-12)
+
+
+@pytest.mark.parametrize("near_deterministic", [False, True])
+@pytest.mark.parametrize("w", [0, 2])
+def test_ksg_cmi_matches_exact_pairwise_strict_counts(w, near_deterministic):
+    from pyspi.statistics.infotheory import _knn_condition, _ksg_cmi
+
+    rng = np.random.default_rng(0)
+    A = rng.standard_normal((24, 2))
+    if near_deterministic:
+        B = A[:, :1] + 1e-10 * rng.standard_normal((24, 1))
+    else:
+        B = rng.standard_normal((24, 1))
+    C = rng.standard_normal((24, 2))
+    conditioned = _knn_condition(np.column_stack([A, B, C]))
+    A_c, B_c, C_c = conditioned[:, :2], conditioned[:, 2:3], conditioned[:, 3:]
+    expected = _brute_force_ksg_cmi(A_c, B_c, C_c, 1, w)
+    assert _ksg_cmi(A, B, C, 1, w) == pytest.approx(expected, abs=1e-12)
 
 
 @pytest.mark.parametrize("dim,delay", [(1, 1), (2, 1), (3, 2), (4, 1)])

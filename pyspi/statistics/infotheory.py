@@ -611,9 +611,10 @@ def _numpy_delay_embedding(x, dim):
 def _knn_condition(X):
     """Validate continuous KSG input and standardise each coordinate.
 
-    Every coordinate must be tie-free. Quantised/discrete data requires a
-    discrete plug-in information estimator; adding deterministic jitter does
-    not turn KSG into one and can make the result depend on sample order.
+    Every coordinate must be tie-free. Quantised/discrete data requires an
+    external discrete plug-in information estimator; pyspi has no general
+    discrete MI/TLMI/DI estimator. Adding deterministic jitter does not turn
+    KSG into one and can make the result depend on sample order.
 
     Standardisation uses an observed origin before mean/std calculation to
     reduce cancellation under affine offsets. No rounding, dither, seed, or
@@ -634,7 +635,8 @@ def _knn_condition(X):
                 f"{c} has {n_unique} unique value(s) among {col.size} "
                 f"observations. Deterministic jitter would make the estimate "
                 f"depend on arbitrary noise. Use a discrete plug-in "
-                f"information estimator for quantised/discrete data, or "
+                f"information estimator outside pyspi for quantised/discrete "
+                f"data, or "
                 f"remove measurement rounding only when scientifically "
                 f"justified."
             )
@@ -675,6 +677,17 @@ def _validate_ksg_sample(N, k, w, context=""):
         )
 
 
+def _strict_radius(epsilon):
+    """Largest representable radius strictly smaller than ``epsilon``.
+
+    ``cKDTree.query_ball_point`` includes the radius boundary. KSG estimator 1
+    requires marginal distances strictly below the joint kth-neighbour radius,
+    so moving by one floating-point step implements that inequality without a
+    scale-dependent tolerance that can discard genuine interior neighbours.
+    """
+    return np.nextafter(epsilon, -np.inf)
+
+
 def _ksg_mi_pair(x, y, k, w):
     """KSG Estimator 1 MI for a single pair of scalar series."""
     N = len(x)
@@ -697,7 +710,7 @@ def _ksg_mi_pair(x, y, k, w):
     if w == 0:
         dists, _ = tree_xy.query(xy, k=k + 1, p=np.inf)
         eps = dists[:, k]
-        eps_strict = eps * (1.0 - 1e-10)
+        eps_strict = _strict_radius(eps)
         nx_lists = tree_x.query_ball_point(x.reshape(-1, 1), eps_strict, p=np.inf)
         ny_lists = tree_y.query_ball_point(y.reshape(-1, 1), eps_strict, p=np.inf)
         n_x = np.array([len(lst) - 1 for lst in nx_lists], dtype=np.float64)
@@ -729,7 +742,7 @@ def _ksg_mi_pair(x, y, k, w):
             # KSG1 and the w==0 branch above. Inclusive (<= eps) counting wrongly
             # admits the k-th neighbour at the boundary, inflating n_x/n_y and
             # flipping the sign of the Theiler-window effect on MI.
-            e_strict = e * (1.0 - 1e-10)
+            e_strict = _strict_radius(e)
             ix = tree_x.query_ball_point([[x[i]]], e_strict, p=np.inf)[0]
             iy = tree_y.query_ball_point([[y[i]]], e_strict, p=np.inf)[0]
             n_x[i] = sum(1 for j in ix if abs(j - i) > w and j != i)
@@ -770,7 +783,7 @@ def _ksg_mi_general(A, B, k_nn, w=0, condition=True):
 
     if w == 0:
         dists, _ = tree_ab.query(AB, k=k_nn + 1, p=np.inf)
-        eps = dists[:, k_nn] * (1.0 - 1e-10)
+        eps = _strict_radius(dists[:, k_nn])
         n_a = np.array([len(lst) - 1 for lst in
                         tree_a.query_ball_point(A, eps, p=np.inf)], dtype=np.float64)
         n_b = np.array([len(lst) - 1 for lst in
@@ -791,7 +804,7 @@ def _ksg_mi_general(A, B, k_nn, w=0, condition=True):
                 d_valid = np.sort(all_d)
                 d_valid = d_valid[np.isfinite(d_valid)]
             e = d_valid[k_nn - 1] if len(d_valid) >= k_nn else np.inf
-            e_strict = e * (1.0 - 1e-10)
+            e_strict = _strict_radius(e)
             ia = tree_a.query_ball_point(A[i], e_strict, p=np.inf)
             ib = tree_b.query_ball_point(B[i], e_strict, p=np.inf)
             n_a[i] = sum(1 for j in ia if abs(j - i) > w and j != i)
@@ -1042,7 +1055,7 @@ def _ksg_cmi(A, B, C, k_nn, w=0, condition=True):
     if w == 0:
         dists, _ = tree_joint.query(joint, k=k_nn + 1, p=np.inf)
         eps = dists[:, k_nn]
-        eps_strict = eps * (1.0 - 1e-10)
+        eps_strict = _strict_radius(eps)
 
         n_AC = np.array([len(l) - 1 for l in
                          tree_AC.query_ball_point(AC, eps_strict, p=np.inf)], dtype=np.float64)
@@ -1059,7 +1072,7 @@ def _ksg_cmi(A, B, C, k_nn, w=0, condition=True):
             valid[0] = False
             d_valid = dists_all[i][valid]
             e = d_valid[k_nn - 1] if len(d_valid) >= k_nn else np.inf
-            e_strict = e * (1.0 - 1e-10)
+            e_strict = _strict_radius(e)
             n_AC[i] = sum(1 for j in tree_AC.query_ball_point(AC[i], e_strict, p=np.inf)
                           if abs(j - i) > w and j != i)
             n_BC[i] = sum(1 for j in tree_BC.query_ball_point(BC[i], e_strict, p=np.inf)

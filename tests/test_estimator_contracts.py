@@ -458,14 +458,14 @@ def test_ksg_mi_refuses_quantised_marginals(levels, w):
         _ksg_mi_pair(draw(), draw(), 4, w)
 
 
-def test_ksg_refusal_directs_discrete_data_to_a_discrete_estimator():
+def test_ksg_refusal_directs_discrete_data_to_an_external_estimator():
     from pyspi.statistics.infotheory import _ksg_mi_pair
 
     rng = np.random.default_rng(1)
     x = (rng.random(4000) < 0.5)
     y = np.where(rng.random(4000) < 0.8, x, ~x)
 
-    with pytest.raises(ValueError, match="discrete plug-in information estimator"):
+    with pytest.raises(ValueError, match="estimator outside pyspi"):
         _ksg_mi_pair(x.astype(float), y.astype(float), 4, 0)
 
 
@@ -486,7 +486,7 @@ def test_ksg_is_deterministic_and_independent_of_call_context():
 
 
 def test_kraskov_spis_refuse_the_quantised_bundled_dataset():
-    """`forex` has a process with 24 distinct values in 250 samples.
+    """Every `forex` process is tied: 24--212 values in 250 samples.
 
     It ships with the package, so the no-ties contract must be explicit rather
     than an accidental low-level neighbour-count failure.
@@ -495,11 +495,13 @@ def test_kraskov_spis_refuse_the_quantised_bundled_dataset():
     from pyspi.data import load_dataset
 
     data = load_dataset("forex")
+    Z = data.to_numpy(squeeze=True)
+    assert [np.unique(x).size for x in Z] == [212, 212, 24, 198, 209, 197, 207]
     for spi in (it.MutualInfo(estimator="kraskov"),
                 it.TimeLaggedMutualInfo(estimator="kraskov"),
                 it.TransferEntropy(estimator="kraskov"),
                 it.DirectedInfo(estimator="kraskov")):
-        with pytest.raises(ValueError, match="continuous, tie-free coordinates"):
+        with pytest.raises(ValueError, match="estimator outside pyspi"):
             spi.bivariate(data, i=0, j=1)
 
 
@@ -801,7 +803,7 @@ def test_infotheory_parameters_are_validated_at_construction(kwargs):
 # KSG conditioning and independent continuous reference
 # ---------------------------------------------------------------------------
 
-def _brute_force_ksg_mi(x, y, k):
+def _brute_force_ksg_mi(x, y, k, w=0):
     """O(N^2) transcription of KSG estimator 1, written from the paper.
 
     Independent of pyspi's cKDTree machinery: full pairwise L-infinity
@@ -818,10 +820,11 @@ def _brute_force_ksg_mi(x, y, k):
     dx = np.abs(x[:, None] - x[None, :])
     dy = np.abs(y[:, None] - y[None, :])
     dz = np.maximum(dx, dy)
-    np.fill_diagonal(dz, np.inf)
+    allowed = np.abs(np.arange(n)[:, None] - np.arange(n)) > w
+    dz[~allowed] = np.inf
     eps = np.sort(dz, axis=1)[:, k - 1]
-    n_x = (dx < eps[:, None]).sum(axis=1) - 1     # excludes self (dx == 0)
-    n_y = (dy < eps[:, None]).sum(axis=1) - 1
+    n_x = ((dx < eps[:, None]) & allowed).sum(axis=1)
+    n_y = ((dy < eps[:, None]) & allowed).sum(axis=1)
     return float(digamma(k) - np.mean(digamma(n_x + 1) + digamma(n_y + 1))
                  + digamma(n))
 
@@ -843,6 +846,23 @@ def test_ksg_matches_an_independent_brute_force_reference():
         conditioned = _knn_condition(np.column_stack([x, y]))
         expected = _brute_force_ksg_mi(conditioned[:, 0], conditioned[:, 1], k)
         assert _ksg_mi_pair(x, y, k, 0) == pytest.approx(expected, abs=1e-12), k
+
+
+@pytest.mark.parametrize("w", [0, 2])
+def test_ksg_strict_radius_matches_exact_pairwise_counting_near_boundary(w):
+    """A relative epsilon shrink must not remove genuine interior points."""
+    from pyspi.statistics.infotheory import _knn_condition, _ksg_mi_pair
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal(8)
+    y = x + 1e-10 * rng.standard_normal(8)
+    conditioned = _knn_condition(np.column_stack([x, y]))
+    expected = _brute_force_ksg_mi(
+        conditioned[:, 0], conditioned[:, 1], 1, w
+    )
+    assert _ksg_mi_pair(x, y, 1, w) == pytest.approx(expected, abs=1e-12)
+    if w == 0:
+        assert expected == pytest.approx(1.5928571428571427, abs=1e-15)
 
 
 @pytest.mark.parametrize("seed", [0, 42, 53])

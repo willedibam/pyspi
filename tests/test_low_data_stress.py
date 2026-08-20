@@ -120,7 +120,7 @@ def _off(matrix):
 # ---------------------------------------------------------------------------
 
 def _representative_spis():
-    """(label, factory) -- one per family the audit touched, not 325 SPIs."""
+    """(label, factory) -- one per family the audit touched, not 322 SPIs."""
     import pyspi.statistics.basic as basic
     import pyspi.statistics.causal as causal
     import pyspi.statistics.distance as distance
@@ -260,7 +260,7 @@ def test_gaussian_mi_tracks_the_sample_correlation_on_short_records(seed):
 @pytest.mark.parametrize("seed", SEEDS)
 @pytest.mark.parametrize("levels", [2, 4])
 def test_ksg_mi_explicitly_refuses_a_duplicated_quantised_process(seed, levels):
-    """Tied discrete coordinates require a discrete estimator, not jitter."""
+    """Tied coordinates require an external discrete estimator, not jitter."""
     import pyspi.statistics.infotheory as it
 
     rng = np.random.default_rng(seed)
@@ -351,7 +351,14 @@ def test_permuting_processes_permutes_the_matrix(seed):
     case for case in ALL_CASES if case[0] not in {"binary", "four_level"}
 ])
 def test_ksg_measures_are_invariant_to_per_process_rescaling(name, seed, T):
-    """Per-coordinate standardisation provides affine marginal covariance."""
+    """Per-coordinate standardisation provides affine marginal covariance.
+
+    Exact duplicate processes are excluded from contemporaneous MI: their
+    joint law is supported on a diagonal, has no two-dimensional density, and
+    has infinite continuous MI. A finite-sample KSG value on that singular
+    pair has no finite affine-invariance target. The fixture's near-collinear
+    third process remains covered.
+    """
     import warnings
 
     import pyspi.statistics.infotheory as it
@@ -365,7 +372,14 @@ def test_ksg_measures_are_invariant_to_per_process_rescaling(name, seed, T):
             base = spi.multivariate(Data(data=Z, dim_order="ps", zscore=False))
             moved = spi.multivariate(Data(data=Z * scale, dim_order="ps",
                                           zscore=False))
-        assert np.allclose(np.asarray(base, float), np.asarray(moved, float),
+        valid = ~np.eye(M, dtype=bool)
+        if spi.identifier.startswith("mi_"):
+            for i in range(M):
+                for j in range(i):
+                    if np.array_equal(Z[i], Z[j]):
+                        valid[i, j] = valid[j, i] = False
+        assert np.allclose(np.asarray(base, float)[valid],
+                           np.asarray(moved, float)[valid],
                            equal_nan=True, atol=1e-12), spi.identifier
 
 
