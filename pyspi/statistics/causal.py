@@ -1,3 +1,5 @@
+import warnings
+
 import numpy as np
 import pandas as pd
 import pyEDM
@@ -14,7 +16,9 @@ class AdditiveNoiseModel(Directed, Unsigned):
 
     name = "Additive noise model"
     identifier = "anm"
-    labels = ["unsigned", "causal", "unordered", "linear", "directed"]
+    # Not `linear`: the fit is a Gaussian-process regression and the
+    # independence test an RBF-kernel HSIC. Nothing about it is linear.
+    labels = ["unsigned", "causal", "unordered", "nonlinear", "directed"]
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
@@ -55,16 +59,51 @@ class RegressionErrorCausalInference(Directed, Unsigned):
         return reci_score(z[i], z[j])
 
 
-class InformationGeometricConditionalIndependence(Directed, Unsigned):
+class InformationGeometricCausalInference(Directed, Signed):
+    """IGCI: Information-Geometric Causal Inference (Daniusis et al. 2010).
 
-    name = "Information-geometric conditional independence"
+    Not "conditional independence" -- IGCI tests neither. It compares the two
+    directions' entropies under a reference measure and leverages the asymmetry
+    of a deterministic invertible map.
+
+    The score is a *difference* of two entropies, hence exactly antisymmetric:
+    `A[i, j] == -A[j, i]`, verified on the fixtures. Reporting it as unsigned
+    was not cosmetic -- `Calculator._rmmin` shifts every column it believes
+    unsigned by that column's minimum, which on an antisymmetric matrix moves
+    `A[i,j]` and `A[j,i]` by the same amount and destroys the lead/lag the sign
+    carries, and `set_group` folds the two directions together through `abs()`.
+
+    It stays commented out of the bundled configs; this is a metadata and API
+    correction, not a claim that the heuristic is reliable.
+    """
+
+    name = "Information-geometric causal inference"
     identifier = "igci"
-    labels = ["causal", "directed", "nonlinear", "unsigned", "unordered"]
+    labels = ["causal", "antisymmetric", "signed", "nonlinear", "unordered"]
 
     @parse_bivariate
     def bivariate(self, data, i=None, j=None):
         z = data.to_numpy()
         return igci_score(z[i], z[j])
+
+
+class InformationGeometricConditionalIndependence(InformationGeometricCausalInference):
+    """Deprecated alias for :class:`InformationGeometricCausalInference`.
+
+    The old name misdescribed the method. Kept so existing configs and scripts
+    keep working; the identifier (`igci`) and the computation are unchanged.
+    """
+
+    def __init__(self, *args, **kwargs):
+        warnings.warn(
+            "InformationGeometricConditionalIndependence is deprecated and "
+            "will be removed in a future release: IGCI is Information-"
+            "Geometric Causal *Inference*, and tests no conditional "
+            "independence. Use InformationGeometricCausalInference; the "
+            "identifier and the computed values are identical.",
+            DeprecationWarning, stacklevel=2,
+        )
+        super().__init__(*args, **kwargs)
 
 
 def _optimal_embedding_dimension(df, column, lib_pred, max_e=10):

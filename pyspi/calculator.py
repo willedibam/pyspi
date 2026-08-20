@@ -62,15 +62,25 @@ def _merge_spi_labels(spi, family_labels=None, config_labels=None):
     # `wpli`, `psi`, `gd` and `ccm_*_diff`) does not merely mislabel it -- it
     # asks for a transform that destroys the lead/lag its sign carries. The
     # label follows the implementation, not the other way round.
-    # Structural traits are authoritative over the config's directedness label
-    # too. `antisymmetric`/`asymmetric` are a third category, derived from what
-    # the matrix actually is, and they replace both `directed` and `undirected`
-    # rather than sitting beside a stale one: `gd_*` carried the class's
-    # `antisymmetric` and the config's `directed` at once, so `filter_spis`
-    # answered both ways for the same SPI.
-    if {"antisymmetric", "asymmetric"} & set(merged):
-        merged = [label for label in merged
-                  if label not in ("directed", "undirected")]
+    # The SPI's *own* structural trait is authoritative over any directedness
+    # the config declares. `labels` here is the instance's list, before the
+    # family and per-config labels are folded in, so it is what the class and
+    # `__init__` decided from the shape of the matrix they produce.
+    #
+    # `antisymmetric`/`asymmetric` are a third category and replace both
+    # `directed` and `undirected`; a self-declared `undirected` or `directed`
+    # displaces the other. Without this, `gd_*` carried the class's
+    # `antisymmetric` and the config's `directed` at once, and
+    # `gd_*_rvalue` -- symmetric by construction, since it stores |r| -- came
+    # back both `undirected` and `directed` when loaded through YAML, so
+    # `filter_spis` answered either way for the same SPI.
+    _DIRECTEDNESS = ("antisymmetric", "asymmetric", "undirected", "directed")
+    own = [label for label in _DIRECTEDNESS if label in labels]
+    if own:
+        trait = own[0]
+        displaced = {"directed", "undirected"} if trait in (
+            "antisymmetric", "asymmetric") else {"directed", "undirected"} - {trait}
+        merged = [label for label in merged if label not in displaced]
 
     issigned = getattr(spi, "issigned", None)
     if issigned is not None:

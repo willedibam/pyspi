@@ -290,3 +290,122 @@ def test_every_bundled_spi_declares_a_signedness():
     spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
     missing = [i for i, s in spis.items() if not hasattr(s, "issigned")]
     assert not missing, "SPIs with no issigned():\n  " + "\n  ".join(sorted(missing))
+
+
+# --------------------------------------------------------------------------
+# Structural traits are authoritative over config-declared directedness
+# --------------------------------------------------------------------------
+
+_GROUP_DELAY_YAML = """.statistics.spectral:
+  GroupDelay:
+    labels: [directed, linear, unsigned, bivariate, M01]
+    configs:
+      - {fmin: 0, fmax: 0.5, statistic: delay}
+      - {fmin: 0, fmax: 0.5, statistic: slope}
+      - {fmin: 0, fmax: 0.5, statistic: rvalue}
+"""
+
+_EXPECTED_GD_TRAITS = {
+    "delay": ({"antisymmetric", "signed"}, True),
+    "slope": ({"antisymmetric", "signed"}, True),
+    "rvalue": ({"undirected", "unsigned"}, False),
+}
+_TRAITS = {"directed", "undirected", "antisymmetric", "asymmetric",
+           "signed", "unsigned"}
+
+
+@pytest.mark.parametrize("statistic", ["delay", "slope", "rvalue"])
+def test_group_delay_traits_survive_direct_construction(statistic):
+    from pyspi.statistics.spectral import GroupDelay
+
+    spi = GroupDelay(statistic=statistic, fmin=0, fmax=0.5)
+    expected, signed = _EXPECTED_GD_TRAITS[statistic]
+    assert set(spi.labels) & _TRAITS == expected
+    assert spi.issigned() is signed
+
+
+def test_group_delay_traits_survive_a_yaml_family_label(tmp_path):
+    """A family-level `directed` must not displace the SPI's own trait.
+
+    `gd_*_rvalue` is symmetric by construction -- it stores |r| -- and declares
+    itself undirected, but the family label put `directed` back alongside it, so
+    `filter_spis(["directed"])` and `filter_spis(["undirected"])` both returned
+    it. `delay` and `slope` are antisymmetric, which displaces both.
+    """
+    from pyspi.calculator import load_spis_from_yaml
+
+    config = tmp_path / "gd.yaml"
+    config.write_text(_GROUP_DELAY_YAML)
+    for identifier, spi in load_spis_from_yaml(str(config), quiet=True).items():
+        statistic = identifier.split("_")[2]
+        expected, signed = _EXPECTED_GD_TRAITS[statistic]
+        assert set(spi.labels) & _TRAITS == expected, identifier
+        assert spi.issigned() is signed, identifier
+
+
+def test_no_spi_in_any_bundled_config_declares_two_directedness_traits():
+    from pyspi.calculator import bundled_configs, load_spis_from_yaml, resolve_config
+
+    for name in bundled_configs():
+        for identifier, spi in load_spis_from_yaml(resolve_config(name),
+                                                   quiet=True).items():
+            labels = set(spi.labels)
+            assert not {"directed", "undirected"} <= labels, f"{name}/{identifier}"
+            if {"antisymmetric", "asymmetric"} & labels:
+                assert not {"directed", "undirected"} & labels, \
+                    f"{name}/{identifier}"
+
+
+# --------------------------------------------------------------------------
+# Causal-statistic metadata
+# --------------------------------------------------------------------------
+
+def test_igci_is_named_and_labelled_for_what_it_computes():
+    """It is Information-Geometric Causal *Inference*, and its score is signed.
+
+    The score is a difference of two entropies, hence exactly antisymmetric.
+    Reporting it unsigned was not cosmetic: `Calculator._rmmin` shifts every
+    column it believes unsigned by that column's minimum, which on an
+    antisymmetric matrix moves both orientations equally and destroys the sign,
+    and `set_group` folds the directions together through `abs()`.
+    """
+    from pyspi.data import Data
+    from pyspi.statistics.causal import InformationGeometricCausalInference
+
+    spi = InformationGeometricCausalInference()
+    assert "causal inference" in spi.name.lower()
+    assert "conditional independence" not in spi.name.lower()
+    assert set(spi.labels) & _TRAITS == {"antisymmetric", "signed"}
+    assert spi.issigned()
+
+    rng = np.random.default_rng(0)
+    x = rng.standard_normal(300)
+    y = np.exp(x) + 0.1 * rng.standard_normal(300)
+    table = spi.multivariate(Data(data=np.vstack([x, y]), dim_order="ps"))
+    assert table[0, 1] == pytest.approx(-table[1, 0], rel=1e-12)
+
+
+def test_the_old_igci_name_still_works_and_warns():
+    """Compatibility alias, so existing configs and scripts keep running."""
+    import pyspi.statistics.causal as causal
+
+    with pytest.warns(DeprecationWarning, match="Causal"):
+        old = causal.InformationGeometricConditionalIndependence()
+    assert isinstance(old, causal.InformationGeometricCausalInference)
+    assert old.identifier == causal.InformationGeometricCausalInference().identifier
+
+
+def test_additive_noise_model_is_not_labelled_linear():
+    """It fits a Gaussian process and tests independence with an RBF HSIC."""
+    from pyspi.statistics.causal import AdditiveNoiseModel
+
+    labels = set(AdditiveNoiseModel().labels)
+    assert "nonlinear" in labels and "linear" not in labels
+
+
+def test_igci_stays_out_of_the_bundled_configs():
+    """A metadata correction, not a claim that the heuristic is reliable."""
+    from pyspi.calculator import bundled_configs, load_spis_from_yaml, resolve_config
+
+    for name in bundled_configs():
+        assert "igci" not in load_spis_from_yaml(resolve_config(name), quiet=True)
