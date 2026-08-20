@@ -182,7 +182,7 @@ def warn_partial_cache_buckets(spis):
             kept[b].add(key)
     if not any(bkey[0] in EXPENSIVE for bkey in kept):
         # Nothing this advisory could say anything about. Checked before the
-        # `full` config is touched: building it instantiates 325 SPIs and pulls
+        # `full` config is touched: building it instantiates 322 SPIs and pulls
         # a heavy dependency tree, which is real import time for a check that
         # only ever comments on `ccm` and `barycenter`.
         return
@@ -382,7 +382,7 @@ class Calculator:
             Which SPIs to compute. Either the name of a bundled config or a path
             to your own YAML file, default="full". Bundled configs are:
 
-            - ``"full"`` -- every SPI (325).
+            - ``"full"`` -- every SPI (322).
             - ``"fast"`` -- drops the slowest SPIs.
             - ``"sonnet"`` -- 14 representative SPIs, one per module (M01-M14).
             - ``"fabfour"`` -- 4 SPIs: covariance, Spearman, directed information,
@@ -1382,6 +1382,15 @@ class CorrelationFrame:
     def get_average_correlation(
         self, thresh=0.2, absolute=True, summary="mean", remove_insig=False
     ):
+        if remove_insig:
+            raise NotImplementedError(
+                "CorrelationFrame.get_average_correlation(remove_insig=True) "
+                "is disabled because it depends on invalid edge-correlation "
+                "p-values. Edges sharing nodes are dependent, so neither "
+                "time-series length nor raw edge count is a valid sample "
+                "size. Use an independently validated network-preserving "
+                "permutation/QAP analysis instead."
+            )
         mdf = copy.deepcopy(self.mdf)
 
         if absolute:
@@ -1393,9 +1402,6 @@ class CorrelationFrame:
             .dropna(thresh=ss_adj.shape[1] * thresh, axis=1)
             .sort_index(axis=1)
         )
-        if remove_insig:
-            ss_adj[self._insig_group.sort_index()] = np.nan
-
         return ss_adj
 
     def get_feature_matrix(self, sthresh=0.8, dthresh=0.2, dropduplicates=True):

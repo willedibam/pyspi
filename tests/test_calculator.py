@@ -384,6 +384,8 @@ def test_correlation_frame_constructs():
         corr.get_pvalues()
     with pytest.raises(NotImplementedError, match="Edges sharing nodes are dependent"):
         corr.compute_significant_values()
+    with pytest.raises(NotImplementedError, match="invalid edge-correlation p-values"):
+        corr.get_average_correlation(remove_insig=True)
 
 def test_normalisation_flag():
     """Test whether the normalisation flag when instantiating

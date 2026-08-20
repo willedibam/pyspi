@@ -111,6 +111,13 @@ calc = Calculator(dataset=load_dataset("forex"), config="fabfour")
 calc.compute()
 ```
 
+`forex` is quantised: every one of its seven processes contains repeated
+values (24–212 distinct values across 250 observations). Consequently, all
+KSG/`kraskov` variants refuse it under pyspi's continuous, tie-free input
+contract. pyspi does not provide a general discrete MI, TLMI or DI plug-in
+estimator; its symbolic support is TE-specific. Use an external discrete
+estimator when the missing quantities are needed.
+
 Walkthrough tutorials in the full documentation:
 [simple demonstration](https://time-series-features.gitbook.io/pyspi/usage/walkthrough-tutorials/getting-started-a-simple-demonstration) ·
 [finance](https://time-series-features.gitbook.io/pyspi/usage/walkthrough-tutorials/finance-stock-price-time-series) ·
@@ -118,18 +125,18 @@ Walkthrough tutorials in the full documentation:
 
 ## Choosing an SPI set
 
-Computing all 325 SPIs is expensive, and cost grows steeply in both the number
+Computing all 322 SPIs is expensive, and cost grows steeply in both the number
 of processes *M* and the series length *T*. `config=` takes either a bundled
 name or a path to your own YAML:
 
 | `config=` | SPIs | Use when |
 |:----------|-----:|:---------|
-| `"full"` (default) | 325 | You want everything and can afford it. |
-| `"fast"` | 216 | General use; drops the slowest SPIs. |
-| `"benchmarked_p99"` | 321 | Near-complete, with only the worst cost outliers removed. |
-| `"benchmarked_p95"` | 308 | Good coverage/cost trade-off. |
-| `"benchmarked_p90"` | 293 | Recommended default for large batches. |
-| `"benchmarked_p80"` | 264 | Cost-constrained sweeps. |
+| `"full"` (default) | 322 | You want everything and can afford it. |
+| `"fast"` | 213 | General use; drops the slowest SPIs. |
+| `"benchmarked_p99"` | 318 | Near-complete, with only the worst cost outliers removed. |
+| `"benchmarked_p95"` | 305 | Good coverage/cost trade-off. |
+| `"benchmarked_p90"` | 290 | Recommended default for large batches. |
+| `"benchmarked_p80"` | 261 | Cost-constrained sweeps. |
 | `"sonnet"` | 14 | One representative SPI per module (M01-M14). |
 | `"fabfour"` | 4 | Smoke tests and quick sanity checks. |
 

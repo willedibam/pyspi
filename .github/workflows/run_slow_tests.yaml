@@ -2,8 +2,9 @@ name: Slow Regression Suite
 
 # The slow suite compares every SPI against frozen baseline tables and takes
 # a couple of minutes plus three full-config computations, so it is not run
-# per-push. Weekly + on demand.
+# per-push. Pull requests, weekly, and on demand.
 on:
+  pull_request:
   schedule:
     # 04:00 UTC every Monday.
     - cron: '0 4 * * 1'
