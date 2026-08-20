@@ -59,14 +59,16 @@ def main(argv=None) -> int:
                     help="Skip z-scoring each time series before computing.")
     cp.add_argument("--quiet", action="store_true",
                     help="Suppress INFO logging; show warnings/errors only.")
-    cp.add_argument("--fail-on-error", action="store_true",
-                    help="Exit non-zero if any SPI raised. Off by default: on "
-                         "real data a handful of SPIs legitimately fail (a "
-                         "spectral factorisation that will not converge, an "
-                         "estimator refusing input it cannot support), so a "
-                         "hard failure there would be the normal case and get "
-                         "ignored. A run in which *nothing* succeeded always "
-                         "exits non-zero, flag or no flag.")
+    cp.add_argument("--allow-partial", action="store_true",
+                    help="Exit 0 even if some SPIs failed. The default is to "
+                         "exit 1 whenever calc.errors is non-empty: a results "
+                         "table with failed columns is one an automated "
+                         "pipeline must not ingest silently, and a NaN column "
+                         "is indistinguishable from a legitimately undefined "
+                         "statistic once the process has exited. The failed "
+                         "identifiers are printed on stderr and stored in the "
+                         "NPZ either way. A run in which *nothing* succeeded "
+                         "exits 1 regardless of this flag.")
 
     args = parser.parse_args(argv)
 
@@ -111,7 +113,9 @@ def main(argv=None) -> int:
         print("Every SPI is empty; the results table carries no information.",
               file=sys.stderr)
         return 1
-    if n_failed and args.fail_on_error:
+    if n_failed and not args.allow_partial:
+        print("Exiting 1 because SPIs failed; pass --allow-partial to accept "
+              "a partial table.", file=sys.stderr)
         return 1
     return 0
 

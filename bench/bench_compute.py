@@ -44,6 +44,7 @@ os.environ.setdefault("OMP_NUM_THREADS", "1")
 import numpy as np
 import psutil
 
+from pyspi._parallel import COMPUTATION_VERSION
 from pyspi.calculator import Calculator, bundled_configs, resolve_config
 
 CATEGORY_PREFIX = ".statistics."  # python module suffix becomes the category field
@@ -164,37 +165,49 @@ def build_environment() -> dict:
     }
 
 
-def cell_seed(base_seed: int, M: int, T: int, n_jobs: int) -> int:
-    """Effective RNG seed for one cell -- a pure function of the cell.
+def cell_seed(base_seed: int, M: int, T: int) -> int:
+    """RNG seed for a cell's *data* -- a pure function of (base seed, M, T).
 
-    Was ``args.seed + i`` with ``i`` the position in the *selected* cell list.
-    Under ``--array-index k`` that list has one element, so every array task
-    used ``seed + 1`` while a sequential run gave cell k ``seed + k``: array and
-    sequential execution generated different data for the same cell and their
-    timings were not comparable. Hashing the cell instead also survives adding a
+    Deliberately not a function of ``n_jobs``. The whole point of the n_jobs
+    sweep is to time the same problem at different worker counts, and seeding on
+    n_jobs handed each column of that sweep a different dataset, so a scaling
+    curve compared runs on data that were never the same.
+
+    Also not a function of position. It was ``args.seed + i`` with ``i`` the
+    index in the *selected* cell list, and under ``--array-index k`` that list
+    has one element -- so every array task used ``seed + 1`` while a sequential
+    run gave cell k ``seed + k``. Hashing the cell instead survives adding a
     point to the grid, which a positional seed does not.
     """
-    digest = hashlib.blake2b(f"{base_seed}|{M}|{T}|{n_jobs}".encode(),
+    digest = hashlib.blake2b(f"{base_seed}|{M}|{T}".encode(),
                              digest_size=8).digest()
     return int.from_bytes(digest, "little")
 
 
-def cell_identity(base_seed, M, T, n_jobs, config_path, mp_context, repeats,
+def cell_identity(base_seed, M, T, n_jobs, config_path, mp_context,
                   environment) -> str:
     """What a stored cell must match for ``--resume`` to reuse it.
 
     Resume previously checked only that the file existed, had at least
     ``repeats`` repeats and carried no ``"error"`` -- so a cell measured under a
     different config, seed, multiprocessing context or dependency set was
-    silently reused, and the resulting grid mixed measurements that were never
-    comparable.
+    silently reused, and the grid mixed measurements that were never comparable.
+
+    ``n_jobs`` is part of the identity (it is what the cell measures) but not of
+    the data seed. ``repeats`` is deliberately *absent*: reuse is already
+    allowed whenever the stored run has at least as many repeats as requested,
+    so folding the requested count in here would discard a perfectly good
+    10-repeat cell the moment someone asked for 5. ``COMPUTATION_VERSION``
+    covers the estimator implementations, so a cell measured before an
+    output-changing change is not reused after it.
     """
     payload = json.dumps({
         "cell": [M, T, n_jobs],
         "config": Path(config_path).read_text(),
-        "seed": cell_seed(base_seed, M, T, n_jobs),
+        "seed": cell_seed(base_seed, M, T),
         "mp_context": mp_context,
-        "repeats": repeats,
+        "computation": COMPUTATION_VERSION,
+        "pyspi_git_sha": environment["pyspi_git_sha"],
         "python": environment["python_version"],
         "platform": environment["platform"],
         "deps": environment["dep_fingerprint"],
@@ -314,7 +327,7 @@ def main(argv=None) -> int:
     for i, (M, T, n_jobs) in enumerate(cells, 1):
         path = output_dir / cell_filename(label, M, T, n_jobs)
         identity = cell_identity(args.seed, M, T, n_jobs, config,
-                                 args.mp_context, args.repeats, env)
+                                 args.mp_context, env)
         if args.resume and path.exists():
             try:
                 existing = json.loads(path.read_text())
@@ -335,7 +348,7 @@ def main(argv=None) -> int:
         print(f"[bench] [{i}/{len(cells)}] M={M} T={T} n_jobs={n_jobs} x{args.repeats}"
               f" -> {path.name}", file=sys.stderr, flush=True)
         t0 = time.perf_counter()
-        seed = cell_seed(args.seed, M, T, n_jobs)
+        seed = cell_seed(args.seed, M, T)
         entry = run_cell(M, T, n_jobs, config, args.mp_context, args.repeats,
                          seed)
         wall = time.perf_counter() - t0

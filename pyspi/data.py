@@ -427,7 +427,18 @@ class Data:
         self._set_internal(appended)
         self._reset_data_size()
         if hasattr(self, "_procnames"):
-            self._procnames.append(f"proc-{self.n_processes - 1}")
+            # `proc-<index>` can already be taken: a caller who named their
+            # processes ["a", "proc-2"] and then appended twice would produce a
+            # second "proc-2", and `Calculator.to_frame()` cannot stack
+            # duplicated labels. Fall past any name already in use rather than
+            # silently creating a collision the constructor would have rejected.
+            index = self.n_processes - 1
+            taken = set(self._procnames)
+            name = f"proc-{index}"
+            while name in taken:
+                index += 1
+                name = f"proc-{index}"
+            self._procnames.append(name)
 
     def remove_process(self, procs):
         try:

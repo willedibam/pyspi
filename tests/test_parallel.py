@@ -189,13 +189,15 @@ def cli_env(monkeypatch):
         monkeypatch.syspath_prepend(tests_dir)
 
 
-def test_cli_reports_failures_and_exits_zero_by_default(tmp_path, capsys, cli_env):
-    """`--quiet` must not turn a partly-failed run into a silent success.
+def test_cli_exits_nonzero_on_a_partial_failure_by_default(tmp_path, capsys, cli_env):
+    """A table with failed columns is one a pipeline must not ingest silently.
 
-    The computation summary is the only place a failed SPI was mentioned, and
-    `--quiet` suppresses it -- so the CLI printed "Wrote results table" and
-    exited 0 over a table whose columns had raised. Exit stays 0 (a few SPIs
-    failing is normal on real data), but the failure is now on stderr.
+    `--quiet` suppresses the computation summary, which used to be the only
+    place a failed SPI was named, and the exit status was 0 unconditionally --
+    so `pyspi compute --quiet` printed "Wrote results table" and exited 0 over a
+    table that could be entirely NaN. The default is now 1, with the failed
+    identifiers on stderr, and the results file is still written so the partial
+    table is available for inspection.
     """
     from pyspi.__main__ import main
 
@@ -204,21 +206,22 @@ def test_cli_reports_failures_and_exits_zero_by_default(tmp_path, capsys, cli_en
     code = main(["compute", "--data", str(data), "--quiet",
                  "--config", str(Path(__file__).parent / "parity_failure_config.yaml"),
                  "--output", str(out)])
-    assert code == 0
+    assert code == 1
     err = capsys.readouterr().err
     assert "always_raises" in err, f"failure not reported on stderr: {err!r}"
-    assert out.exists()
+    assert out.exists(), "the partial table must still be written"
 
 
-def test_cli_fail_on_error_exits_nonzero(tmp_path, cli_env):
-    """Opt-in hard failure for pipelines that want it."""
+def test_cli_allow_partial_exits_zero(tmp_path, capsys, cli_env):
+    """The documented opt-out, for callers that expect some SPIs to fail."""
     from pyspi.__main__ import main
 
     data = _cli_dataset(tmp_path)
-    code = main(["compute", "--data", str(data), "--quiet", "--fail-on-error",
+    code = main(["compute", "--data", str(data), "--quiet", "--allow-partial",
                  "--config", str(Path(__file__).parent / "parity_failure_config.yaml"),
                  "--output", str(tmp_path / "res.npz")])
-    assert code == 1
+    assert code == 0
+    assert "always_raises" in capsys.readouterr().err
 
 
 def test_cli_exits_nonzero_when_every_spi_is_empty(tmp_path, cli_env):
