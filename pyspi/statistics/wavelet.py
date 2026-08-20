@@ -9,6 +9,7 @@ from pyspi.base import (
 import numpy as np
 import warnings
 from pyspi.utils import fmt_param
+from pyspi.statistics.spectral import _circular_nanmean
 
 
 class mne(Unsigned):
@@ -105,11 +106,16 @@ class CoherencePhase(mne, Directed):
     labels = ["signed", "wavelet", "antisymmetric"]
 
     def __init__(self, **kwargs):
+        if kwargs.get("statistic", "mean") != "mean":
+            raise ValueError(
+                "CoherencePhase supports only statistic='mean'. Wrapped phase "
+                "has no branch-cut-independent ordinary maximum; use a "
+                "different circular summary with an explicit interpretation."
+            )
         self.identifier = "phase"
         self._measure = "cohy"
         super().__init__(**kwargs)
-        structural = "antisymmetric" if self._statistic == "mean" else "asymmetric"
-        self.labels = ["signed", "wavelet", structural]
+        self.labels = ["signed", "wavelet", "antisymmetric"]
 
     def issigned(self):
         return True
@@ -120,23 +126,22 @@ class CoherencePhase(mne, Directed):
 
         MNE returns one triangle.  Coherency phase obeys
         ``phase(i, j) = -phase(j, i)``, so reconstruct that triangle before
-        reducing.  This ordering matters for ``max`` because max does not
-        commute with negation; its band summary is asymmetric, while ``mean``
-        remains antisymmetric.
+        reducing. Wrapped angles are combined with a circular mean.
         """
         adj_freq, freq_id = self._get_cache(data)
         phase = np.angle(adj_freq).copy()
         ui = np.triu_indices(data.n_processes, 1)
         phase[ui[0], ui[1], ...] = -phase[ui[1], ui[0], ...]
         if phase.ndim == 4:
-            adj = self._statfn(phase[..., freq_id, :], axis=(2, 3))
+            adj = _circular_nanmean(phase[..., freq_id, :], axis=(2, 3))
         elif phase.ndim == 3:
-            adj = self._statfn(phase[..., freq_id], axis=2)
+            adj = _circular_nanmean(phase[..., freq_id], axis=2)
         else:
             raise ValueError(
                 f"Expected a 3D or 4D wavelet connectivity tensor, got "
                 f"shape {phase.shape}."
             )
+        adj[ui] = -adj.T[ui]
         np.fill_diagonal(adj, np.nan)
         return adj
 

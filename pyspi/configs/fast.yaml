@@ -400,7 +400,8 @@
   CoherencePhase:
     labels:
       - linear
-      - unsigned
+      - signed
+      - antisymmetric
       - bivariate
       - frequency-dependent
       - M01
@@ -413,23 +414,6 @@
 
       - fmin: 0.25
         fmax: 0.5
-
-      - fs: 1
-        statistic: max
-        labels:
-          - M10
-
-      - fmin: 0
-        fmax: 0.25
-        statistic: max
-        labels:
-          - M10
-
-      - fmin: 0.25
-        fmax: 0.5
-        statistic: max
-        labels:
-          - M10
 
   CoherenceMagnitude:
     labels:
@@ -1114,17 +1098,6 @@
 
   #   - fmin: 0.25
   #     fmax: 0.5
-
-  #   - fs: 1
-  #     statistic: max
-
-  #   - fmin: 0
-  #     fmax: 0.25
-  #     statistic: max
-
-  #   - fmin: 0.25
-  #     fmax: 0.5
-  #     statistic: max
 
   # # Coherence (ordinal or squared? imaginary components of the coherence)
   # ImaginaryCoherence:

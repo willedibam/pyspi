@@ -178,10 +178,10 @@ def test_antisymmetric_measures_are_labelled_as_such():
     strict=True,
     reason=(
         "Fixture/low-data finding, not a proven universal defect. "
-        "dspli_*_max, dswpli_*_max and one phase_*_max variant return a "
+        "dspli_*_max and dswpli_*_max variants return a "
         "constant matrix on var1_M3_T100 (M=3, T=100), so on that fixture "
         "they carry no pairwise information. Whether it holds at larger M or "
-        "T has not been established, and none of them should be removed from "
+        "T has not been established, and none should be removed from "
         "the shipped set on this evidence alone."
     ),
 )
@@ -221,38 +221,32 @@ def test_conditional_entropy_label_matches_implementation():
 # Wavelet PSI band statistics
 # --------------------------------------------------------------------------
 
-@pytest.mark.parametrize(
-    "statistic,trait", [("mean", "antisymmetric"), ("max", "asymmetric")]
-)
-def test_wavelet_coherence_phase_reconstructs_before_band_reduction(
-        statistic, trait):
-    """Phase is signed; max(-x) is -min(x), not -max(x)."""
+def test_wavelet_coherence_phase_uses_a_circular_mean_and_negates_orientation():
     from pyspi.statistics.wavelet import CoherencePhase
 
     phase = np.zeros((3, 3, 3))
-    phase[1, 0] = [-0.7, 0.2, 0.4]
+    phase[1, 0] = [np.pi - 0.1, -np.pi + 0.1, np.pi - 0.05]
     phase[2, 0] = [0.1, 0.3, 0.5]
     phase[2, 1] = [-0.4, -0.2, 0.6]
     lower = np.exp(1j * phase)
     lower[np.triu_indices(3, 1)] = 0
     freq = np.array([0.1, 0.2, 0.3])
 
-    spi = CoherencePhase(statistic=statistic, fmin=0, fmax=0.5)
+    spi = CoherencePhase(statistic="mean", fmin=0, fmax=0.5)
     spi._get_cache = lambda data: (lower, np.arange(freq.size))
     got = spi.multivariate(Data(data=np.ones((3, 8)), dim_order="ps",
                                 zscore=False))
 
-    reducer = np.mean if statistic == "mean" else np.max
     for i, j in ((1, 0), (2, 0), (2, 1)):
-        assert got[i, j] == pytest.approx(reducer(phase[i, j]))
-        assert got[j, i] == pytest.approx(reducer(-phase[i, j]))
+        expected = np.angle(np.mean(np.exp(1j * phase[i, j])))
+        assert got[i, j] == pytest.approx(expected)
+        assert got[j, i] == pytest.approx(-expected)
     assert set(spi.labels) & {"directed", "undirected", "antisymmetric",
-                              "asymmetric"} == {trait}
+                              "asymmetric"} == {"antisymmetric"}
     assert "signed" in spi.labels and spi.issigned()
 
 
-@pytest.mark.parametrize("statistic", ["mean", "max"])
-def test_wavelet_coherence_phase_is_process_permutation_covariant(statistic):
+def test_wavelet_coherence_phase_is_process_permutation_covariant():
     from pyspi.statistics.wavelet import CoherencePhase
 
     full = np.zeros((3, 3, 3))
@@ -266,7 +260,7 @@ def test_wavelet_coherence_phase_is_process_permutation_covariant(statistic):
         phase = full[np.ix_(order, order, np.arange(3))]
         lower = np.exp(1j * phase)
         lower[np.triu_indices(3, 1)] = 0
-        spi = CoherencePhase(statistic=statistic, fmin=0, fmax=0.5)
+        spi = CoherencePhase(statistic="mean", fmin=0, fmax=0.5)
         spi._get_cache = lambda unused: (lower, np.arange(3))
         return spi.multivariate(data)
 
@@ -274,6 +268,67 @@ def test_wavelet_coherence_phase_is_process_permutation_covariant(statistic):
     base = calculate([0, 1, 2])
     moved = calculate(order)
     assert np.allclose(base[np.ix_(order, order)], moved, equal_nan=True)
+
+
+def test_spectral_coherence_phase_uses_a_circular_mean_and_is_permutation_covariant():
+    from pyspi.statistics.spectral import CoherencePhase
+
+    full = np.zeros((3, 3, 3))
+    full[:, 1, 0] = [np.pi - 0.1, -np.pi + 0.1, np.pi - 0.05]
+    full[:, 2, 0] = [0.1, 0.3, 0.5]
+    full[:, 2, 1] = [-0.4, -0.2, 0.6]
+    full = full - full.transpose(0, 2, 1)
+    freq = np.array([0.1, 0.2, 0.3])
+    data = Data(data=np.ones((3, 8)), dim_order="ps", zscore=False)
+
+    def calculate(order):
+        phase = full[:, order][:, :, order]
+        spi = CoherencePhase(statistic="mean", fmin=0, fmax=0.5)
+        spi._get_cache = lambda unused: (phase[None, ...], freq)
+        return spi.multivariate(data)
+
+    base = calculate([0, 1, 2])
+    spi = CoherencePhase(statistic="mean", fmin=0, fmax=0.5)
+    assert "signed" in spi.labels and "antisymmetric" in spi.labels
+    assert "unsigned" not in spi.labels and "undirected" not in spi.labels
+    assert spi.issigned()
+    expected = np.angle(np.mean(np.exp(1j * full[:, 1, 0])))
+    assert base[1, 0] == pytest.approx(expected)
+    assert base[0, 1] == pytest.approx(-expected)
+    assert np.allclose(base, -base.T, equal_nan=True)
+
+    order = [2, 0, 1]
+    moved = calculate(order)
+    assert np.allclose(base[np.ix_(order, order)], moved, equal_nan=True)
+
+
+def test_spectral_coherence_phase_var_fixture_is_exactly_antisymmetric_and_covariant():
+    from pyspi.statistics.spectral import CoherencePhase
+
+    raw = np.load(os.path.join(
+        os.path.dirname(BASELINE), "..", "fixtures", "var1_M3_T100.npy"
+    ))
+
+    def calculate(values):
+        data = Data(data=values, dim_order="sp", zscore=False)
+        return CoherencePhase(
+            statistic="mean", fs=1, fmin=0, fmax=0.5
+        ).multivariate(data)
+
+    base = calculate(raw)
+    assert np.nanmax(np.abs(base + base.T)) == 0.0
+    order = [2, 0, 1]
+    moved = calculate(raw[:, order])
+    assert np.allclose(base[np.ix_(order, order)], moved, equal_nan=True)
+
+
+def test_coherence_phase_refuses_branch_dependent_maximum():
+    from pyspi.statistics.spectral import CoherencePhase as SpectralPhase
+    from pyspi.statistics.wavelet import CoherencePhase as WaveletPhase
+
+    for cls in (SpectralPhase, WaveletPhase):
+        with pytest.raises(ValueError, match="branch-cut-independent ordinary maximum"):
+            cls(statistic="max")
 
 @pytest.mark.parametrize("statistic", ["mean", "max"])
 def test_wavelet_psi_is_permutation_invariant(statistic):
@@ -414,13 +469,11 @@ def test_yaml_cannot_add_a_competing_structural_trait(tmp_path):
         "  CoherencePhase:\n"
         "    configs:\n"
         "      - {statistic: mean, fmin: 0, fmax: 0.5, labels: [directed, undirected, asymmetric]}\n"
-        "      - {statistic: max, fmin: 0, fmax: 0.5, labels: [directed, undirected, antisymmetric]}\n"
     )
     expected = {
         "mi_gaussian": "undirected",
         "gc_gaussian_k-1_kt-1_l-1_lt-1": "directed",
         "phase_multitaper_mean_fs-1_fmin-0_fmax-0-5": "antisymmetric",
-        "phase_multitaper_max_fs-1_fmin-0_fmax-0-5": "asymmetric",
     }
     spis = load_spis_from_yaml(str(config), quiet=True)
     assert set(spis) == set(expected)

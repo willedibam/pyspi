@@ -782,7 +782,8 @@
   CoherencePhase:
     labels:
       - linear
-      - unsigned
+      - signed
+      - antisymmetric
       - bivariate
       - frequency-dependent
       - M01
@@ -795,23 +796,6 @@
 
       - fmin: 0.25
         fmax: 0.5
-
-      - fs: 1
-        statistic: max
-        labels:
-          - M10
-
-      - fmin: 0
-        fmax: 0.25
-        statistic: max
-        labels:
-          - M10
-
-      - fmin: 0.25
-        fmax: 0.5
-        statistic: max
-        labels:
-          - M10
 
   CoherenceMagnitude:
     labels:

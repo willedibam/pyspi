@@ -36,8 +36,8 @@ These files began as *red* tests: assertions for behaviour the package did not
 yet have. All but one are now green. The single remaining marker is
 `test_structural_traits.py::test_no_bundled_spi_returns_a_constant_matrix`,
 `@pytest.mark.xfail(strict=True)`, and it records a **fixture/low-data finding,
-not a proven universal defect**: `dspli_*_max`, `dswpli_*_max` and one
-`phase_*_max` variant return a constant matrix on `var1_M3_T100` (M=3, T=100),
+not a proven universal defect**: the six `dspli_*_max` and `dswpli_*_max`
+variants return a constant matrix on `var1_M3_T100` (M=3, T=100),
 which carries no pairwise information *on that fixture*. Whether it holds at
 larger M or T has not been established, and no SPI should be removed on this
 evidence alone.
@@ -128,7 +128,7 @@ see `LOOSE_SPIS` in the module and `tools/measure_reproducibility.py`.
 
 ## Open finding
 
-One `xfail(strict=True)` marker remains. Seven `max`-statistic SPIs return a
+One `xfail(strict=True)` marker remains. Six `max`-statistic SPIs return a
 constant matrix on `var1_M3_T100`; the marker records that fixture observation
 without claiming a universal defect. Positional `bivariate(data, 0, 1)` is no
 longer xfailed: it is rejected with a message explaining the signature.

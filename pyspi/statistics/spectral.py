@@ -77,6 +77,21 @@ def _ensure_time_series_3d(z):
     return z
 
 
+def _circular_nanmean(angles, axis):
+    """Circular mean angle, omitting NaNs along ``axis``.
+
+    Wrapped phase is averaged through its unit phasors, not as real numbers;
+    e.g. values just below +pi and just above -pi average near pi rather than
+    zero. The result is the principal argument in [-pi, pi].
+    """
+    phasors = np.exp(1j * angles)
+    count = np.sum(~np.isnan(angles), axis=axis)
+    total = np.nansum(phasors, axis=axis)
+    mean = np.full(np.shape(total), np.nan + 0j, dtype=complex)
+    np.divide(total, count, out=mean, where=count > 0)
+    return np.angle(mean)
+
+
 class NonparametricSpectral(Unsigned):
     """Base class for the nonparametric spectral methods from the Eden-Kramer repo"""
 
@@ -342,12 +357,33 @@ class CoherencePhase(NonparametricSpectralMultivariate, Undirected):
     # Antisymmetric in (i, j): phase difference: phi(i,j) = -phi(j,i).
     _antisymmetric_spectrum = True
     name = "Coherence phase"
-    labels = ["unsigned", "spectral", "undirected"]
+    labels = ["signed", "spectral", "antisymmetric"]
 
     def __init__(self, **kwargs):
+        if kwargs.get("statistic", "mean") != "mean":
+            raise ValueError(
+                "CoherencePhase supports only statistic='mean'. Wrapped phase "
+                "has no branch-cut-independent ordinary maximum; use a "
+                "different circular summary with an explicit interpretation."
+            )
         self.identifier = "phase"
         super().__init__(**kwargs)
+        self.labels = ["signed", "spectral", "antisymmetric"]
         self._measure = "coherence_phase"
+
+    @parse_multivariate
+    def multivariate(self, data):
+        adj_freq, freq = self._get_cache(data)
+        freq_id = np.where((freq >= self._fmin) * (freq <= self._fmax))[0]
+        adj = _circular_nanmean(adj_freq[0, freq_id, :, :], axis=0)
+
+        # Coherency phase is antisymmetric. Select one computed orientation and
+        # construct its opposite explicitly so branch-cut representations at
+        # +/-pi and backend round-off cannot violate the declared structure.
+        ui = np.triu_indices(data.n_processes, 1)
+        adj[ui] = -adj.T[ui]
+        np.fill_diagonal(adj, np.nan)
+        return adj
 
 
 class ImaginaryCoherence(NonparametricSpectralMultivariate, Undirected):

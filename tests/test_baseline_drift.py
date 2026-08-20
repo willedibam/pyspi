@@ -22,7 +22,8 @@ SPI identifier) and are regenerated from the *current* fork by
 change detector, not an independent oracle: the fork deliberately rewrote the
 information-theoretic estimators, so upstream pyspi 2.0.1 values are the wrong
 reference for exactly the code that most needs one. Independent correctness
-lives in ``test_infotheory_analytic.py``.
+lives in analytic and structural contract tests, including
+``test_infotheory_analytic.py`` and ``test_structural_traits.py``.
 
 Frozen fixtures live in ``tests/data/fixtures/`` (not in ``pyspi/data/``: they
 are test inputs, not shipped demo data) and are built by
@@ -79,7 +80,7 @@ LOOSE = (1e-6, 1e-2)
 # optimisers, GP
 # restarts and randomised independence tests made them irreproducible. Measured,
 # that is false: `tests/tools/measure_reproducibility.py` computes the full
-# config twice per fixture and, on all three fixtures, **325 of 325 SPIs
+# config twice per fixture and, on all three fixtures, **322 of 322 SPIs
 # reproduce bit-exactly** -- max |difference| identically 0, including every
 # `anm`/`cds`/`reci`/`ccm`, every `coint_*`, `gpfit_*` (GaussianProcessRegressor
 # defaults to n_restarts_optimizer=0, so there are no random restarts),
