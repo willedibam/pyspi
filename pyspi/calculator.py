@@ -208,6 +208,13 @@ def warn_partial_cache_buckets(spis):
         )
 
 
+# Fields of `run_spec` that say *where* the run came from rather than *what* it
+# computes. They are recorded for provenance and deliberately kept out of
+# `run_digest`, which is a content hash: the same config contents and the same
+# data must digest the same from a checkout, a wheel or a temporary directory.
+_DIGEST_EXCLUDED_SPEC_FIELDS = frozenset({"config", "configfile", "dataset_name"})
+
+
 # Bumped whenever the .npz layout changes incompatibly. Schema 0 means "written
 # before the field existed", i.e. a pre-3.0.0 pickled file.
 _NPZ_SCHEMA = 1
@@ -474,7 +481,16 @@ class Calculator:
         of the same width with the same name are exactly the case that needs
         separating.
         """
-        spec = self.run_spec
+        # Location-only fields are excluded. `config` and `configfile` are the
+        # name and the *absolute resolved path*, so hashing the spec verbatim
+        # made an identical config and dataset digest differently in a source
+        # checkout and in an installed wheel -- and differently again in a
+        # temporary directory. That is a false negative rather than an unsafe
+        # reuse (a checkpoint is refused when it should have been accepted), but
+        # it defeats the point of a content hash. The path stays in `run_spec`
+        # as provenance; the *contents* are hashed below.
+        spec = {k: v for k, v in self.run_spec.items()
+                if k not in _DIGEST_EXCLUDED_SPEC_FIELDS}
         h = hashlib.sha256()
         h.update(json.dumps(spec, sort_keys=True, default=str).encode())
         # The algorithm, not only its inputs. Identical data and an identical

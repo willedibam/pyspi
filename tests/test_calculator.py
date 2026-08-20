@@ -514,3 +514,76 @@ def test_a_successful_recomputation_clears_a_stale_error():
     calc._errors[key] = "ValueError: stale"
     calc._record(key, calc.table[key].to_numpy(), None, [], 0.0)
     assert key not in calc.errors
+
+
+# --------------------------------------------------------------------------
+# run_digest is a content hash
+# --------------------------------------------------------------------------
+
+def _digest_calculator(config_path, data=None, **data_kwargs):
+    from pyspi.data import Data
+
+    if data is None:
+        rng = np.random.default_rng(0)
+        data = rng.standard_normal((3, 40))
+    return Calculator(dataset=Data(data=data, dim_order="ps", **data_kwargs),
+                      config=str(config_path))
+
+
+@pytest.fixture
+def two_copies_of_one_config(tmp_path):
+    """The same config bytes, at two different paths with two different names."""
+    import shutil
+
+    from pyspi.calculator import resolve_config
+
+    source = resolve_config("fabfour")
+    first = tmp_path / "a" / "config.yaml"
+    second = tmp_path / "b" / "differently-named.yaml"
+    for path in (first, second):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(source, path)
+    return first, second
+
+
+def test_run_digest_ignores_where_the_config_lives(two_copies_of_one_config):
+    """It hashed the absolute resolved path, so the same config and the same
+    data digested differently in a source checkout and an installed wheel.
+
+    A false negative -- a checkpoint refused when it should have been accepted
+    -- rather than unsafe reuse, but it defeats the point of a content hash.
+    """
+    first, second = two_copies_of_one_config
+    assert _digest_calculator(first).run_digest == _digest_calculator(second).run_digest
+    # ... and the path is still recorded, as provenance.
+    assert str(first) in _digest_calculator(first).run_spec["configfile"]
+
+
+def test_run_digest_tracks_the_config_contents(two_copies_of_one_config):
+    first, second = two_copies_of_one_config
+    second.write_text(second.read_text() + "\n# an extra byte\n")
+    assert _digest_calculator(first).run_digest != _digest_calculator(second).run_digest
+
+
+def test_run_digest_tracks_data_order_preprocessing_and_computation_version(
+        two_copies_of_one_config):
+    from pyspi import _parallel
+
+    config, _ = two_copies_of_one_config
+    rng = np.random.default_rng(0)
+    Z = rng.standard_normal((3, 40))
+    base = _digest_calculator(config, data=Z)
+    reference = base.run_digest
+
+    assert _digest_calculator(config, data=Z + rng.standard_normal((3, 40))
+                              ).run_digest != reference
+    assert _digest_calculator(config, data=Z[::-1]).run_digest != reference
+    assert _digest_calculator(config, data=Z, zscore=False).run_digest != reference
+
+    original = _parallel.COMPUTATION_VERSION
+    try:
+        _parallel.COMPUTATION_VERSION = original + "-probe"
+        assert base.run_digest != reference
+    finally:
+        _parallel.COMPUTATION_VERSION = original
+    assert base.run_digest == reference
