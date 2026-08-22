@@ -1098,8 +1098,12 @@ class CalculatorFrame:
                 [self._calculators, calc._calculators], ignore_index=True
             )
         elif isinstance(calc, Calculator):
+            # Keep one Calculator per row in a stable, explicitly named column.
+            # Concatenating a named Series into an empty DataFrame happened to
+            # produce column 0 in pandas 2, but pandas 3 uses the Series name as
+            # the column label and successive calculators form a sparse frame.
             self._calculators = pd.concat(
-                [self._calculators, pd.Series(data=calc, name=calc.name)],
+                [self._calculators, pd.DataFrame({0: [calc]})],
                 ignore_index=True,
             )
         elif isinstance(calc, pd.DataFrame):
