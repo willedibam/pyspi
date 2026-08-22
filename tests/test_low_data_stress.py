@@ -173,16 +173,14 @@ OBSERVED_EMPTY_CASES = {
 }
 
 # (SPI label, fixture, seed, T) -> (exception class, message regex).
-# DirectedCoherence may explicitly fail its spectral factorisation on three
+# DirectedCoherence may explicitly fail its spectral factorisation on these
 # singular duplicate-process cases (the backend's random fallback sometimes
 # converges, so success is also accepted). No other refusal is accepted.
 EXPECTED_REFUSALS = {
-    ("dcoh_mean", "duplicate_and_collinear", 0, 64):
-        (np.linalg.LinAlgError, r"^Singular matrix$"),
-    ("dcoh_mean", "duplicate_and_collinear", 0, 256):
-        (np.linalg.LinAlgError, r"^Singular matrix$"),
-    ("dcoh_mean", "duplicate_and_collinear", 7, 64):
-        (np.linalg.LinAlgError, r"^Singular matrix$"),
+    ("dcoh_mean", "duplicate_and_collinear", seed, T):
+        (np.linalg.LinAlgError, r"^Singular matrix$")
+    for seed in SEEDS
+    for T in (T_SHORT, T_LONG)
 }
 EXPECTED_REFUSALS.update({
     (label, fixture, seed, T):
