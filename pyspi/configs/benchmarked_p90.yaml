@@ -3,7 +3,7 @@
 # Source config : pyspi/configs/full.yaml
 # Bench JSON    : physics_config_M16_T800_n1.json (pyspi badfb4ebdb6b, M=16 T=800 n_jobs=1)
 # Cost model    : amortized
-# Current set: 290 / 322 SPIs (including two manual te_kraskov DCE variants).
+# Current set: 289 / 322 SPIs (including two manual te_kraskov DCE variants).
 # The original 2026-05-27 cut was 297 / 328 before later removals.
 # Cutoff        : fastest kept <= 5.520s ; slowest dropped >= 6.790s.
 #
@@ -500,16 +500,20 @@
 
 
 .statistics.causal:
-  AdditiveNoiseModel:
-    labels:
-      - directed
-      - nonlinear
-      - unsigned
-      - bivariate
-      - contemporaneous
-      - M02
-    dependencies:
-    configs:
+  # Disabled 2026-08-22: in Gadi pilot 177018028, all six M=20,T=1000
+  # datasets remained inside ANM for >18 CPU-minutes each after reaching it;
+  # no dataset completed. Its exact GP fit scales cubically in T for every
+  # directed channel pair, so the old p90 benchmark does not extrapolate here.
+  # AdditiveNoiseModel:
+  #   labels:
+  #     - directed
+  #     - nonlinear
+  #     - unsigned
+  #     - bivariate
+  #     - contemporaneous
+  #     - M02
+  #   dependencies:
+  #   configs:
 
   ConditionalDistributionSimilarity:
     labels:
