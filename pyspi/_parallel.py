@@ -262,11 +262,13 @@ def _worker_init(shm_name, shape, dtype_str, procnames, ds_name, configfile, pro
     _WORKER_STATE["progress_q"] = progress_q
 
 
-def _run_task(spi_keys, checkpoint_dir):
+def _run_task(spi_keys, checkpoint_dir, pairs=None):
     """Compute a bucket of SPIs sequentially in this worker.
 
     Posts ``(key, failed)`` to the progress queue after each SPI, and returns
     the list of ``(key, matrix, error_str_or_None, warnings, elapsed)`` tuples.
+    With ``pairs`` the SPIs are computed on those dyads only (see
+    ``run_spi_pairs``) and nothing is checkpointed.
     """
     data = _WORKER_STATE["data"]
     spis = _WORKER_STATE["spis"]
@@ -274,8 +276,11 @@ def _run_task(spi_keys, checkpoint_dir):
     M = data.n_processes
     out = []
     for key in spi_keys:
-        S, err, warns, elapsed = run_spi(spis[key], data, key, M)
-        write_checkpoint(checkpoint_dir, key, S, err)
+        if pairs is not None:
+            S, err, warns, elapsed = run_spi_pairs(spis[key], data, key, pairs)
+        else:
+            S, err, warns, elapsed = run_spi(spis[key], data, key, M)
+            write_checkpoint(checkpoint_dir, key, S, err)
         # Warnings travel back to the parent rather than being emitted (and
         # lost) here in the worker process.
         out.append((key, S, err, warns, elapsed))
@@ -328,6 +333,108 @@ def run_spi(spi, data, key, M):
         err = f"{type(e).__name__}: {e}"
 
     return S, err, warns, time.perf_counter() - t0
+
+
+def _dense_loop(spi):
+    """How ``bivariate`` reproduces this SPI's dense matrix, if it does.
+
+    ``"directed"`` or ``"undirected"`` when ``multivariate`` is the inherited
+    all-pairs loop over ``bivariate``, which the sampled path replays exactly.
+    Otherwise the class's ``_pair_local``: ``"directed"`` for a vectorised
+    ``multivariate`` whose entries ``bivariate`` matches to rounding, so both
+    orders of a dyad are evaluated directly; ``"retained"`` for one that is
+    ``bivariate(i, j)`` with ``i < j`` written to both entries. ``None`` when
+    there is no such marker -- the entries of a class's own ``multivariate``
+    need not equal ``bivariate`` on the same pair (a covariance estimator is
+    fitted on every process at once).
+    """
+    from pyspi.base import Directed, Undirected
+
+    mv = type(spi).multivariate
+    if mv is Undirected.multivariate:
+        return "undirected"
+    if mv is Directed.multivariate:
+        return "directed"
+    return getattr(type(spi), "_pair_local", None)
+
+
+def run_spi_pairs(spi, data, key, pairs):
+    """Compute one SPI on sampled dyads only; the counterpart of ``run_spi``.
+
+    ``pairs`` is a ``(b, 2)`` integer array of dyads ``(i, j)`` with ``i < j``.
+    Returns ``(V, err, warns, elapsed)`` where ``V`` has shape ``(b, 2)``:
+    ``V[p, 0]`` is the entry the dense matrix holds at ``[i, j]`` and
+    ``V[p, 1]`` the entry at ``[j, i]``.
+
+    An SPI whose dense matrix is the base-class loop over ``bivariate`` is
+    evaluated on the sampled pairs alone -- the calls the dense loop makes for
+    those pairs, in the same order, and no others -- and so is one marked
+    ``_pair_local`` (see ``_dense_loop``). Every other SPI computes its dense
+    matrix exactly as ``run_spi`` does and the sampled entries are read off it,
+    so no statistic is ever fitted on a two-channel subset of the data.
+
+    The failure rules are ``run_spi``'s, applied to the sampled entries: a
+    result fails if it raises, has the wrong shape, holds an infinity, or has
+    no finite value at all. An SPI can therefore fail here on a sample that
+    happens to miss its only finite entries, and pass here when its only
+    infinities lie outside the sample.
+    """
+    t0 = time.perf_counter()
+    err = None
+    warns: list[str] = []
+    b = len(pairs)
+    M = data.n_processes
+    lo, hi = pairs[:, 0], pairs[:, 1]
+    try:
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            loop = _dense_loop(spi)
+            V = np.empty((b, 2))
+            if loop is None:
+                S = np.array(spi.multivariate(data), dtype=float)
+                if S.shape != (M, M):
+                    raise ValueError(
+                        f"SPI returned shape {S.shape}, expected ({M},{M})")
+                V[:, 0] = S[lo, hi]
+                V[:, 1] = S[hi, lo]
+            elif loop == "retained":
+                for p in np.lexsort((lo, hi)):
+                    V[p, :] = spi.bivariate(data, i=int(lo[p]), j=int(hi[p]))
+            else:
+                # Both orders of every sampled dyad, visited as the dense loop
+                # visits them (by column, then row). An undirected SPI keeps
+                # bivariate(i, j) with i < j for both entries, but the dense
+                # loop reaches it after bivariate(j, i), and a per-pair cache
+                # can make the second call depend on the first: the
+                # cross-correlation is then the reversed profile of (j, i), one
+                # ulp from a direct evaluation. Replaying both keeps every
+                # sampled entry bit-identical to the dense one, and makes the
+                # result independent of the order the dyads were supplied in.
+                rows = np.concatenate([lo, hi])
+                cols = np.concatenate([hi, lo])
+                for e in np.lexsort((rows, cols)):
+                    value = spi.bivariate(data, i=int(rows[e]), j=int(cols[e]))
+                    if loop == "directed":
+                        V[e % b, e // b] = value
+                    elif e < b:
+                        V[e, :] = value
+        warns = [f"{w.category.__name__}: {w.message}" for w in caught]
+
+        if np.isinf(V).any():
+            raise ValueError("SPI returned infinite value(s)")
+        if not np.isfinite(V).any():
+            raise ValueError("SPI returned no finite value on the sampled pairs")
+    except Exception as e:
+        V = np.full((b, 2), np.nan)
+        err = f"{type(e).__name__}: {e}"
+
+    return V, err, warns, time.perf_counter() - t0
+
+
+def pairs_digest(pairs) -> str:
+    """Identity of a set of sampled dyads, in the order given."""
+    import hashlib
+    return hashlib.sha256(np.ascontiguousarray(pairs, dtype="<i8").tobytes()).hexdigest()
 
 
 def write_checkpoint(checkpoint_dir, key, S, err):
@@ -565,8 +672,13 @@ def run_parallel(
     progress: bool,
     configfile: str,
     config_bytes: bytes | None = None,
+    pairs: np.ndarray | None = None,
 ) -> dict:
-    """Execute ``spi_keys`` across ``n_jobs`` workers; return dict[key] -> (S, err, elapsed)."""
+    """Execute ``spi_keys`` across ``n_jobs`` workers; return dict[key] -> (S, err, elapsed).
+
+    With ``pairs`` each result is the ``(len(pairs), 2)`` array of
+    ``run_spi_pairs`` rather than an ``(M, M)`` matrix.
+    """
     from tqdm import tqdm
 
     # Pin BLAS env before any worker spawns — workers inherit single-threaded
@@ -578,6 +690,7 @@ def run_parallel(
     M = arr.shape[0]
     tasks = build_tasks(spi_keys, spis)
     cp_str = str(checkpoint_dir) if checkpoint_dir is not None else None
+    failed_shape = (M, M) if pairs is None else (len(pairs), 2)
 
     # Create resources inside the try so a failure constructing either one
     # (e.g. mp.Manager() raising) still runs the cleanup in finally.
@@ -603,7 +716,8 @@ def run_parallel(
                 configfile, progress_q, config_bytes,
             ),
         ) as ex:
-            future_to_task = {ex.submit(_run_task, task, cp_str): task for task in tasks}
+            future_to_task = {ex.submit(_run_task, task, cp_str, pairs): task
+                              for task in tasks}
             pending = set(future_to_task)
             while pending:
                 # Per-SPI progress ticks (cosmetic; bar stalls on a stuck SPI).
@@ -625,7 +739,7 @@ def run_parallel(
                         for key in task:
                             results.setdefault(
                                 key,
-                                (np.full((M, M), np.nan), f"worker died: {exc}", [], 0.0),
+                                (np.full(failed_shape, np.nan), f"worker died: {exc}", [], 0.0),
                             )
                 pending -= done
                 if pending:

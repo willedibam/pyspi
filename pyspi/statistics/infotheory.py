@@ -1489,6 +1489,11 @@ class ConditionalEntropy(InfoTheoryBase, Directed):
 
 
 class MutualInfo(InfoTheoryBase, Undirected):
+    # bivariate() returns the dense matrix entry to floating-point rounding
+    # (the two differ only in summation order), so compute_pairs() may evaluate
+    # both orders of a sampled pair directly rather than building the matrix.
+    _pair_local = "directed"
+
     name = "Mutual information"
     identifier = "mi"
     labels = ["unsigned", "infotheory", "unordered", "undirected"]
@@ -1548,6 +1553,11 @@ class MutualInfo(InfoTheoryBase, Undirected):
 
 
 class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
+    # bivariate() returns the dense matrix entry to floating-point rounding
+    # (the two differ only in summation order), so compute_pairs() may evaluate
+    # both orders of a sampled pair directly rather than building the matrix.
+    _pair_local = "directed"
+
     name = "Time-lagged mutual information"
     identifier = "tlmi"
     labels = ["unsigned", "infotheory", "temporal", "directed"]

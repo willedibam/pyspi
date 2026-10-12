@@ -384,6 +384,29 @@ def _expand_lagged_correlation_configs(configs):
     return expanded
 
 
+def sample_dyads(n_processes, n_pairs, seed=None):
+    """Sample ``n_pairs`` unordered process pairs uniformly without replacement.
+
+    Returns an ``(n_pairs, 2)`` integer array of dyads ``(i, j)`` with
+    ``i < j``: the first ``n_pairs`` entries of one seeded permutation of all
+    ``M(M-1)/2`` dyads, enumerated as ``np.triu_indices(M, 1)``. Budgets are
+    therefore nested -- for a given seed a smaller sample is a prefix of a
+    larger one -- and ``n_pairs = M(M-1)/2`` is the full census.
+
+    ``seed`` is passed to :func:`numpy.random.default_rng`. It selects pairs
+    only and never reaches an estimator.
+    """
+    M = require_int("n_processes", n_processes, minimum=2)
+    n_dyads = M * (M - 1) // 2
+    n_pairs = require_int("n_pairs", n_pairs)
+    if n_pairs > n_dyads:
+        raise ValueError(
+            f"n_pairs={n_pairs} exceeds the {n_dyads} dyads of {M} processes.")
+    i, j = np.triu_indices(M, 1)
+    chosen = np.random.default_rng(seed).permutation(n_dyads)[:n_pairs]
+    return np.stack([i[chosen], j[chosen]], axis=1)
+
+
 class Calculator:
     """Compute all pairwise interactions.
 
@@ -620,6 +643,34 @@ class Calculator:
             "Do not set this property externally. Use the compute() method."
         )
 
+    @property
+    def pairs(self):
+        """``(b, 2)`` dyads ``(i, j)``, ``i < j``, of the last :meth:`compute_pairs`."""
+        return getattr(self, "_pairs", None)
+
+    @property
+    def pair_values(self):
+        """``(n_spis, b, 2)`` results of the last :meth:`compute_pairs`.
+
+        Rows follow :attr:`spis`, columns follow :attr:`pairs`. For the dyad
+        ``(i, j)``, ``[..., 0]`` is the entry the dense table holds at
+        ``[i, j]`` and ``[..., 1]`` the entry at ``[j, i]``.
+        """
+        return getattr(self, "_pair_values", None)
+
+    @property
+    def sampling(self):
+        """What the last :meth:`compute_pairs` evaluated, and how.
+
+        A dict: ``n_processes``; ``n_dyads`` (the census, ``M(M-1)/2``);
+        ``n_pairs``; ``source`` (``"sampled"`` from ``seed``, or ``"explicit"``);
+        ``seed`` as given; ``pairs_sha256`` over :attr:`pairs` as little-endian
+        int64; ``computation_version``; ``n_jobs``; and ``evaluation``, mapping
+        each SPI to ``"pairs"`` (evaluated on the sampled pairs only) or
+        ``"dense"`` (computed on every process and indexed).
+        """
+        return getattr(self, "_sampling", None)
+
     def __repr__(self):
         ds = getattr(self, "_dataset", None)
         shape = f"{ds.n_processes}x{ds.n_observations}" if ds is not None else "no dataset"
@@ -756,6 +807,9 @@ class Calculator:
         # Results belong to the dataset that produced them.
         self._errors = {}
         self._timings = {}
+        self._pairs = None
+        self._pair_values = None
+        self._sampling = None
 
         columns = pd.MultiIndex.from_product(
             [self.spis.keys(), self._dataset.procnames], names=["spi", "process"]
@@ -917,6 +971,130 @@ class Calculator:
         logger.info("Calculation complete. Time taken: %.4fs", elapsed)
         if self._verbose:
             inspect_calc_results(self)
+
+    def compute_pairs(
+        self,
+        n_pairs=None,
+        pairs=None,
+        seed=None,
+        n_jobs=None,
+        mp_context=None,
+        progress=True,
+    ):
+        """Compute every SPI on a sample of process pairs instead of all of them.
+
+        Intended for large ``M``, where the ``M(M-1)`` ordered pairs of
+        :meth:`compute` dominate the cost. The same dyads are used for every
+        SPI and both directions of each dyad are kept, so the sampled entries
+        of different SPIs stay aligned. :attr:`table` is not touched.
+
+        Args:
+            n_pairs (int, optional): Number of dyads to draw with
+                :func:`sample_dyads`. Give this or ``pairs``, not both.
+            pairs (array_like, optional): Explicit ``(b, 2)`` dyads. Each row is
+                stored with its smaller index first; repeats are rejected.
+            seed (optional): Seed for drawing ``n_pairs`` dyads, as accepted by
+                :func:`numpy.random.default_rng`. It selects pairs only.
+            n_jobs, mp_context, progress: As for :meth:`compute`.
+
+        Returns:
+            numpy.ndarray: :attr:`pair_values`, shape ``(n_spis, b, 2)``. The
+            dyads are in :attr:`pairs`.
+
+        Every sampled entry equals the entry :meth:`compute` would have
+        produced: SPIs built by looping over process pairs are evaluated on the
+        sampled pairs only, and the rest are computed in full and indexed, so
+        no statistic is fitted on fewer processes than :meth:`compute` uses.
+        :attr:`errors` and :attr:`timings` describe this call, and
+        :attr:`sampling` records the pairs, budget, seed and how each SPI was
+        evaluated. Checkpointing is not supported.
+        """
+        if not hasattr(self, "_dataset"):
+            raise AttributeError(
+                "Dataset not loaded yet. Please initialise with load_dataset."
+            )
+        M = self.dataset.n_processes
+        if (n_pairs is None) == (pairs is None):
+            raise ValueError("Give exactly one of n_pairs and pairs.")
+        source = "sampled" if pairs is None else "explicit"
+        if pairs is None:
+            pairs = sample_dyads(M, n_pairs, seed)
+        else:
+            if seed is not None:
+                raise ValueError("seed only applies when n_pairs is given.")
+            given = np.asarray(pairs)
+            if (given.ndim != 2 or given.shape[1] != 2 or not len(given)
+                    or not np.issubdtype(given.dtype, np.integer)):
+                raise ValueError(
+                    "pairs must be a non-empty (b, 2) array of integer process indices.")
+            if given.min() < 0 or given.max() >= M:
+                raise IndexError(f"pairs holds an index outside 0..{M - 1}.")
+            if (given[:, 0] == given[:, 1]).any():
+                raise ValueError("pairs holds a process paired with itself.")
+            pairs = np.sort(given, axis=1)
+            if len(np.unique(pairs, axis=0)) != len(pairs):
+                raise ValueError("pairs holds the same dyad more than once.")
+        pairs = np.ascontiguousarray(pairs, dtype=np.intp)
+
+        if n_jobs is None:
+            n_jobs = int(os.getenv("PYSPI_N_JOBS", "1"))
+        _parallel.guard_oversubscription(n_jobs)
+
+        spi_keys = list(self.spis.keys())
+        t_start = time.perf_counter()
+        if n_jobs <= 1:
+            iterable = tqdm(spi_keys) if progress else spi_keys
+            results = {}
+            for key in iterable:
+                if progress:
+                    iterable.set_description(f"Processing [{self._name}: {key}]")
+                results[key] = _parallel.run_spi_pairs(
+                    self._spis[key], self.dataset, key, pairs
+                )
+        else:
+            n_workers = min(int(n_jobs), len(spi_keys))
+            ctx = mp_context or _parallel.default_mp_context()
+            logger.info("Parallel compute: %d SPI(s) on %d pair(s) via %d workers (mp=%s)",
+                        len(spi_keys), len(pairs), n_workers, ctx)
+            results = _parallel.run_parallel(
+                self._spis, self._dataset, spi_keys,
+                n_jobs=n_workers, mp_context=ctx,
+                checkpoint_dir=None, progress=progress,
+                configfile=self._configfile,
+                config_bytes=self._config_bytes,
+                pairs=pairs,
+            )
+
+        self._pairs = pairs
+        self._pair_values = np.stack([results[key][0] for key in spi_keys])
+        self._sampling = {
+            "n_processes": M,
+            "n_dyads": M * (M - 1) // 2,
+            "n_pairs": len(pairs),
+            "source": source,
+            "seed": seed,
+            "pairs_sha256": _parallel.pairs_digest(pairs),
+            "computation_version": _parallel.COMPUTATION_VERSION,
+            "n_jobs": max(1, int(n_jobs)),
+            "evaluation": {
+                key: "dense" if _parallel._dense_loop(self._spis[key]) is None else "pairs"
+                for key in spi_keys},
+        }
+        self._errors = {}
+        self._timings = {}
+        for key in spi_keys:
+            _, err, warns, elapsed = results[key]
+            self._timings[key] = elapsed
+            for w in warns:
+                warnings.warn(f'SPI "{key}": {w}')
+            if err is not None:
+                self._errors[key] = err
+                warnings.warn(f'Caught error for SPI "{key}": {err}')
+
+        logger.info("Calculation complete on %d pair(s): %d of %d SPI(s) failed. "
+                    "Time taken: %.4fs", len(pairs), len(self._errors),
+                    len(spi_keys), time.perf_counter() - t_start)
+        return self._pair_values
 
     def _compute_serial(self, spi_keys, M, cp_dir, progress):
         iterable = tqdm(spi_keys) if progress else spi_keys

@@ -124,6 +124,10 @@ class HellerHellerGorfine(Undirected, Unsigned):
 class DistanceCorrelation(Undirected, Unsigned):
     """Distance correlation"""
 
+    # multivariate() below is bivariate(i, j), i < j, written to both entries,
+    # so compute_pairs() makes that one call for each sampled pair.
+    _pair_local = "retained"
+
     name = "Distance correlation"
     identifier = "dcorr"
     labels = ["unsigned", "distance", "unordered", "nonlinear", "undirected"]
@@ -239,6 +243,11 @@ class DynamicTimeWarping(TimeWarping):
 
     Falls back to tslearn if dtaidistance is not available or for itakura constraint.
     """
+
+    # bivariate() returns the dense matrix entry to floating-point rounding
+    # (the two differ only in summation order), so compute_pairs() may evaluate
+    # both orders of a sampled pair directly rather than building the matrix.
+    _pair_local = "directed"
 
     name = "Dynamic time warping"
     identifier = "dtw"

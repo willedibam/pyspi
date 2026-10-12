@@ -309,6 +309,11 @@ class LaggedCorrelation(Undirected, Signed):
     Computes symmetric lagged correlation: 0.5 * (corr(x[tau:], y[:-tau]) + corr(y[tau:], x[:-tau])).
     Supports Pearson, Spearman, and Kendall estimators.
     """
+
+    # bivariate() returns the dense matrix entry to floating-point rounding
+    # (the two differ only in summation order), so compute_pairs() may evaluate
+    # both orders of a sampled pair directly rather than building the matrix.
+    _pair_local = "directed"
     name = "Lagged correlation"
     labels = ["basic", "linear", "undirected", "temporal"]
 
