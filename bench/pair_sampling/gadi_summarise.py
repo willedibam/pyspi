@@ -20,7 +20,7 @@ import numpy as np
 
 from validate import errors, load_record, pair_values, spi_spi_features
 
-OUT = Path(__file__).parent / "results" / "gadi-smoke"
+RESULTS = Path(__file__).parent / "results"
 # SPIs whose values changed between computation r7 and r8.
 CHANGED = ("sgddtw", "MinCovDet", "EllipticEnvelope", "psi_multitaper")
 EXAMPLES = {"Pearson": "cov_EmpiricalCovariance", "Distance correlation": "dcorr",
@@ -65,8 +65,13 @@ def main():
     parser.add_argument("--runs", type=Path, required=True)
     parser.add_argument("--dense", type=Path, required=True)
     parser.add_argument("--pbs", type=Path, required=True)
+    parser.add_argument("--name", default="gadi-smoke",
+                        help="Folder under results/ to write.")
+    parser.add_argument("--previous", default=None,
+                        help="An earlier folder under results/ to compare result hashes with.")
     args = parser.parse_args()
     pbs = json.loads(args.pbs.read_text())
+    OUT = RESULTS / args.name
     OUT.mkdir(parents=True, exist_ok=True)
 
     runs, values = [], {}
@@ -126,7 +131,8 @@ def main():
         keep = np.array([not any(tag in n for tag in CHANGED) for n in order])
         exact = spi_spi_features(pair_values(stored[keep], np.stack(np.triu_indices(M, 1), 1)))
         z_lines = []
-        for name in (m243, "m243-b2500-j8"):
+        larger = next((r["run"] for r in runs if r["M"] == 243 and r["n_pairs"] != 1000), None)
+        for name in (m243, larger):
             if name not in values:
                 continue
             pairs = np.load(args.runs / name / "pairs.npy")
@@ -147,12 +153,29 @@ def main():
                            f"{100 * e['retained']:.1f}% of coordinates retained")
         summary["m243_z_error"] = ("z from the sampled run against z from the full extraction, "
                                    "SPIs changed in r8 excluded -- " + "; ".join(z_lines))
-        if "m243-b2500-j8" in values:
-            small, big = (np.load(args.runs / n / "pairs.npy") for n in (m243, "m243-b2500-j8"))
+        if larger:
+            small, big = (np.load(args.runs / n / "pairs.npy") for n in (m243, larger))
             summary["nested_prefix_identical"] = bool(
                 np.array_equal(big[:len(small)], small)
-                and np.array_equal(values["m243-b2500-j8"][:, :len(small)],
+                and np.array_equal(values[larger][:, :len(small)],
                                    values[m243], equal_nan=True))
+
+    # Recordings run side by side under nci-parallel: the cores each was bound to.
+    bound = [json.loads(p.read_text()) for p in sorted(args.runs.glob("binding-*/*/report.json"))]
+    if bound:
+        cores = [set(r["affinity"]) for r in bound]
+        summary["binding"] = {
+            "recordings": [{"member": r["member"], "n_jobs": r["n_jobs"], "affinity": r["affinity"],
+                            "wall_seconds": r["wall_seconds"], "host": r["host"]} for r in bound],
+            "each_bound_to_its_workers": all(len(c) == r["n_jobs"] for c, r in zip(cores, bound)),
+            "disjoint": sum(map(len, cores)) == len(set().union(*cores)),
+        }
+    if args.previous:
+        before = {r["run"]: r["values_sha256"] for r in json.loads(
+            (RESULTS / args.previous / "summary.json").read_text())["runs"]}
+        shared = [r["run"] for r in runs if r["run"] in before]
+        summary["same_values_as_previous"] = {
+            "runs": shared, "identical": all(by_name[n]["values_sha256"] == before[n] for n in shared)}
     (OUT / "summary.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps({k: v for k, v in summary.items() if k != "runs"}, indent=1))
 

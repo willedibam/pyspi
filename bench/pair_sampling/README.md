@@ -86,38 +86,38 @@ run (Apple M5, 10 cores, macOS).
 
 `gadi_smoke.py` / `gadi_smoke.pbs`, one PBS job per configuration on a Cascade
 Lake node, forked workers, each job bound to its cores; reduced by
-`gadi_summarise.py` to `results/gadi-smoke/`. One MEG recording, T=1000,
-computation r8. These runs predate two changes that lower the times below
-without changing any value: the directed spectral SPIs now share one
-factorisation per pair (they were 44% of the M=64 run), and nonparametric
-spectral Granger causality is evaluated on the sampled pairs only (it was the
-18-minute task at M=243). Neither has been re-timed on Gadi. The earlier full extractions (r7, one core) took 1.35 h at
-M=64 and 19.3 h at M=243.
+`gadi_summarise.py`. One MEG recording, T=1000, computation r8. The earlier
+full extractions (r7, one core) took 1.35 h at M=64 and 19.3 h at M=243.
+`results/gadi-smoke-2/` is the current code; `results/gadi-smoke/` the same
+runs a day earlier, before the directed spectral SPIs shared a factorisation
+and before nonparametric spectral Granger causality was sampled.
 
-| run | workers | wall | speed-up | job peak memory |
+| run | workers | wall | before | job peak memory |
 |---|---:|---:|---:|---:|
-| M=64, full table | 1 | 65.0 min | 1.0x | 3.5 GiB |
-| | 4 | 18.0 min | 3.6x | 8.0 GiB |
-| | 8 | 9.9 min | 6.6x | 8.3 GiB |
-| M=243, 1,000 of 29,403 dyads | 1 | 61.2 min | 1.0x (19x the full r7 run) | 20.3 GiB |
-| | 4 | 20.8 min | 2.9x (55x) | 35.5 GiB |
-| | 8 | 18.3 min | 3.3x (63x) | 39.0 GiB |
-| M=243, 2,500 dyads | 8 | 18.2 min | | 34.8 GiB |
+| M=64, full table | 1 | 40.3 min | 65.0 min | 2.7 GiB |
+| | 4 | 10.8 min (3.8x) | 18.0 min | 5.1 GiB |
+| | 8 | 5.9 min (6.9x) | 9.9 min | 5.9 GiB |
+| M=243, 1,000 of 29,403 dyads | 1 | 52.0 min | 61.2 min | 20.0 GiB |
+| | 4 | 9.4 min | 20.8 min | 41.7 GiB |
+| | 8 | 4.8 min | 18.3 min | 39.0 GiB |
+| M=243, 2,305 dyads (`tolerance=0.03`) | 4 | 15.7 min | | 27.9 GiB |
 
-- Results are identical for every worker count, and the 2,500-dyad run begins
-  with the 1,000-dyad run's dyads and values.
+- Results are identical for every worker count and to the earlier runs, and
+  the 2,305-dyad run begins with the 1,000-dyad run's dyads and values.
 - Against the r7 full extractions: at M=64 all 274 SPIs not changed in r8 are
   bit-identical; at M=243, 249 are bit-identical on the sampled entries, 17
   agree to rounding, and the same 8 fail. None differs.
 - The SPI-SPI vector from the M=243 runs has RMSE 0.032 at 1,000 dyads and
-  0.016 at 2,500 against the full extraction (r8-changed SPIs excluded).
-- At M=243 the wall time stops at 18 min from four workers on, for either
-  budget: that is one task, the 24 nonparametric spectral-Granger SPIs, which
-  share a cache and are computed on every channel. Summed SPI time is 61 min at
-  1,000 dyads and 119 min at 2,500.
-- At M=64, eight workers are limited by the longest task (10 min, one group of
-  directed spectral SPIs); the summed SPI time is 10% higher with workers than
-  without.
+  0.017 at 2,305 against the full extraction (r8-changed SPIs excluded).
+- The M=243 one-worker job ran each SPI about 40% slower than the same SPIs
+  ran inside the worker jobs (summed SPI time 52 min against 36-37 min),
+  probably a busier node; its wall time overstates the serial cost, and the
+  apparent speed-ups over it (5.5x on 4, 10.9x on 8) are inflated accordingly.
+- Memory at M=243 is set by the SPIs computed on every channel, about 16 GiB
+  in the largest worker; it does not fall with the sample.
+- `gadi_binding.pbs`: two M=64 recordings side by side under `nci-parallel`
+  with four cores each were bound to four distinct cores apiece and took
+  12.4 min each, against 10.8 min for one alone on another node.
 
 ## Projected large-M cost (superseded where measured)
 

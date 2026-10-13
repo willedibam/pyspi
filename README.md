@@ -178,8 +178,8 @@ calc.save("recording.npz")                              # either kind; load_tabl
 
 **Workers.** SPIs that share a cached intermediate form one task and stay on one
 worker, so the longest task bounds the speed-up. On one *M*=64, *T*=1000
-recording with `benchmarked_p90`: 65, 18 and 10 minutes on 1, 4 and 8 workers,
-and 3.5, 8.0 and 8.3 GiB. Each worker pins its BLAS/OpenMP pools to one thread
+recording with `benchmarked_p90`: 40, 11 and 6 minutes on 1, 4 and 8 workers,
+and 2.7, 5.1 and 5.9 GiB. Each worker pins its BLAS/OpenMP pools to one thread
 (macOS Accelerate cannot be pinned; prefer `n_jobs=1` there). `PYSPI_N_JOBS`
 sets `n_jobs` from the environment.
 
@@ -194,7 +194,7 @@ small *M* the budget is nearly every pair and `compute()` is the simpler call.
 SPIs that are fitted on all processes at once (covariance and precision
 estimators, most spectral measures) are still computed in full and read off, so
 their cost and memory do not shrink. On one *M*=243, *T*=1000 recording, 1,000
-of 29,403 pairs took 61, 21 and 18 minutes on 1, 4 and 8 workers and 20-39 GiB,
+of 29,403 pairs took 52, 9 and 5 minutes on 1, 4 and 8 workers and 20-42 GiB,
 against 19 hours for the full table.
 
 **Memory.** Request memory per dataset, not per core: allow the parent plus
