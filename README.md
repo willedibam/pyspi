@@ -158,18 +158,47 @@ calc = Calculator(config="my_spis.yaml")
 
 ## Running at scale
 
-**Prefer one dataset per process.** `Calculator.compute(n_jobs=...)` parallelises
-*within* a single dataset, but SPIs sharing a cache are grouped into one task
-that runs serially in one worker, so the makespan is floored by the longest
-single task. Measured on the benchmark grid at *M*=64, *T*=1600, that ceiling is
-**2.3-4.5x regardless of `n_jobs`**, on every config. If you have more datasets
-than cores — the usual case on a cluster — run each dataset in its own
-single-core process instead. That scales close to linearly, isolates failures to
-one dataset, and schedules far faster as an array job.
+Three levers. Results do not depend on which you use: every stochastic
+estimator carries its own seed, so a table is the same for any number of
+workers, and a sampled entry is the entry of the full table.
 
-Use `n_jobs > 1` when you have fewer datasets than cores, when one dataset must
-finish under a walltime limit, or when memory forces you to share a single copy
-of a large dataset across workers.
+| Lever | Call | Use when |
+|---|---|---|
+| One dataset per process | a scheduler array or task farm | you have at least as many datasets as cores (the usual case) |
+| Workers within a dataset | `calc.compute(n_jobs=k)` | cores outnumber datasets, a walltime limit, or memory limits how many datasets fit on a node |
+| Sampled process pairs | `calc.compute_pairs(tolerance=0.03, n_jobs=k)` | *M* is large (about 100 and up) |
+
+```python
+calc = Calculator(dataset=x, config="benchmarked_p90")
+calc.compute(n_jobs=4)                                  # every pair, four workers -> calc.table
+calc.compute_pairs(tolerance=0.03, seed=0, n_jobs=4)    # sampled pairs -> calc.pair_values
+calc.pairs, calc.sampling                               # which pairs, and how each SPI was evaluated
+```
+
+**Workers.** SPIs that share a cached intermediate form one task and stay on one
+worker, so the longest task bounds the speed-up. On one *M*=64, *T*=1000
+recording with `benchmarked_p90`: 65, 18 and 10 minutes on 1, 4 and 8 workers,
+and 3.5, 8.0 and 8.3 GiB. Each worker pins its BLAS/OpenMP pools to one thread
+(macOS Accelerate cannot be pinned; prefer `n_jobs=1` there). `PYSPI_N_JOBS`
+sets `n_jobs` from the environment.
+
+**Sampled pairs.** `compute_pairs` evaluates every SPI on the same sample of
+unordered process pairs, both directions of each, and returns
+`(n_spis, n_pairs, 2)`. `tolerance` sets the number of pairs through
+`pyspi.calculator.pair_budget`: it is the root-mean-square error to expect in
+correlations between SPIs across pairs, and it caps the sample near 2,500 pairs
+however large *M* is; `n_pairs=` or `pairs=` state the sample directly. For
+small *M* the budget is nearly every pair and `compute()` is the simpler call.
+SPIs that are fitted on all processes at once (covariance and precision
+estimators, most spectral measures) are still computed in full and read off, so
+their cost and memory do not shrink. On one *M*=243, *T*=1000 recording, 1,000
+of 29,403 pairs took 61, 21 and 18 minutes on 1, 4 and 8 workers and 20-39 GiB,
+against 19 hours for the full table.
+
+**Memory.** Request memory per dataset, not per core: allow the parent plus
+`k` times the largest worker until you have measured it, and keep the datasets
+in one job similar in *M* and *T*, because one oversized dataset can take the
+whole job down.
 
 ```bash
 # PBS array job: one dataset per task, one core each
@@ -179,14 +208,11 @@ python -m pyspi compute --data "datasets/${PBS_ARRAY_INDEX}.npy" \
     --config benchmarked_p90 --checkpoint-dir "results/${PBS_ARRAY_INDEX}/"
 ```
 
-`--checkpoint-dir` writes each SPI to `<dir>/<identifier>.npy` as it finishes and
-resumes from those on a re-run, so a job killed at the walltime limit picks up
-where it stopped. `PYSPI_N_JOBS` sets `n_jobs` from the environment.
-
-When `n_jobs > 1`, workers pin their nested BLAS/OpenMP thread pools to one
-thread each to avoid oversubscription. macOS is
-an exception: its Accelerate BLAS cannot be pinned this way, so prefer `n_jobs=1`
-there for a single dataset.
+`--checkpoint-dir` (and `checkpoint_dir=` on both calls) writes each SPI as it
+finishes and resumes from those on a re-run, so a job killed at the walltime
+limit picks up where it stopped. A checkpoint directory belongs to one run: the
+same data, config, pyspi computation version and, for a sampled run, the same
+pairs. Worked examples are in `demos/optimisation/`.
 
 ## SPI Descriptions 📋
 To access a table with a high-level overview of the _pyspi_ library of SPIs, including their associated identifiers, see the [table of SPIs](https://time-series-features.gitbook.io/pyspi/spis/table-of-spis) in the full documentation.

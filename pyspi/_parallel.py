@@ -343,10 +343,12 @@ def _dense_loop(spi):
     Otherwise the class's ``_pair_local``: ``"directed"`` for a vectorised
     ``multivariate`` whose entries ``bivariate`` matches to rounding, so both
     orders of a dyad are evaluated directly; ``"retained"`` for one that is
-    ``bivariate(i, j)`` with ``i < j`` written to both entries. ``None`` when
-    there is no such marker -- the entries of a class's own ``multivariate``
-    need not equal ``bivariate`` on the same pair (a covariance estimator is
-    fitted on every process at once).
+    ``bivariate(i, j)`` with ``i < j`` written to both entries; ``"matrix"``
+    for one with a ``multivariate_pairs(data, pairs)`` that returns the dense
+    matrix filled at those dyads only. ``None`` when there is no such marker
+    -- the entries of a class's own ``multivariate`` need not equal
+    ``bivariate`` on the same pair (a covariance estimator is fitted on every
+    process at once).
     """
     from pyspi.base import Directed, Undirected
 
@@ -355,7 +357,7 @@ def _dense_loop(spi):
         return "undirected"
     if mv is Directed.multivariate:
         return "directed"
-    return getattr(type(spi), "_pair_local", None)
+    return getattr(spi, "_pair_local", None)
 
 
 def run_spi_pairs(spi, data, key, pairs):
@@ -390,8 +392,9 @@ def run_spi_pairs(spi, data, key, pairs):
             warnings.simplefilter("always")
             loop = _dense_loop(spi)
             V = np.empty((b, 2))
-            if loop is None:
-                S = np.array(spi.multivariate(data), dtype=float)
+            if loop in (None, "matrix"):
+                S = np.array(spi.multivariate(data) if loop is None
+                             else spi.multivariate_pairs(data, pairs), dtype=float)
                 if S.shape != (M, M):
                     raise ValueError(
                         f"SPI returned shape {S.shape}, expected ({M},{M})")

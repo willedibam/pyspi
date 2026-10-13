@@ -29,7 +29,7 @@ import numpy as np
 import pytest
 
 from pyspi import _parallel
-from pyspi.calculator import Calculator, sample_dyads
+from pyspi.calculator import Calculator, pair_budget, sample_dyads
 from pyspi.data import Data
 
 TESTS_DIR = Path(__file__).parent
@@ -78,7 +78,7 @@ def _mismatches(dense, sampled, pairs, spis):
     for key, (S, dense_err) in dense.items():
         V, err = sampled[key]
         expected = np.stack([S[i, j], S[j, i]], axis=1)
-        if getattr(type(spis[key]), "_pair_local", None) == "directed":
+        if getattr(spis[key], "_pair_local", None) == "directed":
             same = np.allclose(V, expected, equal_nan=True, **TIGHT)
         else:
             same = np.array_equal(V, expected, equal_nan=True)
@@ -107,16 +107,51 @@ def test_a_subset_holds_the_dense_entries(dense):
 def test_pair_local_classes_are_the_expensive_vectorised_ones():
     """The marker is an opt-in per class; pin which p90 SPIs carry it.
 
-    ``"directed"`` classes match the dense table to rounding, the
-    ``"retained"`` one exactly.
+    ``"directed"`` classes match the dense table to rounding; ``"retained"``
+    and ``"matrix"`` exactly.
     """
-    marked = {type(s).__name__: type(s)._pair_local for s in _p90().spis.values()
-              if getattr(type(s), "_pair_local", None)}
-    assert marked == {"LaggedCorrelation": "directed",
-                      "DynamicTimeWarping": "directed",
-                      "MutualInfo": "directed",
-                      "TimeLaggedMutualInfo": "directed",
-                      "DistanceCorrelation": "retained"}
+    marked = {(type(s).__name__, s._pair_local) for s in _p90().spis.values()
+              if getattr(s, "_pair_local", None)}
+    assert marked == {("LaggedCorrelation", "directed"),
+                      ("DynamicTimeWarping", "directed"),
+                      ("MutualInfo", "directed"),
+                      ("TimeLaggedMutualInfo", "directed"),
+                      ("DistanceCorrelation", "retained"),
+                      ("SpectralGrangerCausality", "matrix")}
+
+
+def test_nonparametric_spectral_granger_factorises_only_the_sampled_pairs(monkeypatch):
+    """One factorisation per sampled dyad, and the dense entries exactly.
+
+    The parametric variants fit every process and stay fully computed.
+    """
+    import spectral_connectivity.connectivity as backend
+
+    calc = _p90()
+    keys = [k for k in calc.spis if k.startswith("sgc_")]
+    nonparametric = [k for k in keys if "nonparametric" in k]
+    assert len(nonparametric) == 6 and len(keys) == 24
+    assert {_parallel._dense_loop(calc.spis[k]) for k in nonparametric} == {"matrix"}
+    assert {_parallel._dense_loop(calc.spis[k]) for k in keys if k not in nonparametric} == {None}
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        dense = {k: _parallel.run_spi(calc.spis[k], calc.dataset, k, 7)[0] for k in nonparametric}
+
+    calls = []
+    inner = backend.minimum_phase_decomposition
+    monkeypatch.setattr(backend, "minimum_phase_decomposition",
+                        lambda *a, **k: calls.append(1) or inner(*a, **k))
+    fresh = _p90()
+    pairs = np.array([[1, 4], [0, 6], [2, 3], [0, 1], [3, 5]])
+    i, j = pairs.T
+    for k in nonparametric:
+        V, err, _, _ = _parallel.run_spi_pairs(fresh.spis[k], fresh.dataset, k, pairs)
+        assert err is None, (k, err)
+        assert np.array_equal(V, np.stack([dense[k][i, j], dense[k][j, i]], axis=1),
+                              equal_nan=True), k
+        assert np.isfinite(V).all()
+    assert len(calls) == len(pairs)               # shared by all six variants
 
 
 def test_distance_correlation_makes_one_call_per_sampled_pair(monkeypatch):
@@ -307,6 +342,8 @@ def test_failures_are_isolated_and_recorded(n_jobs, monkeypatch):
 @pytest.mark.parametrize("kwargs,exc", [
     ({}, ValueError),
     ({"n_pairs": 3, "pairs": [[0, 1]]}, ValueError),
+    ({"n_pairs": 3, "tolerance": 0.1}, ValueError),
+    ({"tolerance": 0}, ValueError),
     ({"pairs": [[0, 1]], "seed": 0}, ValueError),
     ({"n_pairs": 16}, ValueError),
     ({"pairs": [0, 1]}, ValueError),
@@ -349,6 +386,37 @@ def test_sampling_record_identifies_the_pairs_and_how_each_spi_was_evaluated():
     assert explicit.sampling["pairs_sha256"] == record["pairs_sha256"]
     # The identity is of the dyads in the order given.
     assert _deterministic(pairs=calc.pairs[::-1]).sampling["pairs_sha256"] != record["pairs_sha256"]
+
+
+# --------------------------------------------------------------------------
+# The budget rule
+# --------------------------------------------------------------------------
+
+def test_pair_budget_solves_the_error_model_and_never_exceeds_the_census():
+    """b is the smallest budget whose modelled error is within tolerance."""
+    for M in (2, 5, 20, 64, 243, 1000):
+        D = M * (M - 1) // 2
+        for tolerance, c in ((0.03, 1.5), (0.05, 1.0), (0.01, 1.8), (0.5, 1.5)):
+            b = pair_budget(M, tolerance, c)
+            assert 1 <= b <= D
+            error = lambda n: c * np.sqrt((1 - n / D) / n)
+            assert error(b) <= tolerance * (1 + 1e-9)
+            assert b == 1 or error(b - 1) > tolerance
+
+    assert [pair_budget(M) for M in (20, 64, 100, 243, 500)] == [177, 1117, 1662, 2305, 2451]
+    assert pair_budget(10 ** 5) == 2500                # (c / tolerance)^2, whatever M
+    assert pair_budget(8, tolerance=1e-6) == 28        # the census
+    for bad in (dict(n_processes=1), dict(n_processes=5, tolerance=-0.1),
+                dict(n_processes=5, c=0)):
+        with pytest.raises(ValueError):
+            pair_budget(**bad)
+
+
+def test_compute_pairs_draws_the_budget_for_a_tolerance():
+    calc = _deterministic(tolerance=0.2, seed=3)
+    assert len(calc.pairs) == pair_budget(6, 0.2) == 12
+    assert calc.sampling["tolerance"] == 0.2 and calc.sampling["n_pairs"] == 12
+    assert np.array_equal(calc.pairs, sample_dyads(6, 12, seed=3))
 
 
 # --------------------------------------------------------------------------
@@ -417,14 +485,14 @@ def test_p90_sampled_runs_agree_across_workers_census_and_resume(tmp_path):
         for row, key in zip(calc.pair_values, keys):
             S = dense.table[key].to_numpy(dtype=float)
             expected = np.stack([S[i, j], S[j, i]], axis=1)
-            if getattr(type(dense.spis[key]), "_pair_local", None) == "directed":
+            if getattr(dense.spis[key], "_pair_local", None) == "directed":
                 assert np.allclose(row, expected, equal_nan=True, **TIGHT), (label, key)
             else:
                 assert np.array_equal(row, expected, equal_nan=True), (label, key)
 
     serial = run(n_pairs=8, seed=5)
     how = list(serial.sampling["evaluation"].values())
-    assert (how.count("pairs"), how.count("dense")) == (147, 142)
+    assert (how.count("pairs"), how.count("dense")) == (153, 136)
     assert_matches_dense(serial, "serial sample")
     stochastic = [k for k in keys if "sgddtw" in k or "MinCovDet" in k or "EllipticEnvelope" in k]
     assert len(stochastic) == 12

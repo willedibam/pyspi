@@ -187,7 +187,7 @@ def tier_of(spi):
     """
     if _parallel._dense_loop(spi) is None:
         return "indexed"
-    return ("pair-local" if getattr(type(spi), "_pair_local", None) == "directed"
+    return ("pair-local" if getattr(spi, "_pair_local", None) == "directed"
             else "pair loop")
 
 

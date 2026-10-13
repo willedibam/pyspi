@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import copy, yaml, importlib, time, warnings, os
 import functools
-import hashlib, json
+import hashlib, json, math
 from pathlib import Path
 from tqdm import tqdm
 
@@ -407,6 +407,34 @@ def sample_dyads(n_processes, n_pairs, seed=None):
     return np.stack([i[chosen], j[chosen]], axis=1)
 
 
+def pair_budget(n_processes, tolerance=0.03, c=1.5):
+    """How many dyads :meth:`Calculator.compute_pairs` needs for a given accuracy.
+
+    The accuracy meant is that of correlations between SPIs taken across
+    process pairs, the usual summary of a table of SPIs. Estimated from ``b``
+    of the ``D = M(M-1)/2`` dyads, their root-mean-square error is close to
+    ``c * sqrt((1 - b/D) / b)``; this returns the ``b`` at which that equals
+    ``tolerance``::
+
+        b = ceil(1 / ((tolerance / c) ** 2 + 1 / D))
+
+    It never exceeds ``D``, is nearly ``D`` for small ``M`` (sampling then
+    saves nothing, and :meth:`Calculator.compute` is the simpler call), and
+    levels off at ``(c / tolerance) ** 2`` -- 2,500 dyads at the defaults --
+    however large ``M`` is.
+
+    ``c`` depends on the data. It was 0.7-0.9 on the recordings measured for
+    this package (bench/pair_sampling) and up to 1.8 on sparsely coupled
+    systems, so the default errs towards more dyads; the error actually
+    achieved at the default is then usually below ``tolerance``.
+    """
+    M = require_int("n_processes", n_processes, minimum=2)
+    if not (tolerance > 0 and c > 0):
+        raise ValueError("tolerance and c must be positive.")
+    n_dyads = M * (M - 1) // 2
+    return min(n_dyads, math.ceil(1 / ((tolerance / c) ** 2 + 1 / n_dyads)))
+
+
 class Calculator:
     """Compute all pairwise interactions.
 
@@ -664,7 +692,7 @@ class Calculator:
 
         A dict: ``n_processes``; ``n_dyads`` (the census, ``M(M-1)/2``);
         ``n_pairs``; ``source`` (``"sampled"`` from ``seed``, or ``"explicit"``);
-        ``seed`` as given; ``pairs_sha256`` over :attr:`pairs` as little-endian
+        ``seed`` and ``tolerance`` as given; ``pairs_sha256`` over :attr:`pairs` as little-endian
         int64; ``computation_version``; ``n_jobs``; and ``evaluation``, mapping
         each SPI to ``"pairs"`` (evaluated on the sampled pairs only) or
         ``"dense"`` (computed on every process and indexed).
@@ -981,6 +1009,7 @@ class Calculator:
         self,
         n_pairs=None,
         pairs=None,
+        tolerance=None,
         seed=None,
         n_jobs=None,
         checkpoint_dir=None,
@@ -998,10 +1027,13 @@ class Calculator:
 
         Args:
             n_pairs (int, optional): Number of dyads to draw with
-                :func:`sample_dyads`. Give this or ``pairs``, not both.
+                :func:`sample_dyads`. Give exactly one of this, ``pairs`` and
+                ``tolerance``.
             pairs (array_like, optional): Explicit ``(b, 2)`` dyads. Each row is
                 stored with its smaller index first; repeats are rejected.
-            seed (optional): Seed for drawing ``n_pairs`` dyads, as accepted by
+            tolerance (float, optional): Draw :func:`pair_budget` dyads for
+                this accuracy instead of a stated number.
+            seed (optional): Seed for the draw, as accepted by
                 :func:`numpy.random.default_rng`. It selects pairs only.
             n_jobs, checkpoint_dir, resume, retry_failed, mp_context, progress:
                 As for :meth:`compute`. A checkpoint directory belongs to one
@@ -1025,14 +1057,16 @@ class Calculator:
                 "Dataset not loaded yet. Please initialise with load_dataset."
             )
         M = self.dataset.n_processes
-        if (n_pairs is None) == (pairs is None):
-            raise ValueError("Give exactly one of n_pairs and pairs.")
+        if sum(arg is not None for arg in (n_pairs, pairs, tolerance)) != 1:
+            raise ValueError("Give exactly one of n_pairs, pairs and tolerance.")
         source = "sampled" if pairs is None else "explicit"
         if pairs is None:
+            if tolerance is not None:
+                n_pairs = pair_budget(M, tolerance)
             pairs = sample_dyads(M, n_pairs, seed)
         else:
             if seed is not None:
-                raise ValueError("seed only applies when n_pairs is given.")
+                raise ValueError("seed only applies when pairs are drawn.")
             given = np.asarray(pairs)
             if (given.ndim != 2 or given.shape[1] != 2 or not len(given)
                     or not np.issubdtype(given.dtype, np.integer)):
@@ -1102,6 +1136,7 @@ class Calculator:
             "n_pairs": len(pairs),
             "source": source,
             "seed": seed,
+            "tolerance": tolerance,
             "pairs_sha256": pairs_sha256,
             "computation_version": _parallel.COMPUTATION_VERSION,
             "n_jobs": max(1, int(n_jobs)),

@@ -919,6 +919,13 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
 
         self.identifier = self.identifier + paramstr
 
+    @property
+    def _pair_local(self):
+        # The nonparametric estimate factorises each pair's 2x2 cross-spectrum
+        # on its own, so compute_pairs() asks for the sampled pairs only (see
+        # multivariate_pairs). The parametric fit is made on every process.
+        return "matrix" if self._method == "nonparametric" else None
+
     def _getkey(self):
         # fs is passed to the spectral transform, so it must key the cache.
         # Without it, reusing one Data at another sampling frequency returned
@@ -996,6 +1003,43 @@ class SpectralGrangerCausality(NonparametricSpectralMultivariate, Directed, Unsi
                 data.spectral_gc = {key: {"freq": freq, "F": F}}
 
         return F, freq
+
+    def multivariate_pairs(self, data, pairs):
+        """``multivariate(data)`` at the dyads in ``pairs``, NaN everywhere else.
+
+        The backend's pairwise prediction loops over all ``M(M-1)/2`` pairs,
+        one spectral factorisation each; its own routine is called here with
+        the sampled pairs instead, on the same cross-spectral matrix, so each
+        entry is the one the full matrix holds.
+        """
+        from spectral_connectivity.connectivity import (
+            _estimate_spectral_granger_prediction)
+
+        lo, hi = np.asarray(pairs).T
+        # The backend indexes [target, source]; both directions of each dyad.
+        targets, sources = np.r_[lo, hi], np.r_[hi, lo]
+        key = self._getkey() + (np.asarray(pairs).tobytes(),)
+        try:
+            block, freq = data.spectral_gc[key]
+        except (AttributeError, KeyError):
+            z = _ensure_time_series_3d(np.transpose(data.to_numpy(squeeze=True)))
+            conn = sc.Connectivity.from_multitaper(
+                sc.Multitaper(z, sampling_frequency=self._fs))
+            with _surface_backend_log_warnings():
+                F = np.asarray(_estimate_spectral_granger_prediction(
+                    conn._power, conn._expectation_cross_spectral_matrix(),
+                    list(zip(lo.tolist(), hi.tolist()))))
+            block, freq = F[0][:, targets, sources], conn.frequencies
+            if not hasattr(data, "spectral_gc"):
+                data.spectral_gc = {}
+            data.spectral_gc[key] = block, freq
+
+        band = block[(freq >= self._fmin) & (freq <= self._fmax)]
+        values = self._statfn(band, axis=0)
+        values[np.isnan(band).mean(axis=0) > self.nan_threshold] = np.nan
+        result = np.full((data.n_processes, data.n_processes), np.nan)
+        result[sources, targets] = values
+        return result
 
     @parse_multivariate
     def multivariate(self, data):
