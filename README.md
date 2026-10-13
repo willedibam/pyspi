@@ -176,12 +176,17 @@ calc.pairs, calc.sampling                               # which pairs, and how e
 calc.save("recording.npz")                              # either kind; load_table() returns the pairs in .attrs
 ```
 
-**Workers.** SPIs that share a cached intermediate form one task and stay on one
-worker, so the longest task bounds the speed-up. On one *M*=64, *T*=1000
-recording with `benchmarked_p90`: 40, 11 and 6 minutes on 1, 4 and 8 workers,
-and 2.7, 5.1 and 5.9 GiB. Each worker pins its BLAS/OpenMP pools to one thread
-(macOS Accelerate cannot be pinned; prefer `n_jobs=1` there). `PYSPI_N_JOBS`
-sets `n_jobs` from the environment.
+**Workers.** An SPI that is a loop over process pairs has its pairs shared
+between the workers, so it runs `k` times faster on `k` of them; these are a
+third of `benchmarked_p90` and most of its time. An SPI fitted on every process
+at once stays on one worker, together with the SPIs that share its fit, and the
+longest of those bounds the speed-up. On one *M*=64, *T*=1000 recording with
+`benchmarked_p90`: 41, 10, 5.0, 2.6 and 1.3 minutes on 1, 4, 8, 16 and 48
+workers, and 4, 4, 5, 7 and 14 GiB. Every worker compiles the numerical kernels
+it uses, about 30 s each on a cold cache (less with `NUMBA_CACHE_DIR` on storage
+that persists), so a short run gains less than a long one. Each worker pins its
+BLAS/OpenMP pools to one thread (macOS Accelerate cannot be pinned; prefer
+`n_jobs=1` there). `PYSPI_N_JOBS` sets `n_jobs` from the environment.
 
 **Sampled pairs.** `compute_pairs` evaluates every SPI on the same sample of
 unordered process pairs, both directions of each. The result is the usual
@@ -193,9 +198,10 @@ however large *M* is; `n_pairs=` or `pairs=` state the sample directly. For
 small *M* the budget is nearly every pair and `compute()` is the simpler call.
 SPIs that are fitted on all processes at once (covariance and precision
 estimators, most spectral measures) are still computed in full and read off, so
-their cost and memory do not shrink. On one *M*=243, *T*=1000 recording, 1,000
-of 29,403 pairs took 52, 9 and 5 minutes on 1, 4 and 8 workers and 20-42 GiB,
-against 19 hours for the full table.
+their cost and memory do not shrink, and they bound a sampled run on many
+workers. On one *M*=243, *T*=1000 recording, 1,000 of 29,403 pairs took 52, 9, 5
+and 3.6 minutes on 1, 4, 8 and 16 workers and 20-72 GiB, against 19 hours for
+the full table on one worker.
 
 **Memory.** Request memory per dataset, not per core: allow the parent plus
 `k` times the largest worker until you have measured it, and keep the datasets

@@ -19,7 +19,9 @@ source /scratch/ql44/we2614/mts-spi-study/environments/mts-spi-v3-631de27/bin/ac
 # The snapshot's pyspi, ahead of the environment's editable install.
 export PYTHONPATH="$SOURCE"
 export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-export PYTHONDONTWRITEBYTECODE=1 NUMBA_CACHE_DIR="$PBS_JOBFS/numba-cache"
+# NUMBA_CACHE=<dir> keeps compiled kernels between jobs; the default is a cold
+# cache, which every worker then fills for itself.
+export PYTHONDONTWRITEBYTECODE=1 NUMBA_CACHE_DIR="${NUMBA_CACHE:-$PBS_JOBFS/numba-cache}"
 mkdir -p "$OUT"
 exec >"$OUT/job.log" 2>&1
 python -c 'import pyspi, pyspi._parallel as p; print(pyspi.__file__, p.COMPUTATION_VERSION, flush=True)'

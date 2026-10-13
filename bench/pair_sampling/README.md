@@ -120,6 +120,43 @@ and before nonparametric spectral Granger causality was sampled.
   with four cores each were bound to four distinct cores apiece and took
   12.4 min each, against 10.8 min for one alone on another node.
 
+## Pairs shared between workers
+
+`results/gadi-split/`, the same recordings and scripts on computation r9 with
+`split_pairs` (the default): an SPI that is a loop over pairs has its pairs cut
+into one piece per worker. One PBS job per row, Cascade Lake, forked workers.
+"Cold" is a compile cache that starts empty in every job (`gadi_smoke.pbs`'s
+default); "warm" is `NUMBA_CACHE=<dir>` filled by an earlier job.
+
+| M=64, full table | wall, cold | wall, warm | job memory, warm | summed SPI time, warm |
+|---|---:|---:|---:|---:|
+| 1 worker | 40.6 min | | 4.1 GiB | 2,436 s |
+| 2 | 19.2 min | | 4.5 GiB | 2,302 s |
+| 4 | 10.1 min | 10.0 min (4.1x) | 4.0 GiB | 2,385 s |
+| 8 | 5.8 min | 5.0 min (8.1x) | 5.0 GiB | 2,385 s |
+| 16 | 3.5 min | 2.6 min (15.6x) | 7.3 GiB | 2,488 s |
+| 16, `split_pairs=False` | 5.1 min | | 6.2 GiB | 2,450 s |
+| 32 | 1.9 min | 1.6 min (25.7x) | 11.3 GiB | 3,007 s |
+| 48 | 1.5 min | 1.3 min (31.4x) | 13.6 GiB | 3,151 s |
+
+- All fourteen M=64 tables, the serial one included, are the same file
+  (`values_sha256` in `summary.json`, which also holds each run's wall time,
+  summed SPI time and PBS memory).
+- Single runs on different nodes: a speed-up above the worker count (8.1x on
+  8) is a difference between nodes.
+- Unsplit, the run stops gaining at eight workers (5.9 min in the runs above,
+  5.1 on 16): the DTW barycenter task alone is five minutes. Split, the longest task
+  left is the spectral Granger group at 76 s, which is what 48 workers reach.
+- The cold runs spend about 30 s per worker compiling: summed over workers,
+  `dcorr` rises from 109 s to 1,077 s on 48 and `bary_dtw_mean` from 308 s to
+  859 s, and no other SPI moves. hyppo's kernels are cached on disk, so a warm
+  cache removes the first; tslearn's are not, so each worker still compiles
+  them. This is a fixed cost per worker and matters less the longer the run.
+- M=243, 1,000 dyads: 3.6 min on 16 workers and on 48 (4.8 on 8, unsplit),
+  72 and 81 GiB. The bound is the spectral Granger group, 218 s, of which 182 s
+  is three parametric SPIs fitted on every channel; sampled runs have little
+  pair-loop work left to share.
+
 ## Projected large-M cost (superseded where measured)
 
 Written before the Gadi runs above. At M=243 it predicted 1.1 h for 1,000
