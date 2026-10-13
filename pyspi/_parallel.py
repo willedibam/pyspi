@@ -7,6 +7,9 @@ Design:
   becomes one task assigned to a single worker, so a cache populated lazily on
   the Data object (e.g. data.spectral_bv, data.covariance) is reused across
   every variant in that bucket. SPIs without a tag run as single-SPI tasks.
+- A task whose SPIs are all plain loops over ``bivariate`` is shared out: its
+  pairs are cut into one piece per worker and the pieces are put together in
+  the parent (``plan_pieces``, ``_SplitSPI``). Every other task stays whole.
 - Per-SPI failures yield a NaN matrix; the rest of the run continues.
 - If ``checkpoint_dir`` is set, each finished SPI is atomically written to
   ``<dir>/<identifier>.npy`` (and ``<identifier>.error`` on failure). A
@@ -289,6 +292,27 @@ def _run_task(spi_keys, checkpoint_dir, pairs=None):
     return out
 
 
+def _run_piece(spi_keys, pairs):
+    """One worker's share of a split task: these SPIs on these dyads.
+
+    Nothing is judged, written or announced here. The parent does all three
+    once every piece of an SPI is in (see ``_SplitSPI``).
+    """
+    data = _WORKER_STATE["data"]
+    spis = _WORKER_STATE["spis"]
+    return [(key, *run_spi_pairs(spis[key], data, key, pairs, complete=False))
+            for key in spi_keys]
+
+
+def _require_finite(values, what):
+    """Raise unless ``values`` is a usable result: no infinity, something finite."""
+    if values.size:
+        if np.isinf(values).any():
+            raise ValueError("SPI returned infinite value(s)")
+        if not np.isfinite(values).any():
+            raise ValueError(f"SPI returned no finite {what}")
+
+
 def run_spi(spi, data, key, M):
     """Compute one SPI, validate it, and capture failures and warnings.
 
@@ -322,12 +346,7 @@ def run_spi(spi, data, key, M):
             raise ValueError(f"SPI returned shape {S.shape}, expected ({M},{M})")
         np.fill_diagonal(S, np.nan)
 
-        offdiag = S[~np.eye(M, dtype=bool)]
-        if offdiag.size:
-            if np.isinf(offdiag).any():
-                raise ValueError("SPI returned infinite value(s)")
-            if not np.isfinite(offdiag).any():
-                raise ValueError("SPI returned no finite off-diagonal values")
+        _require_finite(S[~np.eye(M, dtype=bool)], "off-diagonal values")
     except Exception as e:
         S = np.full((M, M), np.nan)
         err = f"{type(e).__name__}: {e}"
@@ -360,7 +379,24 @@ def _dense_loop(spi):
     return getattr(spi, "_pair_local", None)
 
 
-def run_spi_pairs(spi, data, key, pairs):
+def is_pair_loop(spi) -> bool:
+    """Whether this SPI's dense matrix is a Python loop over ``bivariate``.
+
+    The inherited all-pairs loop, or a class's own loop marked ``"retained"``.
+    Each entry is then the ``bivariate`` call for its pair and nothing else,
+    which ``run_spi_pairs`` replays bit for bit on any subset of the pairs, so
+    several workers can each take some of them. A vectorised ``multivariate``
+    is left out even where ``bivariate`` reproduces it: only to rounding, and
+    at a higher cost per pair.
+    """
+    from pyspi.base import Directed, Undirected
+
+    mv = type(spi).multivariate
+    return (mv is Directed.multivariate or mv is Undirected.multivariate
+            or getattr(spi, "_pair_local", None) == "retained")
+
+
+def run_spi_pairs(spi, data, key, pairs, complete=True):
     """Compute one SPI on sampled dyads only; the counterpart of ``run_spi``.
 
     ``pairs`` is a ``(b, 2)`` integer array of dyads ``(i, j)`` with ``i < j``.
@@ -380,6 +416,10 @@ def run_spi_pairs(spi, data, key, pairs):
     no finite value at all. An SPI can therefore fail here on a sample that
     happens to miss its only finite entries, and pass here when its only
     infinities lie outside the sample.
+
+    ``complete=False`` says ``pairs`` is one piece of a result that is put
+    together elsewhere (see ``_SplitSPI``): the values are returned as they
+    are, and whether they are usable is decided on the whole.
     """
     t0 = time.perf_counter()
     err = None
@@ -423,10 +463,8 @@ def run_spi_pairs(spi, data, key, pairs):
                         V[e, :] = value
         warns = [f"{w.category.__name__}: {w.message}" for w in caught]
 
-        if np.isinf(V).any():
-            raise ValueError("SPI returned infinite value(s)")
-        if not np.isfinite(V).any():
-            raise ValueError("SPI returned no finite value on the sampled pairs")
+        if complete:
+            _require_finite(V, "value on the sampled pairs")
     except Exception as e:
         V = np.full((b, 2), np.nan)
         err = f"{type(e).__name__}: {e}"
@@ -533,6 +571,78 @@ def build_tasks(spi_keys, spis) -> list[list[str]]:
     grouped_tasks = [keys for _, keys in
                      sorted(grouped.items(), key=cost, reverse=True)]
     return grouped_tasks + cacheless
+
+
+def all_dyads(M: int) -> np.ndarray:
+    """Every dyad ``(i, j)`` with ``i < j``, by ``j`` then ``i``: shape ``(M(M-1)/2, 2)``."""
+    hi, lo = np.nonzero(np.tri(M, k=-1, dtype=bool))
+    return np.column_stack([lo, hi]).astype(np.intp)
+
+
+def plan_pieces(tasks, spis, n_jobs: int, n_pairs: int):
+    """Decide which tasks are shared between workers, and how.
+
+    Returns ``(whole, split, pieces)``. A task in ``whole`` is computed by one
+    worker, as before. A task in ``split`` consists only of pair loops (see
+    ``is_pair_loop``), so its pairs are cut into ``pieces``: one contiguous
+    ``(start, stop)`` range of the pair list per worker, the same ranges for
+    every split task.
+
+    Without this the longest task bounds the run however many workers there
+    are: on one M=64, T=1000 recording the DTW barycenter task alone took as
+    long as the whole ``benchmarked_p90`` run on eight workers.
+    """
+    n_pieces = min(n_jobs, n_pairs)
+    if n_pieces < 2:
+        return list(tasks), [], []
+    whole, split = [], []
+    for keys in tasks:
+        (split if all(is_pair_loop(spis[key]) for key in keys) else whole).append(keys)
+    bounds = np.linspace(0, n_pairs, n_pieces + 1).astype(int)
+    return whole, split, list(zip(bounds[:-1].tolist(), bounds[1:].tolist()))
+
+
+class _SplitSPI:
+    """One SPI whose pairs were shared between workers.
+
+    The pieces carry values only. Whether the SPI succeeded is decided here,
+    once, on the whole result, by the rule ``run_spi`` applies to a matrix and
+    ``run_spi_pairs`` to a sample, so the outcome does not depend on how the
+    pairs were divided. A piece that raised fails the SPI, as one raising pair
+    fails the single loop; the error kept is the first piece's.
+    """
+
+    def __init__(self, n_pairs: int, n_pieces: int):
+        self.values = np.empty((n_pairs, 2))
+        self.pieces = [None] * n_pieces
+
+    def add(self, piece, rows, values, err, warns, elapsed) -> bool:
+        """Store one piece; True once every piece is in."""
+        self.values[rows] = values
+        self.pieces[piece] = (err, warns, elapsed)
+        return all(p is not None for p in self.pieces)
+
+    def result(self, pairs, M, dense):
+        """``(values, err, warns, elapsed)`` as ``run_spi`` (``dense``) or
+        ``run_spi_pairs`` returns them; ``elapsed`` is summed over the pieces."""
+        err = next((e for e, _, _ in self.pieces if e is not None), None)
+        warns = [w for _, piece_warns, _ in self.pieces for w in piece_warns]
+        elapsed = sum(t for _, _, t in self.pieces)
+        out = self.values
+        if err is None:
+            try:
+                if dense:
+                    out = np.full((M, M), np.nan)
+                    out[pairs[:, 0], pairs[:, 1]] = self.values[:, 0]
+                    out[pairs[:, 1], pairs[:, 0]] = self.values[:, 1]
+                    _require_finite(out[~np.eye(M, dtype=bool)], "off-diagonal values")
+                else:
+                    _require_finite(out, "value on the sampled pairs")
+            except ValueError as e:
+                err = f"{type(e).__name__}: {e}"
+        if err is not None:
+            out = np.full((M, M) if dense else self.values.shape, np.nan)
+        return out, err, warns, elapsed
 
 
 MANIFEST_NAME = "run.json"
@@ -678,11 +788,16 @@ def run_parallel(
     configfile: str,
     config_bytes: bytes | None = None,
     pairs: np.ndarray | None = None,
+    split_pairs: bool = True,
 ) -> dict:
-    """Execute ``spi_keys`` across ``n_jobs`` workers; return dict[key] -> (S, err, elapsed).
+    """Execute ``spi_keys`` across ``n_jobs`` workers; return dict[key] -> (S, err, warns, elapsed).
 
     With ``pairs`` each result is the ``(len(pairs), 2)`` array of
     ``run_spi_pairs`` rather than an ``(M, M)`` matrix.
+
+    ``split_pairs`` shares the pairs of pair-loop SPIs between the workers
+    (``plan_pieces``); ``False`` gives every task to one worker. The results
+    are the same either way.
     """
     from tqdm import tqdm
 
@@ -693,9 +808,16 @@ def run_parallel(
 
     arr = np.ascontiguousarray(dataset._data)
     M = arr.shape[0]
-    tasks = build_tasks(spi_keys, spis)
     cp_str = str(checkpoint_dir) if checkpoint_dir is not None else None
-    failed_shape = (M, M) if pairs is None else (len(pairs), 2)
+    dense = pairs is None
+    failed_shape = (M, M) if dense else (len(pairs), 2)
+    # The pairs a split SPI is spread over: all of them, or the sample.
+    spread = all_dyads(M) if dense else pairs
+    whole, split, pieces = plan_pieces(
+        build_tasks(spi_keys, spis), spis, n_jobs if split_pairs else 1, len(spread))
+    assembling = {key: _SplitSPI(len(spread), len(pieces))
+                  for keys in split for key in keys}
+    n_workers = min(n_jobs, len(whole) + len(split) * len(pieces))
 
     # Create resources inside the try so a failure constructing either one
     # (e.g. mp.Manager() raising) still runs the cleanup in finally.
@@ -712,7 +834,7 @@ def run_parallel(
         results: dict = {}
         pbar = tqdm(total=len(spi_keys), desc="SPIs", disable=not progress)
         with cf.ProcessPoolExecutor(
-            max_workers=n_jobs,
+            max_workers=n_workers,
             mp_context=ctx,
             initializer=_worker_init,
             initargs=(
@@ -721,9 +843,15 @@ def run_parallel(
                 configfile, progress_q, config_bytes,
             ),
         ) as ex:
-            future_to_task = {ex.submit(_run_task, task, cp_str, pairs): task
-                              for task in tasks}
-            pending = set(future_to_task)
+            # Whole tasks first: one of them may be the longest thing left,
+            # and the pieces are small enough to fill in around them.
+            submitted = {ex.submit(_run_task, keys, cp_str, pairs): (keys, None)
+                         for keys in whole}
+            for keys in split:
+                for piece, (start, stop) in enumerate(pieces):
+                    future = ex.submit(_run_piece, keys, spread[start:stop])
+                    submitted[future] = (keys, piece)
+            pending = set(submitted)
             while pending:
                 # Per-SPI progress ticks (cosmetic; bar stalls on a stuck SPI).
                 while True:
@@ -736,16 +864,21 @@ def run_parallel(
                 # Harvest finished futures (source of truth for results).
                 done = {f for f in pending if f.done()}
                 for fut in done:
-                    task = future_to_task[fut]
+                    keys, piece = submitted[fut]
                     try:
-                        for key, S, err, warns, elapsed in fut.result():
-                            results[key] = (S, err, warns, elapsed)
+                        finished = fut.result()
                     except Exception as exc:  # worker process died (segfault/OOM)
-                        for key in task:
-                            results.setdefault(
-                                key,
-                                (np.full(failed_shape, np.nan), f"worker died: {exc}", [], 0.0),
-                            )
+                        lost = failed_shape if piece is None else (np.diff(pieces[piece])[0], 2)
+                        finished = [(key, np.full(lost, np.nan), f"worker died: {exc}", [], 0.0)
+                                    for key in keys if key not in results]
+                    for key, S, err, warns, elapsed in finished:
+                        if piece is None:
+                            results[key] = (S, err, warns, elapsed)
+                        elif assembling[key].add(piece, slice(*pieces[piece]),
+                                                 S, err, warns, elapsed):
+                            results[key] = assembling.pop(key).result(spread, M, dense)
+                            write_checkpoint(cp_str, key, *results[key][:2])
+                            pbar.update(1)
                 pending -= done
                 if pending:
                     time.sleep(0.05)

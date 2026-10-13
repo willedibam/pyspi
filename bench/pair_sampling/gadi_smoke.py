@@ -33,6 +33,8 @@ def main():
     parser.add_argument("--n-pairs", type=int, default=0)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n-jobs", type=int, default=1)
+    parser.add_argument("--no-split", action="store_true",
+                        help="one worker per SPI, as before pairs were shared")
     parser.add_argument("--config", default="benchmarked_p90")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
@@ -53,10 +55,10 @@ def main():
     calc = Calculator(dataset=series.T, config=args.config, zscore=False, verbose=False)
     start = time.perf_counter()
     if args.n_pairs:
-        values = calc.compute_pairs(n_pairs=args.n_pairs, seed=args.seed,
-                                    n_jobs=args.n_jobs, progress=False)
+        values = calc.compute_pairs(n_pairs=args.n_pairs, seed=args.seed, n_jobs=args.n_jobs,
+                                    progress=False, split_pairs=not args.no_split)
     else:
-        calc.compute(n_jobs=args.n_jobs, progress=False)
+        calc.compute(n_jobs=args.n_jobs, progress=False, split_pairs=not args.no_split)
         values = np.stack([calc.table[key].to_numpy(dtype=float) for key in calc.spis])
     wall = time.perf_counter() - start
 
@@ -70,7 +72,7 @@ def main():
         "member": args.member, "M": M, "T": T, "config": args.config,
         "mode": "sampled" if args.n_pairs else "dense",
         "n_dyads": M * (M - 1) // 2, "n_pairs": args.n_pairs or None, "seed": args.seed,
-        "n_jobs": args.n_jobs, "wall_seconds": wall,
+        "n_jobs": args.n_jobs, "split_pairs": not args.no_split, "wall_seconds": wall,
         "spi_seconds": sum(calc.timings.values()),
         "timings": calc.timings, "errors": calc.errors, "spis": list(calc.spis),
         "sampling": calc.sampling,

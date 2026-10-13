@@ -292,6 +292,212 @@ def test_build_tasks_starts_with_the_expensive_buckets():
     assert tasks[0][0].startswith("ccm_"), f"first task is {tasks[0][0]}"
 
 
+# --------------------------------------------------------------------------
+# Pairs shared between workers
+# --------------------------------------------------------------------------
+
+SPLIT_CONFIG = Path(__file__).parent / "split_test_config.yaml"
+FIXTURE = Path(__file__).parent / "data" / "fixtures" / "kuramoto_M7_T100.npy"
+
+
+def _in_pieces(spis, keys, pieces, order, pairs, M, dense=True):
+    """What ``run_parallel`` assembles for split SPIs, without a pool.
+
+    Every piece gets a ``Data`` of its own, so no cache is carried from one
+    piece to the next, as none is between two workers.
+    """
+    from pyspi._parallel import _SplitSPI, run_spi_pairs
+    from pyspi.data import Data
+
+    assembling = {key: _SplitSPI(len(pairs), len(pieces)) for key in keys}
+    results = {}
+    for piece in order:
+        data = Data(data=str(FIXTURE), dim_order="sp")
+        rows = slice(*pieces[piece])
+        for key in keys:
+            part = run_spi_pairs(spis[key], data, key, pairs[rows], complete=False)
+            if assembling[key].add(piece, rows, *part):
+                results[key] = assembling[key].result(pairs, M, dense)
+    return results
+
+
+def test_plan_pieces_shares_only_pair_loops():
+    """A task is split only if every SPI in it is a loop over ``bivariate``."""
+    from pyspi._parallel import all_dyads, build_tasks, is_pair_loop, plan_pieces
+    from pyspi.calculator import load_spis_from_yaml, resolve_config
+
+    spis = load_spis_from_yaml(resolve_config("benchmarked_p90"), quiet=True)
+    tasks = build_tasks(list(spis), spis)
+    n_pairs = len(all_dyads(7))
+    assert n_pairs == 21
+
+    whole, split, pieces = plan_pieces(tasks, spis, n_jobs=4, n_pairs=n_pairs)
+    assert sorted(k for t in whole + split for k in t) == sorted(spis)
+    assert all(is_pair_loop(spis[k]) for t in split for k in t)
+    assert not any(all(is_pair_loop(spis[k]) for k in t) for t in whole)
+    in_split = {k for t in split for k in t}
+    assert {"bary_dtw_mean", "dcorr", "cds"} <= in_split
+    # Vectorised, and fitted on every process at once: never split.
+    assert not {"dtw", "spearmanr", "cov_EmpiricalCovariance"} & in_split
+
+    # The pieces are one contiguous, non-empty range each and cover every pair.
+    assert len(pieces) == 4
+    assert pieces[0][0] == 0 and pieces[-1][1] == n_pairs
+    assert all(a < b for a, b in pieces)
+    assert all(pieces[i][1] == pieces[i + 1][0] for i in range(3))
+
+    # More workers than pairs: one pair each. One worker, or one pair: no split.
+    assert plan_pieces(tasks, spis, n_jobs=64, n_pairs=n_pairs)[2] == [
+        (i, i + 1) for i in range(n_pairs)]
+    assert plan_pieces(tasks, spis, n_jobs=1, n_pairs=n_pairs) == (tasks, [], [])
+    assert plan_pieces(tasks, spis, n_jobs=4, n_pairs=1) == (tasks, [], [])
+
+
+@pytest.mark.parametrize("scheme", ["one pair each, backwards", "four pieces, shuffled"])
+def test_every_pair_loop_spi_is_the_same_in_pieces(scheme):
+    """Each pair-loop SPI in ``full``: the matrix put together from pieces is the
+    matrix one loop gives, bit for bit. (Failures: the next test.)
+
+    This is what lets workers share an SPI's pairs. It fails for an SPI whose
+    value on a pair depends on which pairs were computed before it.
+    """
+    from pyspi._parallel import all_dyads, is_pair_loop, plan_pieces, run_spi
+    from pyspi.calculator import load_spis_from_yaml, resolve_config
+    from pyspi.data import Data
+
+    spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+    keys = [key for key, spi in spis.items() if is_pair_loop(spi)]
+    assert len(keys) > 100
+
+    data = Data(data=str(FIXTURE), dim_order="sp")
+    M = data.n_processes
+    pairs = all_dyads(M)
+    with np.errstate(all="ignore"):
+        whole = {key: run_spi(spis[key], data, key, M) for key in keys}
+
+        # A second set of instances, as the workers have their own.
+        spis = load_spis_from_yaml(resolve_config("full"), quiet=True)
+        if scheme.startswith("one pair"):
+            pieces = [(i, i + 1) for i in range(len(pairs))]
+            order = range(len(pieces))[::-1]
+        else:
+            pieces = plan_pieces([keys], spis, n_jobs=4, n_pairs=len(pairs))[2]
+            order = np.random.default_rng(0).permutation(len(pieces))
+        split = _in_pieces(spis, keys, pieces, order, pairs, M)
+
+    for key in keys:
+        assert split[key][1] == whole[key][1], key
+        assert np.array_equal(split[key][0], whole[key][0], equal_nan=True), key
+
+
+@pytest.mark.parametrize("name,error", [
+    ("FiniteOnOnePair", None),
+    ("InfiniteOnOnePair", "ValueError: SPI returned infinite value(s)"),
+    ("RaisesOnOnePair", "RuntimeError: deliberate failure on one pair"),
+    ("NeverFinite", "ValueError: SPI returned no finite off-diagonal values"),
+    ("AlwaysRaises", "RuntimeError: deliberate test failure"),
+])
+def test_a_split_spi_is_judged_whole(name, error, monkeypatch):
+    """Pieces carry values; success is decided once, on the assembled result.
+
+    A piece with nothing finite in it is not a failure, an infinity in one
+    piece fails the SPI, and so does one pair that raises: the outcomes of one
+    loop over every pair.
+    """
+    monkeypatch.syspath_prepend(str(Path(__file__).parent))
+    import failing_spis
+    from pyspi._parallel import all_dyads, run_spi, run_spi_pairs
+    from pyspi.data import Data
+
+    spi = getattr(failing_spis, name)()
+    data = Data(data=str(FIXTURE), dim_order="sp")
+    M = data.n_processes
+    pairs = all_dyads(M)
+    S, err, _, _ = run_spi(spi, data, name, M)
+    assert err == error
+
+    for pieces in ([(i, i + 1) for i in range(len(pairs))], [(0, 5), (5, 6), (6, 21)]):
+        out, split_err, _, _ = _in_pieces(
+            {name: spi}, [name], pieces, range(len(pieces)), pairs, M)[name]
+        assert split_err == error
+        assert np.array_equal(out, S, equal_nan=True)
+
+    # A sample is judged by the rule for samples.
+    sample = pairs[[0, 3, 7, 11, 20]]
+    V, err, _, _ = run_spi_pairs(spi, data, name, sample)
+    out, split_err, _, _ = _in_pieces(
+        {name: spi}, [name], [(0, 2), (2, 5)], [1, 0], sample, M, dense=False)[name]
+    assert split_err == err
+    assert np.array_equal(out, V, equal_nan=True)
+
+
+@pytest.mark.parametrize("M,n_jobs", [(5, 2), (5, 4), (3, 3)])
+def test_split_table_is_the_serial_table(M, n_jobs, tmp_path):
+    """Through the pool: sharing pairs changes no value, on a full table or a
+    sample, from checkpoints or not, and neither does switching it off."""
+    x = np.random.default_rng(1).standard_normal((M, 200))
+
+    def calculator():
+        return Calculator(dataset=x, config=str(SPLIT_CONFIG), verbose=False)
+
+    def run(**kwargs):
+        calc = calculator()
+        calc.compute(progress=False, **kwargs)
+        return calc
+
+    ref = run(n_jobs=1)
+    assert not ref.errors
+    expected = ref.table.to_numpy(float)
+
+    split = run(n_jobs=n_jobs, mp_context="spawn", checkpoint_dir=tmp_path / "ckpt")
+    assert list(split.table.columns) == list(ref.table.columns)
+    assert np.array_equal(split.table.to_numpy(float), expected, equal_nan=True)
+    assert not split.errors
+    assert set(split.timings) == set(ref.spis)
+
+    # A split SPI is checkpointed whole, in the format a serial run reads.
+    resumed = run(n_jobs=1, checkpoint_dir=tmp_path / "ckpt")
+    assert np.array_equal(resumed.table.to_numpy(float), expected, equal_nan=True)
+    assert all(t == 0.0 for t in resumed.timings.values()), "recomputed, not resumed"
+
+    unsplit = run(n_jobs=n_jobs, mp_context="spawn", split_pairs=False)
+    assert np.array_equal(unsplit.table.to_numpy(float), expected, equal_nan=True)
+
+    if M > 3:
+        one, many = calculator(), calculator()
+        values = one.compute_pairs(n_pairs=6, seed=0, n_jobs=1, progress=False)
+        assert np.array_equal(
+            many.compute_pairs(n_pairs=6, seed=0, n_jobs=n_jobs, mp_context="spawn",
+                               progress=False),
+            values, equal_nan=True)
+        assert many.errors == one.errors
+
+
+@pytest.mark.parametrize("name", ["KillsItsWorker", "KillsItsWorkerWhole"])
+def test_a_dead_worker_fails_its_spi_and_not_the_run(name, tmp_path, monkeypatch):
+    """A worker that dies takes its SPI with it, split between workers or not;
+    ``compute`` still returns, with the loss recorded."""
+    tests_dir = str(Path(__file__).parent)
+    monkeypatch.syspath_prepend(tests_dir)
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join(
+        filter(None, [tests_dir, os.environ.get("PYTHONPATH")])))
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        f"failing_spis:\n  {name}:\n    labels: [test]\n    configs:\n"
+        ".statistics.basic:\n  Covariance:\n    labels: [undirected]\n"
+        "    configs:\n      - estimator: EmpiricalCovariance\n")
+    calc = Calculator(dataset=np.random.default_rng(0).standard_normal((4, 100)),
+                      config=str(config), verbose=False)
+    key = next(k for k in calc.spis if k.startswith("kills_its_worker"))
+
+    with pytest.warns(UserWarning, match="worker died"):
+        calc.compute(n_jobs=2, mp_context="spawn", progress=False)
+
+    assert calc.errors[key].startswith("worker died")
+    assert np.isnan(calc.table[key].to_numpy(float)).all()
+    assert set(calc.table.columns.get_level_values(0)) == set(calc.spis)
+
+
 def test_parallel_run_leaves_the_parent_environment_alone(monkeypatch):
     """The thread pins are for the workers and must not outlive the pool.
 

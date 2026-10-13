@@ -9,6 +9,7 @@
 # that configuration's. Resources come from qsub: -l ncpus=,mem=,walltime=
 #   qsub -v SOURCE=...,ARCHIVE=...,MEMBER=...,N_PAIRS=1000,N_JOBS=4,OUT=... \
 #        -l ncpus=4,mem=128GB,walltime=03:00:00 gadi_smoke.pbs
+# NO_SPLIT=1 gives every SPI to one worker (split_pairs=False).
 set -euo pipefail
 : "${SOURCE:?}" "${ARCHIVE:?}" "${MEMBER:?}" "${N_PAIRS:?}" "${N_JOBS:?}" "${OUT:?}"
 (( N_JOBS <= PBS_NCPUS ))
@@ -23,4 +24,4 @@ mkdir -p "$OUT"
 exec >"$OUT/job.log" 2>&1
 python -c 'import pyspi, pyspi._parallel as p; print(pyspi.__file__, p.COMPUTATION_VERSION, flush=True)'
 python "$SOURCE/bench/pair_sampling/gadi_smoke.py" --archive "$ARCHIVE" --member "$MEMBER" \
-    --n-pairs "$N_PAIRS" --n-jobs "$N_JOBS" --out "$OUT"
+    --n-pairs "$N_PAIRS" --n-jobs "$N_JOBS" --out "$OUT" ${NO_SPLIT:+--no-split}

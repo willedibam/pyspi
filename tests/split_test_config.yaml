@@ -1,0 +1,49 @@
+# Small config for the split-pairs tests in tests/test_parallel.py.
+# Pair loops, whose pairs the workers share between them:
+#  - Barycenter, two statistics of one mode: one cache entry per pair, one task
+#  - DistanceCorrelation: a loop of its own over i < j
+#  - CrossCorrelation: the inherited undirected loop
+#  - ConditionalDistributionSimilarity: the inherited directed loop
+# Never split:
+#  - SpearmanR: vectorised
+#  - Covariance: fitted on every process at once
+.statistics.distance:
+  Barycenter:
+    labels: [undirected, nonlinear, unsigned, bivariate, time-dependent]
+    dependencies:
+    configs:
+      - mode: euclidean
+        statistic: mean
+      - mode: euclidean
+        statistic: max
+
+  DistanceCorrelation:
+    labels: [undirected, nonlinear, unsigned, bivariate, contemporaneous]
+    dependencies:
+    configs:
+      - biased: False
+
+.statistics.basic:
+  CrossCorrelation:
+    labels: [undirected, linear, signed/unsigned, bivariate, time-dependent]
+    dependencies:
+    configs:
+      - statistic: max
+
+  SpearmanR:
+    labels: [undirected, nonlinear, signed, bivariate, contemporaneous]
+    dependencies:
+    configs:
+      - squared: False
+
+  Covariance:
+    labels: [undirected, linear, signed, multivariate, contemporaneous]
+    dependencies:
+    configs:
+      - estimator: EmpiricalCovariance
+
+.statistics.causal:
+  ConditionalDistributionSimilarity:
+    labels: [directed, nonlinear, unsigned, bivariate, contemporaneous]
+    dependencies:
+    configs:

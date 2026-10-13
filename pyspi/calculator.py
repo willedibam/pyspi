@@ -918,6 +918,7 @@ class Calculator:
         retry_failed=True,
         mp_context=None,
         progress=True,
+        split_pairs=True,
     ):
         """Compute every SPI on the loaded dataset.
 
@@ -939,6 +940,15 @@ class Calculator:
                 inherit imported state via copy-on-write — ~2x faster startup),
                 ``"spawn"`` on macOS/Windows (fork is unsafe/absent there).
             progress (bool): Show a tqdm progress bar (default True).
+            split_pairs (bool): With ``n_jobs>1``, share the process pairs of
+                each SPI that is a loop over pairs between the workers
+                (default True). Otherwise one worker computes a whole SPI, and
+                the slowest SPI bounds the run however many workers there are.
+                The table is the same either way. It relies on each pair's
+                value not depending on which other pairs were computed before
+                it, which holds for every SPI in pyspi; pass False for an SPI
+                of your own that keeps state between pairs. A split SPI's
+                entry in :attr:`timings` is its time summed over the workers.
 
         Backend threading: when ``n_jobs>1`` each worker pins its nested pools
         (OpenMP/OpenBLAS/MKL, pyEDM) to one thread/process so the
@@ -985,16 +995,16 @@ class Calculator:
         if n_jobs <= 1:
             self._compute_serial(spi_keys, M, cp_dir, progress)
         else:
-            n_workers = min(int(n_jobs), len(spi_keys))
             ctx = mp_context or _parallel.default_mp_context()
-            logger.info("Parallel compute: %d SPI(s) via %d workers (mp=%s)",
-                        len(spi_keys), n_workers, ctx)
+            logger.info("Parallel compute: %d SPI(s) via up to %d workers (mp=%s)",
+                        len(spi_keys), n_jobs, ctx)
             results = _parallel.run_parallel(
                 self._spis, self._dataset, spi_keys,
-                n_jobs=n_workers, mp_context=ctx,
+                n_jobs=n_jobs, mp_context=ctx,
                 checkpoint_dir=cp_dir, progress=progress,
                 configfile=self._configfile,
                 config_bytes=self._config_bytes,
+                split_pairs=split_pairs,
             )
             for key, (S, err, warns, elapsed) in results.items():
                 self._record(key, S, err, warns, elapsed)
@@ -1039,6 +1049,7 @@ class Calculator:
         retry_failed=True,
         mp_context=None,
         progress=True,
+        split_pairs=True,
     ):
         """Compute every SPI on a sample of process pairs instead of all of them.
 
@@ -1060,7 +1071,8 @@ class Calculator:
                 this accuracy instead of a stated number.
             seed (optional): Seed for the draw, as accepted by
                 :func:`numpy.random.default_rng`. It selects pairs only.
-            n_jobs, checkpoint_dir, resume, retry_failed, mp_context, progress:
+            n_jobs, checkpoint_dir, resume, retry_failed, mp_context, progress,
+            split_pairs:
                 As for :meth:`compute`. A checkpoint directory belongs to one
                 set of dyads in one order: it is refused by :meth:`compute`,
                 and by ``compute_pairs`` on any other sample.
@@ -1139,17 +1151,17 @@ class Calculator:
                 )
                 _parallel.write_checkpoint(cp_dir, key, *results[key][:2])
         elif todo:
-            n_workers = min(int(n_jobs), len(todo))
             ctx = mp_context or _parallel.default_mp_context()
-            logger.info("Parallel compute: %d SPI(s) on %d pair(s) via %d workers (mp=%s)",
-                        len(todo), len(pairs), n_workers, ctx)
+            logger.info("Parallel compute: %d SPI(s) on %d pair(s) via up to %d workers (mp=%s)",
+                        len(todo), len(pairs), n_jobs, ctx)
             results.update(_parallel.run_parallel(
                 self._spis, self._dataset, todo,
-                n_jobs=n_workers, mp_context=ctx,
+                n_jobs=n_jobs, mp_context=ctx,
                 checkpoint_dir=cp_dir, progress=progress,
                 configfile=self._configfile,
                 config_bytes=self._config_bytes,
                 pairs=pairs,
+                split_pairs=split_pairs,
             ))
 
         self._pairs = pairs
@@ -1506,10 +1518,9 @@ class CalculatorFrame:
         ``frame.compute(n_jobs=4)`` parallelises *within* each dataset.
 
         Note that for many datasets on many cores, running one dataset per
-        process (e.g. a scheduler array job) beats ``n_jobs>1`` here: SPIs
-        sharing a cache run serially inside a single worker, which floors the
-        achievable speedup at roughly 2-4x irrespective of ``n_jobs``. See
-        "Running at scale" in the README.
+        process (e.g. a scheduler array job) beats ``n_jobs>1`` here: workers
+        add a few percent of overhead and the SPIs fitted on every process at
+        once are not shared between them. See "Running at scale" in the README.
         """
         if not hasattr(self, "_calculators"):
             raise AttributeError("No calculators in frame yet. Initialise before computing.")
