@@ -53,6 +53,15 @@ def main(argv=None) -> int:
     cp.add_argument("--n-jobs", type=int, default=None,
                     help="Worker process count. 1 = serial, -1 = all available cores. "
                          "Default: the PYSPI_N_JOBS environment variable, else 1.")
+    sampled = cp.add_mutually_exclusive_group()
+    sampled.add_argument("--tolerance", type=float, default=None,
+                         help="Compute a sample of process pairs sized for this "
+                              "accuracy (e.g. 0.03) instead of every pair; for "
+                              "large M. Unsampled entries are NaN in the output.")
+    sampled.add_argument("--n-pairs", type=int, default=None,
+                         help="Compute this many sampled process pairs.")
+    cp.add_argument("--pair-seed", type=int, default=0,
+                    help="Seed for the pair sample (default 0).")
     cp.add_argument("--checkpoint-dir", type=Path, default=None,
                     help="Directory for per-SPI .npy checkpoints. Enables resume.")
     cp.add_argument("--no-resume", action="store_true",
@@ -97,12 +106,13 @@ def main(argv=None) -> int:
         zscore=not args.no_zscore,
         verbose=not args.quiet,
     )
-    calc.compute(
-        n_jobs=args.n_jobs,
-        checkpoint_dir=args.checkpoint_dir,
-        resume=not args.no_resume,
-        mp_context=args.mp_context,
-    )
+    run = dict(n_jobs=args.n_jobs, checkpoint_dir=args.checkpoint_dir,
+               resume=not args.no_resume, mp_context=args.mp_context)
+    if args.tolerance is None and args.n_pairs is None:
+        calc.compute(**run)
+    else:
+        calc.compute_pairs(n_pairs=args.n_pairs, tolerance=args.tolerance,
+                           seed=args.pair_seed, **run)
 
     calc.save(out)
     print(f"Wrote results table -> {out}")

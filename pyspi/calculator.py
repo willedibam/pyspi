@@ -249,6 +249,10 @@ def load_table(path):
     Returns the same DataFrame ``Calculator.table`` returns: rows are
     processes, columns are a ``(spi, process)`` MultiIndex. Only ``.npz``
     round-trips exactly -- ``.csv`` is a one-way human-readable export.
+
+    ``attrs`` carries the run's provenance. For a table from
+    :meth:`Calculator.compute_pairs` it includes ``pairs`` and ``sampling``:
+    only the entries at those pairs were computed.
     """
     path = Path(path)
     if path.suffix != ".npz":
@@ -277,8 +281,10 @@ def load_table(path):
         # Provenance. `save()` has always written these three and `load_table`
         # has never read them, so a loaded table could not be asked which SPIs
         # failed, what produced it, or whether it matched a rerun.
-        meta = {name: str(f[name]) for name in ("run_spec", "run_digest", "errors")
+        meta = {name: str(f[name])
+                for name in ("run_spec", "run_digest", "errors", "sampling")
                 if name in f.files}
+        pairs = f["pairs"] if "pairs" in f.files else None
 
     # The whole shape, not just `ndim` and axis 0. A file whose matrices were
     # the wrong width reached `MultiIndex.from_product` and failed there, with
@@ -298,7 +304,9 @@ def load_table(path):
     # place for exactly this, and it keeps `load_table` returning the same
     # object `Calculator.table` does.
     table.attrs["schema"] = schema
-    for name in ("run_spec", "errors"):
+    if pairs is not None:
+        table.attrs["pairs"] = pairs
+    for name in ("run_spec", "errors", "sampling"):
         if name in meta:
             try:
                 table.attrs[name] = json.loads(meta[name])
@@ -859,6 +867,10 @@ class Calculator:
         ``(n_spis, M, M)`` float array plus the SPI and process names -- and
         round-trips exactly through :func:`pyspi.load_table`. ``.csv`` is for
         eyeballing small results; it is impractical for the full SPI set.
+
+        After :meth:`compute_pairs` the table holds the sampled entries and NaN
+        elsewhere; the ``.npz`` then also stores :attr:`pairs` and
+        :attr:`sampling`, which :func:`pyspi.load_table` returns in ``attrs``.
         """
         path = Path(path)
         M = self.dataset.n_processes
@@ -882,6 +894,13 @@ class Calculator:
                 errors=np.array(
                     json.dumps(self.errors, sort_keys=True, default=str), dtype="U"
                 ),
+                # After compute_pairs(): which entries were computed. Without
+                # it an entry that was not sampled and one that is undefined
+                # are both just NaN.
+                **({} if self.sampling is None else {
+                    "pairs": self.pairs,
+                    "sampling": np.array(json.dumps(
+                        self.sampling, sort_keys=True, default=str), dtype="U")}),
             )
         else:
             raise ValueError(
@@ -936,6 +955,9 @@ class Calculator:
 
         n_jobs = _parallel.resolve_n_jobs(n_jobs)
         _parallel.guard_oversubscription(n_jobs)
+
+        # The table is about to hold every pair again.
+        self._pairs = self._pair_values = self._sampling = None
 
         spi_keys = list(self.spis.keys())
         M = self.dataset.n_processes
@@ -1023,7 +1045,10 @@ class Calculator:
         Intended for large ``M``, where the ``M(M-1)`` ordered pairs of
         :meth:`compute` dominate the cost. The same dyads are used for every
         SPI and both directions of each dyad are kept, so the sampled entries
-        of different SPIs stay aligned. :attr:`table` is not touched.
+        of different SPIs stay aligned. :attr:`table` then holds those entries
+        and NaN everywhere else, so :meth:`save` and anything written for a
+        full table work on a sampled one; :attr:`pairs` says which entries
+        were computed.
 
         Args:
             n_pairs (int, optional): Number of dyads to draw with
@@ -1041,8 +1066,8 @@ class Calculator:
                 and by ``compute_pairs`` on any other sample.
 
         Returns:
-            numpy.ndarray: :attr:`pair_values`, shape ``(n_spis, b, 2)``. The
-            dyads are in :attr:`pairs`.
+            numpy.ndarray: :attr:`pair_values`, shape ``(n_spis, b, 2)``: the
+            same entries without the gaps, in the order of :attr:`pairs`.
 
         Every sampled entry equals the entry :meth:`compute` would have
         produced: SPIs built by looping over process pairs are evaluated on the
@@ -1130,6 +1155,12 @@ class Calculator:
 
         self._pairs = pairs
         self._pair_values = np.stack([results[key][0] for key in spi_keys])
+        # The same result as a table: the sampled entries, NaN elsewhere.
+        lo, hi = pairs.T
+        for key, values in zip(spi_keys, self._pair_values):
+            S = np.full((M, M), np.nan)
+            S[lo, hi], S[hi, lo] = values[:, 0], values[:, 1]
+            self._table[key] = S
         self._sampling = {
             "n_processes": M,
             "n_dyads": M * (M - 1) // 2,

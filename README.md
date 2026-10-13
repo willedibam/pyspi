@@ -171,8 +171,9 @@ workers, and a sampled entry is the entry of the full table.
 ```python
 calc = Calculator(dataset=x, config="benchmarked_p90")
 calc.compute(n_jobs=4)                                  # every pair, four workers -> calc.table
-calc.compute_pairs(tolerance=0.03, seed=0, n_jobs=4)    # sampled pairs -> calc.pair_values
+calc.compute_pairs(tolerance=0.03, seed=0, n_jobs=4)    # sampled pairs -> calc.table, NaN where not sampled
 calc.pairs, calc.sampling                               # which pairs, and how each SPI was evaluated
+calc.save("recording.npz")                              # either kind; load_table() returns the pairs in .attrs
 ```
 
 **Workers.** SPIs that share a cached intermediate form one task and stay on one
@@ -183,8 +184,9 @@ and 3.5, 8.0 and 8.3 GiB. Each worker pins its BLAS/OpenMP pools to one thread
 sets `n_jobs` from the environment.
 
 **Sampled pairs.** `compute_pairs` evaluates every SPI on the same sample of
-unordered process pairs, both directions of each, and returns
-`(n_spis, n_pairs, 2)`. `tolerance` sets the number of pairs through
+unordered process pairs, both directions of each. The result is the usual
+table with the unsampled entries missing (and, without the gaps,
+`calc.pair_values` of shape `(n_spis, n_pairs, 2)`). `tolerance` sets the number of pairs through
 `pyspi.calculator.pair_budget`: it is the root-mean-square error to expect in
 correlations between SPIs across pairs, and it caps the sample near 2,500 pairs
 however large *M* is; `n_pairs=` or `pairs=` state the sample directly. For
@@ -206,6 +208,7 @@ whole job down.
 #PBS -l ncpus=1,mem=8GB
 python -m pyspi compute --data "datasets/${PBS_ARRAY_INDEX}.npy" \
     --config benchmarked_p90 --checkpoint-dir "results/${PBS_ARRAY_INDEX}/"
+# large M: add  --tolerance 0.03  (sampled pairs)  and/or  --n-jobs 4
 ```
 
 `--checkpoint-dir` (and `checkpoint_dir=` on both calls) writes each SPI as it

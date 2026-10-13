@@ -278,7 +278,7 @@ def _deterministic(**kwargs):
     return calc
 
 
-def test_compute_pairs_matches_compute_and_leaves_the_table_alone():
+def test_compute_pairs_matches_compute_and_fills_the_table_at_the_sample():
     dense = Calculator(dataset=_series(), config=DETERMINISTIC_CONFIG, verbose=False)
     dense.compute(progress=False)
     calc = _deterministic(n_pairs=7, seed=11)
@@ -286,11 +286,66 @@ def test_compute_pairs_matches_compute_and_leaves_the_table_alone():
     assert not calc.errors and set(calc.timings) == set(calc.spis)
     assert calc.pair_values.shape == (calc.n_spis, 7, 2)
     assert np.isfinite(calc.pair_values).all()
-    assert calc.table.isna().all().all()
     i, j = calc.pairs.T
+    sampled = np.zeros((6, 6), dtype=bool)
+    sampled[i, j] = sampled[j, i] = True
     for row, key in zip(calc.pair_values, calc.spis):
         S = dense.table[key].to_numpy(dtype=float)
         assert np.array_equal(row, np.stack([S[i, j], S[j, i]], axis=1)), key
+        # The table is the full one with the unsampled entries missing.
+        T = calc.table[key].to_numpy(dtype=float)
+        assert np.array_equal(T[sampled], S[sampled]) and np.isnan(T[~sampled]).all(), key
+
+
+def test_a_full_run_and_a_sampled_run_replace_each_other():
+    calc = _deterministic(n_pairs=4, seed=1)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        calc.compute(progress=False)
+    assert calc.pairs is None and calc.pair_values is None and calc.sampling is None
+    off = ~np.eye(6, dtype=bool)
+    assert np.isfinite(calc.table["spearmanr"].to_numpy(dtype=float)[off]).all()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        calc.compute_pairs(n_pairs=4, seed=1, progress=False)
+    assert np.isfinite(calc.table["spearmanr"].to_numpy(dtype=float)).sum() == 8
+
+
+def test_a_sampled_table_saves_and_loads_with_its_pairs(tmp_path):
+    from pyspi import load_table
+
+    calc = _deterministic(tolerance=0.3, seed=2)
+    table = load_table(calc.save(tmp_path / "sampled.npz"))
+    assert np.array_equal(table.to_numpy(dtype=float), calc.table.to_numpy(dtype=float),
+                          equal_nan=True)
+    assert np.array_equal(table.attrs["pairs"], calc.pairs)
+    record = table.attrs["sampling"]
+    assert record["n_pairs"] == len(calc.pairs) and record["tolerance"] == 0.3
+    assert record["pairs_sha256"] == calc.sampling["pairs_sha256"]
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        calc.compute(progress=False)
+    full = load_table(calc.save(tmp_path / "full.npz"))
+    assert "pairs" not in full.attrs and "sampling" not in full.attrs
+
+
+def test_command_line_computes_a_sampled_table(tmp_path):
+    from pyspi import load_table
+    from pyspi.__main__ import main
+
+    data = tmp_path / "x.npy"
+    np.save(data, _series())
+    out = tmp_path / "out.npz"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        code = main(["compute", "--data", str(data), "--config", DETERMINISTIC_CONFIG,
+                     "--output", str(out), "--n-pairs", "5", "--pair-seed", "3",
+                     "--no-zscore", "--quiet"])
+    assert code == 0
+    table = load_table(out)
+    assert np.array_equal(table.attrs["pairs"], sample_dyads(6, 5, seed=3))
+    assert np.isfinite(table["spearmanr"].to_numpy(dtype=float)).sum() == 10
 
 
 def test_result_does_not_depend_on_the_order_pairs_are_given_in():
