@@ -1,0 +1,32 @@
+#!/bin/bash
+#PBS -N pyspi-binding
+#PBS -P ql44
+#PBS -q normal
+#PBS -l jobfs=4GB
+#PBS -l storage=gdata/ql44+scratch/ql44
+#PBS -j oe
+# Two recordings side by side under nci-parallel, each bound to K cores -- the
+# layout a farm with several workers per recording uses. Each run records the
+# cores it was bound to; they must be K each and disjoint.
+#   qsub -v SOURCE=...,ARCHIVE=...,MEMBERS=a:b,K=4,OUT=... \
+#        -l ncpus=8,mem=32GB,walltime=01:00:00 gadi_binding.pbs
+set -euo pipefail
+: "${SOURCE:?}" "${ARCHIVE:?}" "${MEMBERS:?}" "${K:?}" "${OUT:?}"
+module purge
+module load python3/3.12.1 nci-parallel/1.0.0a
+source /scratch/ql44/we2614/mts-spi-study/environments/mts-spi-v3-631de27/bin/activate
+export PYTHONPATH="$SOURCE"
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+export PYTHONDONTWRITEBYTECODE=1 NUMBA_CACHE_DIR="$PBS_JOBFS/numba-cache"
+mkdir -p "$OUT"
+exec >"$OUT/job.log" 2>&1
+commands="$PBS_JOBFS/commands.txt"
+IFS=: read -ra members <<< "$MEMBERS"
+(( ${#members[@]} * K <= PBS_NCPUS ))
+for member in "${members[@]}"; do
+    printf 'python %s/bench/pair_sampling/gadi_smoke.py --archive %s --member %s --n-pairs 0 --n-jobs %d --out %s/%s\n' \
+        "$SOURCE" "$ARCHIVE" "$member" "$K" "$OUT" "$member" >> "$commands"
+done
+cat "$commands"
+mpirun -np "${#members[@]}" --map-by "node:PE=$K" nci-parallel --verbose \
+    --input-file "$commands" --status "$OUT/status"

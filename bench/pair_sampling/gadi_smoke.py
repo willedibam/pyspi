@@ -75,6 +75,8 @@ def main():
         "timings": calc.timings, "errors": calc.errors, "spis": list(calc.spis),
         "sampling": calc.sampling,
         "bound_cores": cores, "thread_variables": threads,
+        "affinity": (sorted(os.sched_getaffinity(0))
+                     if hasattr(os, "sched_getaffinity") else None),
         "start_method": _parallel.default_mp_context() if args.n_jobs > 1 else None,
         "peak_rss_gib": {"parent": peak(resource.RUSAGE_SELF),
                          "largest_worker": peak(resource.RUSAGE_CHILDREN)},
