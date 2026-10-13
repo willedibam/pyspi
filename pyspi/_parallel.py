@@ -268,7 +268,7 @@ def _run_task(spi_keys, checkpoint_dir, pairs=None):
     Posts ``(key, failed)`` to the progress queue after each SPI, and returns
     the list of ``(key, matrix, error_str_or_None, warnings, elapsed)`` tuples.
     With ``pairs`` the SPIs are computed on those dyads only (see
-    ``run_spi_pairs``) and nothing is checkpointed.
+    ``run_spi_pairs``).
     """
     data = _WORKER_STATE["data"]
     spis = _WORKER_STATE["spis"]
@@ -280,7 +280,7 @@ def _run_task(spi_keys, checkpoint_dir, pairs=None):
             S, err, warns, elapsed = run_spi_pairs(spis[key], data, key, pairs)
         else:
             S, err, warns, elapsed = run_spi(spis[key], data, key, M)
-            write_checkpoint(checkpoint_dir, key, S, err)
+        write_checkpoint(checkpoint_dir, key, S, err)
         # Warnings travel back to the parent rather than being emitted (and
         # lost) here in the worker process.
         out.append((key, S, err, warns, elapsed))
@@ -621,11 +621,13 @@ def checkpoint_owner_matches(checkpoint_dir: Path, digest: str):
     return True, None
 
 
-def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool = True):
+def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool = True,
+                     n_pairs: int | None = None):
     """Return (done_results, remaining_keys).
 
     done_results: dict[key] -> (matrix, error_or_None, warns, 0.0).
-    A key is considered done if ``<key>.npy`` exists and has shape (M, M).
+    A key is considered done if ``<key>.npy`` exists and has shape (M, M), or
+    ``(n_pairs, 2)`` for a sampled run (``run_spi_pairs``).
 
     A checkpoint carrying an ``.error`` sidecar records a *failed* SPI. By
     default those are retried rather than resumed: a failure is usually caused
@@ -645,14 +647,14 @@ def load_checkpoints(checkpoint_dir: Path, spi_keys, M: int, retry_failed: bool 
         except Exception:
             remaining.append(key)
             continue
-        if arr.shape != (M, M):
+        if arr.shape != ((M, M) if n_pairs is None else (n_pairs, 2)):
             remaining.append(key)
             continue
         err_path = checkpoint_dir / f"{key}.error"
         err = err_path.read_text() if err_path.exists() else None
         # Validate *before* the retry decision, so an invalid matrix is retried
         # rather than being marked failed and then kept.
-        off = arr[~np.eye(M, dtype=bool)] if M > 1 else arr.ravel()
+        off = arr[~np.eye(M, dtype=bool)] if M > 1 and n_pairs is None else arr.ravel()
         if off.size and (np.isinf(off).any() or not np.isfinite(off).any()):
             err = err or "ValueError: checkpoint contains no finite values"
         if err is not None and retry_failed:

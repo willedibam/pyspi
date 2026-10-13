@@ -911,26 +911,8 @@ class Calculator:
 
         spi_keys = list(self.spis.keys())
         M = self.dataset.n_processes
-        cp_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
-        self._resume_rejected = False
-        if cp_dir is not None:
-            cp_dir.mkdir(parents=True, exist_ok=True)
-            digest = self.run_digest
-            owned, reason = _parallel.checkpoint_owner_matches(cp_dir, digest)
-            if not owned:
-                # Refuse to inherit another run's results. Resuming here is how
-                # a different dataset of the same width silently returned the
-                # previous run's numbers.
-                self._resume_rejected = True
-                # Refuse rather than delete. Deleting another run's results to
-                # make room is destructive and, if interrupted midway, relabels
-                # whatever survives as this run.
-                raise ValueError(
-                    f"Checkpoint directory {cp_dir} belongs to a different run "
-                    f"({reason}). Use a separate directory per run, or remove "
-                    f"it yourself if the old results are no longer wanted."
-                )
-            _parallel.write_manifest(cp_dir, digest, self.run_spec)
+        cp_dir = self._claim_checkpoint_dir(
+            checkpoint_dir, self.run_digest, self.run_spec)
 
         # Resume: skip SPIs whose checkpoint exists.
         if cp_dir is not None and resume:
@@ -972,12 +954,38 @@ class Calculator:
         if self._verbose:
             inspect_calc_results(self)
 
+    def _claim_checkpoint_dir(self, checkpoint_dir, digest, spec):
+        """Bind ``checkpoint_dir`` to the run ``digest`` identifies, or refuse."""
+        cp_dir = Path(checkpoint_dir) if checkpoint_dir is not None else None
+        self._resume_rejected = False
+        if cp_dir is not None:
+            cp_dir.mkdir(parents=True, exist_ok=True)
+            owned, reason = _parallel.checkpoint_owner_matches(cp_dir, digest)
+            if not owned:
+                # Refuse to inherit another run's results. Resuming here is how
+                # a different dataset of the same width silently returned the
+                # previous run's numbers.
+                self._resume_rejected = True
+                # Refuse rather than delete. Deleting another run's results to
+                # make room is destructive and, if interrupted midway, relabels
+                # whatever survives as this run.
+                raise ValueError(
+                    f"Checkpoint directory {cp_dir} belongs to a different run "
+                    f"({reason}). Use a separate directory per run, or remove "
+                    f"it yourself if the old results are no longer wanted."
+                )
+            _parallel.write_manifest(cp_dir, digest, spec)
+        return cp_dir
+
     def compute_pairs(
         self,
         n_pairs=None,
         pairs=None,
         seed=None,
         n_jobs=None,
+        checkpoint_dir=None,
+        resume=True,
+        retry_failed=True,
         mp_context=None,
         progress=True,
     ):
@@ -995,7 +1003,10 @@ class Calculator:
                 stored with its smaller index first; repeats are rejected.
             seed (optional): Seed for drawing ``n_pairs`` dyads, as accepted by
                 :func:`numpy.random.default_rng`. It selects pairs only.
-            n_jobs, mp_context, progress: As for :meth:`compute`.
+            n_jobs, checkpoint_dir, resume, retry_failed, mp_context, progress:
+                As for :meth:`compute`. A checkpoint directory belongs to one
+                set of dyads in one order: it is refused by :meth:`compute`,
+                and by ``compute_pairs`` on any other sample.
 
         Returns:
             numpy.ndarray: :attr:`pair_values`, shape ``(n_spis, b, 2)``. The
@@ -1007,7 +1018,7 @@ class Calculator:
         no statistic is fitted on fewer processes than :meth:`compute` uses.
         :attr:`errors` and :attr:`timings` describe this call, and
         :attr:`sampling` records the pairs, budget, seed and how each SPI was
-        evaluated. Checkpointing is not supported.
+        evaluated.
         """
         if not hasattr(self, "_dataset"):
             raise AttributeError(
@@ -1041,29 +1052,47 @@ class Calculator:
         _parallel.guard_oversubscription(n_jobs)
 
         spi_keys = list(self.spis.keys())
+        pairs_sha256 = _parallel.pairs_digest(pairs)
+        # The dyads are part of what a checkpoint is: the same SPI on another
+        # sample, or on every pair, is a different array under the same name.
+        cp_dir = self._claim_checkpoint_dir(
+            checkpoint_dir,
+            hashlib.sha256(f"{self.run_digest}:pairs:{pairs_sha256}".encode()).hexdigest(),
+            dict(self.run_spec, sampling={
+                "n_pairs": len(pairs), "pairs_sha256": pairs_sha256,
+                "source": source, "seed": seed}),
+        )
+        results = {}
+        todo = spi_keys
+        if cp_dir is not None and resume:
+            results, todo = _parallel.load_checkpoints(
+                cp_dir, spi_keys, M, retry_failed=retry_failed, n_pairs=len(pairs))
+            if results:
+                logger.info("Resumed %d SPI(s) from %s", len(results), cp_dir)
+
         t_start = time.perf_counter()
         if n_jobs <= 1:
-            iterable = tqdm(spi_keys) if progress else spi_keys
-            results = {}
+            iterable = tqdm(todo) if progress else todo
             for key in iterable:
                 if progress:
                     iterable.set_description(f"Processing [{self._name}: {key}]")
                 results[key] = _parallel.run_spi_pairs(
                     self._spis[key], self.dataset, key, pairs
                 )
-        else:
-            n_workers = min(int(n_jobs), len(spi_keys))
+                _parallel.write_checkpoint(cp_dir, key, *results[key][:2])
+        elif todo:
+            n_workers = min(int(n_jobs), len(todo))
             ctx = mp_context or _parallel.default_mp_context()
             logger.info("Parallel compute: %d SPI(s) on %d pair(s) via %d workers (mp=%s)",
-                        len(spi_keys), len(pairs), n_workers, ctx)
-            results = _parallel.run_parallel(
-                self._spis, self._dataset, spi_keys,
+                        len(todo), len(pairs), n_workers, ctx)
+            results.update(_parallel.run_parallel(
+                self._spis, self._dataset, todo,
                 n_jobs=n_workers, mp_context=ctx,
-                checkpoint_dir=None, progress=progress,
+                checkpoint_dir=cp_dir, progress=progress,
                 configfile=self._configfile,
                 config_bytes=self._config_bytes,
                 pairs=pairs,
-            )
+            ))
 
         self._pairs = pairs
         self._pair_values = np.stack([results[key][0] for key in spi_keys])
@@ -1073,7 +1102,7 @@ class Calculator:
             "n_pairs": len(pairs),
             "source": source,
             "seed": seed,
-            "pairs_sha256": _parallel.pairs_digest(pairs),
+            "pairs_sha256": pairs_sha256,
             "computation_version": _parallel.COMPUTATION_VERSION,
             "n_jobs": max(1, int(n_jobs)),
             "evaluation": {

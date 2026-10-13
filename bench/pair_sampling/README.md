@@ -6,10 +6,11 @@ retrospective pair-sampling study in `mts-spi-study-cluster`
 `benchmarked_p90` (289 SPIs).
 
 ```bash
-python bench/pair_sampling/validate.py extract          # ~8 min, M=20, T=1000
+python bench/pair_sampling/validate.py extract          # ~6 min, M=20, T=1000
 python bench/pair_sampling/validate.py retrospective \
     --study-results <mts-spi-study-cluster>/results/pyspi-optimisation/large_m_pair_baselines_260917
 python bench/pair_sampling/validate.py figures          # needs latex + dvipng
+python bench/pair_sampling/workers.py                   # ~7 min, M=20, T=1000
 ```
 
 Outputs are written to `bench/pair_sampling/results/`.
@@ -22,22 +23,29 @@ and 19 dyads for three pair seeds each, with the global RNG seeded identically
 before every run.
 
 - Every one of the 289 SPIs matches the dense table on every run: 271-272 are
-  bit-identical and the remaining 17-18, all from the four pair-local classes,
-  agree to 9e-16.
+  bit-identical and the remaining 17-18, all from the four rounding-level
+  pair-local classes, agree to 9e-16.
 - The SPI-SPI vector built from the sampled extraction equals the one obtained
   by masking the dense matrices to 4e-15 on all 41,616 coordinates.
-- Wall time: dense 125 s. Sampled 67-72 s at 95 dyads (1.8x) and 16-17 s at 19
-  dyads (7.5x).
+- Wall time: dense 100 s. Sampled 53-55 s at 95 dyads (1.8-1.9x) and 13 s at 19
+  dyads (7.5-7.7x).
 
 | tier | SPIs | dense | 95 dyads | 19 dyads |
 |---|---:|---:|---:|---:|
-| pair loop (dense matrix is a loop over `bivariate`; replayed exactly) | 94 | 107.4 s | 54.9 s | 11.3 s |
-| pair-local (vectorised dense path; `bivariate` on sampled pairs) | 53 | 14.9 s | 11.1 s | 2.3 s |
-| indexed (computed in full, entries read off) | 142 | 2.8 s | 2.8 s | 3.0 s |
+| pair loop (dense matrix is a loop over `bivariate`; replayed exactly) | 94 | 91.4 s | 45.7 s | 9.3 s |
+| pair-local (vectorised dense path; `bivariate` on sampled pairs) | 53 | 5.7 s | 5.4 s | 1.1 s |
+| indexed (computed in full, entries read off) | 142 | 2.9 s | 2.9 s | 2.9 s |
 
-The pair-loop tier costs the fraction of dyads visited (53.7 s and 10.7 s
-predicted). The pair-local tier costs about 1.5x its dense cost per dyad, so
-it only pays below roughly two thirds of the census.
+Sampled columns are means over the three pair seeds. The pair-loop tier costs
+the fraction of dyads visited (45.7 s and 9.1 s predicted). The pair-local tier
+costs about 1.9x its dense cost per dyad, so it only pays below roughly half
+of the census. Distance correlation counts as pair loop: it is evaluated once
+per sampled dyad and is bit-identical.
+
+An SPI can be recorded as failed on a sample and not on the full table: of the
+three multitaper group-delay SPIs, two have no finite entry at all and the
+third has none on some 19-dyad samples, where it is reported as
+`no finite value on the sampled pairs`.
 
 **`retrospective` — the sampler and the convergence match the study.** No
 extraction. With the study's seed sequences, `sample_dyads` reproduces its draws
@@ -53,6 +61,26 @@ the twelve MEG records (M=64/100/243, 128 draws each) agree with its
 
 Together these mean a sampled extraction at large M yields the SPI-SPI vector
 the study obtained by masking.
+
+**`workers.py` -- sampling and workers together.** The same series, dense and
+at 95 and 19 dyads, on 1, 2 and 4 spawned workers; one fresh interpreter per
+run (Apple M5, 10 cores, macOS).
+
+| run | 1 worker | 2 workers | 4 workers | peak memory, 1 worker | largest worker of 4 |
+|---|---:|---:|---:|---:|---:|
+| dense (190 dyads) | 102.7 s | 62.0 s (1.7x) | 43.1 s (2.4x) | 698 MiB | 602 MiB |
+| 95 dyads | 55.6 s | 35.2 s (1.6x) | 24.7 s (2.3x) | 767 MiB | 614 MiB |
+| 19 dyads | 15.2 s | 14.1 s (1.1x) | 11.5 s (1.3x) | 724 MiB | 677 MiB |
+
+- The result hash is the same for every worker count in each row.
+- Workers do not scale linearly here. The summed per-SPI time rises from 103 s
+  to 150 s at four workers (each SPI runs slower alongside others; the cause
+  was not isolated), and starting a spawned pool costs several seconds. At 19
+  dyads the fully computed SPIs and the start-up dominate, so workers add
+  little.
+- A parallel run's parent holds about 300 MiB; `parent + n_jobs x largest
+  worker` bounds the total (about 2.6 GiB for the dense run on four workers).
+  These sizes are for M=20, T=1000 and say nothing about larger recordings.
 
 ## Projected large-M cost (not measured)
 
@@ -71,6 +99,11 @@ cost per dyad. That conversion is an assumption; both runs are at T=1000.
 
 The 142 indexed SPIs are about 2% of a dense run, which caps the speedup near
 45x however few pairs are sampled.
+
+The Gadi timings behind this table predate the faster distance-correlation and
+Kraskov kernels. Those lower the dense cost of pair-evaluated SPIs, so the
+ratios above overstate what sampling adds on current code; the table has not
+been recomputed.
 
 ## Figures
 

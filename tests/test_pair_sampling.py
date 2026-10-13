@@ -314,9 +314,6 @@ def test_failures_are_isolated_and_recorded(n_jobs, monkeypatch):
     ({"pairs": [[0, 0]]}, ValueError),
     ({"pairs": [[0, 1], [1, 0]]}, ValueError),
     ({"pairs": [[0, 6]]}, IndexError),
-    # Sampled results have no checkpoint format; resuming them is refused
-    # rather than written into dense-shaped files.
-    ({"n_pairs": 3, "checkpoint_dir": "unused"}, TypeError),
 ])
 def test_invalid_requests_are_refused(kwargs, exc):
     calc = Calculator(dataset=_series(), config=DETERMINISTIC_CONFIG, verbose=False)
@@ -352,3 +349,99 @@ def test_sampling_record_identifies_the_pairs_and_how_each_spi_was_evaluated():
     assert explicit.sampling["pairs_sha256"] == record["pairs_sha256"]
     # The identity is of the dyads in the order given.
     assert _deterministic(pairs=calc.pairs[::-1]).sampling["pairs_sha256"] != record["pairs_sha256"]
+
+
+# --------------------------------------------------------------------------
+# Checkpoints, and sampling together with workers
+# --------------------------------------------------------------------------
+
+def test_a_checkpoint_directory_belongs_to_one_sample(tmp_path):
+    """Same SPI names, different arrays: the dyads are part of the identity."""
+    import json
+
+    cp_dir = tmp_path / "sampled"
+    first = _deterministic(n_pairs=5, seed=3, checkpoint_dir=cp_dir)
+    manifest = json.loads((cp_dir / "run.json").read_text())
+    assert manifest["computation"] == _parallel.COMPUTATION_VERSION
+    assert manifest["spec"]["sampling"] == {
+        "n_pairs": 5, "pairs_sha256": first.sampling["pairs_sha256"],
+        "source": "sampled", "seed": 3}
+
+    # The same dyads, however they were arrived at, resume without recomputing.
+    again = _deterministic(pairs=first.pairs, checkpoint_dir=cp_dir)
+    assert np.array_equal(again.pair_values, first.pair_values)
+    assert set(again.timings.values()) == {0.0}
+
+    calc = Calculator(dataset=_series(), config=DETERMINISTIC_CONFIG, verbose=False)
+    for kwargs in ({"n_pairs": 5, "seed": 4},            # another sample
+                   {"n_pairs": 6, "seed": 3},            # a longer prefix
+                   {"pairs": first.pairs[::-1]}):        # another order
+        with pytest.raises(ValueError, match="different run"):
+            calc.compute_pairs(progress=False, checkpoint_dir=cp_dir, **kwargs)
+    with pytest.raises(ValueError, match="different run"):
+        calc.compute(progress=False, checkpoint_dir=cp_dir)
+
+    dense_dir = tmp_path / "dense"
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        calc.compute(progress=False, checkpoint_dir=dense_dir)
+    with pytest.raises(ValueError, match="different run"):
+        calc.compute_pairs(n_pairs=5, seed=3, progress=False, checkpoint_dir=dense_dir)
+
+
+@pytest.mark.slow
+def test_p90_sampled_runs_agree_across_workers_census_and_resume(tmp_path):
+    """Sampling and workers together, on the config that mixes every path.
+
+    The dyads are fixed before any work is handed out, so a sampled run is the
+    same array serially, on two or four workers, and resumed part-way; a full
+    census is the dense table; and the seeded stochastic estimators (sgddtw
+    barycenters, MinCovDet, EllipticEnvelope) give the dense entry exactly.
+    """
+    def run(**kwargs):
+        calc = _p90()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            if kwargs:
+                calc.compute_pairs(progress=False, **kwargs)
+            else:
+                calc.compute(progress=False)
+        return calc
+
+    dense = run()
+    keys = list(dense.spis)
+
+    def assert_matches_dense(calc, label):
+        i, j = calc.pairs.T
+        assert set(calc.errors) == set(dense.errors), label
+        for row, key in zip(calc.pair_values, keys):
+            S = dense.table[key].to_numpy(dtype=float)
+            expected = np.stack([S[i, j], S[j, i]], axis=1)
+            if getattr(type(dense.spis[key]), "_pair_local", None) == "directed":
+                assert np.allclose(row, expected, equal_nan=True, **TIGHT), (label, key)
+            else:
+                assert np.array_equal(row, expected, equal_nan=True), (label, key)
+
+    serial = run(n_pairs=8, seed=5)
+    how = list(serial.sampling["evaluation"].values())
+    assert (how.count("pairs"), how.count("dense")) == (147, 142)
+    assert_matches_dense(serial, "serial sample")
+    stochastic = [k for k in keys if "sgddtw" in k or "MinCovDet" in k or "EllipticEnvelope" in k]
+    assert len(stochastic) == 12
+
+    cp_dir = tmp_path / "ckpt"
+    for label, kwargs in (("two workers", dict(n_jobs=2)),
+                          ("four workers", dict(n_jobs=4, checkpoint_dir=cp_dir))):
+        calc = run(n_pairs=8, seed=5, mp_context="spawn", **kwargs)
+        assert np.array_equal(calc.pairs, serial.pairs), label
+        assert np.array_equal(calc.pair_values, serial.pair_values, equal_nan=True), label
+        assert calc.errors == serial.errors, label
+
+    for key in keys[::2]:
+        (cp_dir / f"{key}.npy").unlink()
+    resumed = run(n_pairs=8, seed=5, n_jobs=2, mp_context="spawn", checkpoint_dir=cp_dir)
+    assert np.array_equal(resumed.pair_values, serial.pair_values, equal_nan=True)
+    assert resumed.errors == serial.errors
+
+    assert_matches_dense(run(n_pairs=21, seed=6, n_jobs=4, mp_context="spawn"),
+                         "census on four workers")

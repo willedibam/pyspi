@@ -11,29 +11,29 @@
   "indexed": 142
  },
  "dense": {
-  "wall": 125.14608345809393,
+  "wall": 100.08046204200946,
   "errors": {
    "gd_multitaper_delay_fs-1_fmin-0_fmax-0-5": "ValueError: SPI returned no finite off-diagonal values",
    "gd_multitaper_delay_fs-1_fmin-0-25_fmax-0-5": "ValueError: SPI returned no finite off-diagonal values"
   },
   "by_tier": {
-   "pair loop": 107.39745707588736,
-   "pair-local": 14.889510208624415,
-   "indexed": 2.8425855454988778
+   "pair loop": 91.43902825121768,
+   "pair-local": 5.746705583529547,
+   "indexed": 2.878036789712496
   }
  },
  "sampled": [
   {
    "seed": 0,
    "n_pairs": 95,
-   "wall": 67.44301991700195,
-   "speedup": 1.8555824399931031,
+   "wall": 54.67771362501662,
+   "speedup": 1.8303702808125426,
    "by_tier": {
-    "pair loop": 53.36633820680436,
-    "pair-local": 11.236067171324976,
-    "indexed": 2.839932661037892
+    "pair loop": 45.96297999948729,
+    "pair-local": 5.847867958596908,
+    "indexed": 2.865668415091932
    },
-   "predicted_pair_loop": 53.69872853794368,
+   "predicted_pair_loop": 45.71951412560884,
    "identical_spis": 271,
    "rounding_spis": 18,
    "max_abs_entry_gap": 6.106226635438361e-16,
@@ -42,14 +42,14 @@
   {
    "seed": 1,
    "n_pairs": 95,
-   "wall": 67.74991337500978,
-   "speedup": 1.8471770253842905,
+   "wall": 53.69102541706525,
+   "speedup": 1.864007276162018,
    "by_tier": {
-    "pair loop": 53.90260083402973,
-    "pair-local": 11.004878126317635,
-    "indexed": 2.8417199986288324
+    "pair loop": 45.56296866631601,
+    "pair-local": 5.252722166245803,
+    "indexed": 2.874180246493779
    },
-   "predicted_pair_loop": 53.69872853794368,
+   "predicted_pair_loop": 45.71951412560884,
    "identical_spis": 271,
    "rounding_spis": 18,
    "max_abs_entry_gap": 6.106226635438361e-16,
@@ -58,14 +58,14 @@
   {
    "seed": 2,
    "n_pairs": 95,
-   "wall": 71.65722733305302,
-   "speedup": 1.7464544487108329,
+   "wall": 53.4952057080809,
+   "speedup": 1.8708304925144248,
    "by_tier": {
-    "pair loop": 57.50875383219682,
-    "pair-local": 11.21329545287881,
-    "indexed": 2.9340402447851375
+    "pair loop": 45.42210820945911,
+    "pair-local": 5.211779003031552,
+    "indexed": 2.860223080846481
    },
-   "predicted_pair_loop": 53.69872853794368,
+   "predicted_pair_loop": 45.71951412560884,
    "identical_spis": 272,
    "rounding_spis": 17,
    "max_abs_entry_gap": 8.881784197001252e-16,
@@ -74,14 +74,14 @@
   {
    "seed": 0,
    "n_pairs": 19,
-   "wall": 16.913893042015843,
-   "speedup": 7.399011164799153,
+   "wall": 13.0203881659545,
+   "speedup": 7.686442275484399,
    "by_tier": {
-    "pair loop": 11.49271204334218,
-    "pair-local": 2.4677928349701688,
-    "indexed": 2.95270857878495
+    "pair loop": 9.071569208055735,
+    "pair-local": 1.0877572901081294,
+    "indexed": 2.860156878014095
    },
-   "predicted_pair_loop": 10.739745707588737,
+   "predicted_pair_loop": 9.143902825121769,
    "identical_spis": 272,
    "rounding_spis": 17,
    "max_abs_entry_gap": 6.106226635438361e-16,
@@ -90,14 +90,14 @@
   {
    "seed": 1,
    "n_pairs": 19,
-   "wall": 16.5837865419453,
-   "speedup": 7.546291261140058,
+   "wall": 13.236419583088718,
+   "speedup": 7.5609919596289865,
    "by_tier": {
-    "pair loop": 11.336625121766701,
-    "pair-local": 2.332093997625634,
-    "indexed": 2.914400662179105
+    "pair loop": 9.31195879355073,
+    "pair-local": 1.049374585156329,
+    "indexed": 2.8741840713191777
    },
-   "predicted_pair_loop": 10.739745707588737,
+   "predicted_pair_loop": 9.143902825121769,
    "identical_spis": 271,
    "rounding_spis": 18,
    "max_abs_entry_gap": 4.440892098500626e-16,
@@ -106,14 +106,14 @@
   {
    "seed": 2,
    "n_pairs": 19,
-   "wall": 16.41785475006327,
-   "speedup": 7.6225600337712605,
+   "wall": 13.322313208016567,
+   "speedup": 7.512243593086151,
    "by_tier": {
-    "pair loop": 11.191210873541422,
-    "pair-local": 2.2425332465209067,
-    "indexed": 2.98351417214144
+    "pair loop": 9.377125420840457,
+    "pair-local": 1.0681899583432823,
+    "indexed": 2.876078042201698
    },
-   "predicted_pair_loop": 10.739745707588737,
+   "predicted_pair_loop": 9.143902825121769,
    "identical_spis": 272,
    "rounding_spis": 17,
    "max_abs_entry_gap": 6.106226635438361e-16,
