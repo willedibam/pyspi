@@ -3,7 +3,8 @@
 Checks `Calculator.compute_pairs()` against dense extraction and against the
 retrospective pair-sampling study in `mts-spi-study-cluster`
 (`notebooks/optimization/channel-pair-sampling.ipynb`). Everything uses
-`benchmarked_p90` (289 SPIs).
+`benchmarked_p90` as it stood when they were run: 289 SPIs. Six `dspli`/`dswpli`
+`_max` variants, constant on every input, have since been removed (283).
 
 ```bash
 python bench/pair_sampling/validate.py extract          # ~4 min, M=20, T=1000

@@ -1106,8 +1106,7 @@ class Calculator:
                 raise ValueError("pairs holds the same dyad more than once.")
         pairs = np.ascontiguousarray(pairs, dtype=np.intp)
 
-        if n_jobs is None:
-            n_jobs = int(os.getenv("PYSPI_N_JOBS", "1"))
+        n_jobs = _parallel.resolve_n_jobs(n_jobs)
         _parallel.guard_oversubscription(n_jobs)
 
         spi_keys = list(self.spis.keys())

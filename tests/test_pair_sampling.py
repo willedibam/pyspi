@@ -547,7 +547,7 @@ def test_p90_sampled_runs_agree_across_workers_census_and_resume(tmp_path):
 
     serial = run(n_pairs=8, seed=5)
     how = list(serial.sampling["evaluation"].values())
-    assert (how.count("pairs"), how.count("dense")) == (153, 136)
+    assert (how.count("pairs"), how.count("dense")) == (153, 130)
     assert_matches_dense(serial, "serial sample")
     stochastic = [k for k in keys if "sgddtw" in k or "MinCovDet" in k or "EllipticEnvelope" in k]
     assert len(stochastic) == 12
