@@ -1,0 +1,47 @@
+# Seven p90 statistics that between them use every evaluation path of
+# compute_pairs(); for the notebooks in this folder.
+.statistics.basic:
+  Covariance:
+    labels: [undirected, linear, signed, multivariate, contemporaneous]
+    dependencies:
+    configs:
+      - estimator: EmpiricalCovariance
+  CrossCorrelation:
+    labels: [undirected, linear, signed, bivariate, time-dependent]
+    dependencies:
+    configs:
+      - statistic: max
+
+.statistics.distance:
+  DistanceCorrelation:
+    labels: [undirected, nonlinear, unsigned, bivariate, contemporaneous]
+    dependencies:
+  DynamicTimeWarping:
+    labels: [undirected, nonlinear, unsigned, bivariate, time-dependent]
+    dependencies:
+    configs:
+      - global_constraint: sakoe_chiba
+
+.statistics.infotheory:
+  MutualInfo:
+    labels: [undirected, nonlinear, unsigned, bivariate, contemporaneous]
+    dependencies:
+    configs:
+      - estimator: kraskov
+        prop_k: 4
+  TransferEntropy:
+    labels: [directed, nonlinear, unsigned, bivariate, time-dependent]
+    dependencies:
+    configs:
+      - estimator: kraskov
+        prop_k: 4
+        k_history: 1
+        l_history: 1
+
+.statistics.spectral:
+  PhaseSlopeIndex:
+    labels: [undirected, linear/nonlinear, unsigned, bivariate, frequency-dependent]
+    dependencies:
+    configs:
+      - fmin: 0
+        fmax: 0.5

@@ -380,7 +380,7 @@ def retrospective(out, study):
     for directory in sorted((study / "cached-mpis").glob("*-large-*/*-var-sparse-*"))[:1]:
         projections += project_speedup(load_record(directory)[0], [500, 1000, 2500, 5000],
                                        report)
-    pd.concat(frames).to_csv(out / "meg-draws.csv", index=False)
+    pd.concat(frames).to_csv(out / "meg-draws.csv.gz", index=False)
     pd.DataFrame(projections).to_csv(out / "projected-speedup.csv", index=False)
     medians = pd.concat(frames).groupby(["M", "dyads"]).rmse.median().unstack(0)
     print(medians.loc[[100, 400, 800]].round(5).to_string())
@@ -395,9 +395,11 @@ X_LABEL = (r"$b$ sampled channel dyads $(i,j) = 2b$ directed channel-pairs: "
            r"$(i\to j)$ and $(j\to i)$")
 
 
-def figure_style():
+def figure_style(backend="Agg"):
+    """Matplotlib with the figure style; ``backend=None`` keeps the current one."""
     import matplotlib
-    matplotlib.use("Agg")
+    if backend:
+        matplotlib.use(backend)
     import matplotlib.pyplot as plt
     if not (shutil.which("latex") and shutil.which("dvipng")):
         raise RuntimeError("These figures use LaTeX text: latex and dvipng are required.")
@@ -414,8 +416,13 @@ def figure_style():
 
 
 def _save(fig, path):
+    """Write png and svg and close, or hand the figure back when ``path`` is None."""
+    if path is None:
+        return fig
     for ext in ("png", "svg"):
         fig.savefig(path.with_suffix(f".{ext}"), dpi=180)
+    import matplotlib.pyplot as plt
+    plt.close(fig)
 
 
 def whole_vector_figure(plt, frame, path, title, extracted=None):
@@ -455,8 +462,7 @@ def whole_vector_figure(plt, frame, path, title, extracted=None):
                ncol=len(handles), fontsize=8)
     fig.supxlabel(X_LABEL)
     fig.suptitle(title, fontsize=10)
-    _save(fig, path)
-    plt.close(fig)
+    return _save(fig, path)
 
 
 def gallery_figure(plt, source, path, color, title):
@@ -489,8 +495,7 @@ def gallery_figure(plt, source, path, color, title):
     fig.supxlabel(X_LABEL)
     fig.supylabel(r"Estimated SPI-SPI feature value $\hat{z}$")
     fig.suptitle(title, fontsize=10)
-    _save(fig, path)
-    plt.close(fig)
+    return _save(fig, path)
 
 
 def figures(out):
@@ -505,8 +510,8 @@ def figures(out):
     gallery_figure(plt, out / f"gallery-local-M{M}.npz", out / f"gallery-local-M{M}",
                    COLORS[M], rf"select examples $\cdot$ data=VAR(1) ($M={M}$, $T={T}$, "
                    rf"1 instance) $\cdot$ {REPEATS} draws $\cdot$ vertical scales differ")
-    if (out / "meg-draws.csv").exists():
-        meg = pd.read_csv(out / "meg-draws.csv")
+    if (out / "meg-draws.csv.gz").exists():
+        meg = pd.read_csv(out / "meg-draws.csv.gz")
         sizes = ",".join(map(str, sorted(meg.M.unique())))
         whole_vector_figure(
             plt, meg, out / "meg-full-vector-convergence",
