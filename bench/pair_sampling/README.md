@@ -82,10 +82,44 @@ run (Apple M5, 10 cores, macOS).
   worker` bounds the total (about 2.6 GiB for the dense run on four workers).
   These sizes are for M=20, T=1000 and say nothing about larger recordings.
 
-## Projected large-M cost (not measured)
+## Measured on Gadi
 
-End-to-end sampled extraction has only been timed at M=20. The table applies a
-cost model to the per-SPI dense timings recorded with the cached extractions on
+`gadi_smoke.py` / `gadi_smoke.pbs`, one PBS job per configuration on a Cascade
+Lake node, forked workers, each job bound to its cores; reduced by
+`gadi_summarise.py` to `results/gadi-smoke/`. One MEG recording, T=1000,
+computation r8. The earlier full extractions (r7, one core) took 1.35 h at
+M=64 and 19.3 h at M=243.
+
+| run | workers | wall | speed-up | job peak memory |
+|---|---:|---:|---:|---:|
+| M=64, full table | 1 | 65.0 min | 1.0x | 3.5 GiB |
+| | 4 | 18.0 min | 3.6x | 8.0 GiB |
+| | 8 | 9.9 min | 6.6x | 8.3 GiB |
+| M=243, 1,000 of 29,403 dyads | 1 | 61.2 min | 1.0x (19x the full r7 run) | 20.3 GiB |
+| | 4 | 20.8 min | 2.9x (55x) | 35.5 GiB |
+| | 8 | 18.3 min | 3.3x (63x) | 39.0 GiB |
+| M=243, 2,500 dyads | 8 | 18.2 min | | 34.8 GiB |
+
+- Results are identical for every worker count, and the 2,500-dyad run begins
+  with the 1,000-dyad run's dyads and values.
+- Against the r7 full extractions: at M=64 all 274 SPIs not changed in r8 are
+  bit-identical; at M=243, 249 are bit-identical on the sampled entries, 17
+  agree to rounding, and the same 8 fail. None differs.
+- The SPI-SPI vector from the M=243 runs has RMSE 0.032 at 1,000 dyads and
+  0.016 at 2,500 against the full extraction (r8-changed SPIs excluded).
+- At M=243 the wall time stops at 18 min from four workers on, for either
+  budget: that is one task, the 24 nonparametric spectral-Granger SPIs, which
+  share a cache and are computed on every channel. Summed SPI time is 61 min at
+  1,000 dyads and 119 min at 2,500.
+- At M=64, eight workers are limited by the longest task (10 min, one group of
+  directed spectral SPIs); the summed SPI time is 10% higher with workers than
+  without.
+
+## Projected large-M cost (superseded where measured)
+
+Written before the Gadi runs above. At M=243 it predicted 1.1 h for 1,000
+dyads and 2.0 h for 2,500 on one core; measured, 1.0 h and (summed over eight
+workers) 2.0 h. The table applies a cost model to the per-SPI dense timings recorded with the cached extractions on
 Gadi (`projected-speedup.csv`): indexed SPIs keep their dense cost, pair loops
 scale with the fraction of dyads, and pair-local SPIs use the cost per dyad
 measured at M=20, converted between machines by the ratio of their pair-loop

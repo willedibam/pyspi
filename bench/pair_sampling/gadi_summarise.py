@@ -96,22 +96,26 @@ def main():
         "m64-dense": same([f"m64-dense-j{k}" for k in (1, 4, 8)]),
         "m243-b1000": same([f"m243-b1000-j{k}" for k in (1, 4, 8)])}}
 
+    first = lambda stem: next((f"{stem}-j{k}" for k in (1, 4, 8) if f"{stem}-j{k}" in values), None)
+
     # M=64: the full table against the earlier full extraction.
-    report = json.loads((args.runs / "m64-dense-j1" / "report.json").read_text())
-    folder = next(args.dense.glob(f"*m64*/*{report['member'].lower().rsplit('-m', 1)[0]}*"))
+    m64 = first("m64-dense")
+    report = json.loads((args.runs / m64 / "report.json").read_text())
+    folder = next(args.dense.glob(f"*-m64-*/*{report['member'].lower().rsplit('-m', 1)[0]}*"))
     meta, order, stored = load_record(folder)
     assert order == report["spis"]
     directed = np.array([s["directed"] for s in meta["pyspi"]["spis"]])
-    table = values["m64-dense-j1"].copy()
+    table = values[m64].copy()
     table[~directed] = 0.5 * (table[~directed] + table[~directed].transpose(0, 2, 1))
     off = ~np.eye(report["M"], dtype=bool)
     summary["m64_vs_dense"] = ("against the r7 full extraction: "
                                + describe(compare(table[:, off], stored[:, off], order, report["errors"])))
 
     # M=243: sampled entries against the earlier full extraction, and z.
-    if "m243-b1000-j1" in values:
-        report = json.loads((args.runs / "m243-b1000-j1" / "report.json").read_text())
-        folder = next(args.dense.glob(f"*large*/*{report['member'].lower().rsplit('-m', 1)[0]}*"))
+    m243 = first("m243-b1000")
+    if m243:
+        report = json.loads((args.runs / m243 / "report.json").read_text())
+        folder = next(args.dense.glob(f"*-large-*/*{report['member'].lower().rsplit('-m', 1)[0]}*"))
         meta, order, stored = load_record(folder)
         assert order == report["spis"]
         directed = np.array([s["directed"] for s in meta["pyspi"]["spis"]])
@@ -122,14 +126,14 @@ def main():
         keep = np.array([not any(tag in n for tag in CHANGED) for n in order])
         exact = spi_spi_features(pair_values(stored[keep], np.stack(np.triu_indices(M, 1), 1)))
         z_lines = []
-        for name in ("m243-b1000-j1", "m243-b2500-j8"):
+        for name in (m243, "m243-b2500-j8"):
             if name not in values:
                 continue
             pairs = np.load(args.runs / name / "pairs.npy")
             got = stored_form(values[name], directed)
             want = pair_values(stored, pairs)
             run_errors = json.loads((args.runs / name / "report.json").read_text())["errors"]
-            if name == "m243-b1000-j1":
+            if name == m243:
                 summary["m243_vs_dense"] = ("sampled entries against the r7 full extraction: "
                                             + describe(compare(got, want, order, run_errors)))
                 index = [order.index(k) for k in EXAMPLES.values()]
@@ -144,11 +148,11 @@ def main():
         summary["m243_z_error"] = ("z from the sampled run against z from the full extraction, "
                                    "SPIs changed in r8 excluded -- " + "; ".join(z_lines))
         if "m243-b2500-j8" in values:
-            small, big = (np.load(args.runs / n / "pairs.npy") for n in ("m243-b1000-j1", "m243-b2500-j8"))
+            small, big = (np.load(args.runs / n / "pairs.npy") for n in (m243, "m243-b2500-j8"))
             summary["nested_prefix_identical"] = bool(
                 np.array_equal(big[:len(small)], small)
                 and np.array_equal(values["m243-b2500-j8"][:, :len(small)],
-                                   values["m243-b1000-j1"], equal_nan=True))
+                                   values[m243], equal_nan=True))
     (OUT / "summary.json").write_text(json.dumps(summary, indent=1))
     print(json.dumps({k: v for k, v in summary.items() if k != "runs"}, indent=1))
 
