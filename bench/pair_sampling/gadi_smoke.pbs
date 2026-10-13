@@ -1,0 +1,26 @@
+#!/bin/bash
+#PBS -N pyspi-smoke
+#PBS -P ql44
+#PBS -q normal
+#PBS -l jobfs=4GB
+#PBS -l storage=gdata/ql44+scratch/ql44
+#PBS -j oe
+# One configuration per job, so PBS's own walltime, CPU time and memory are
+# that configuration's. Resources come from qsub: -l ncpus=,mem=,walltime=
+#   qsub -v SOURCE=...,ARCHIVE=...,MEMBER=...,N_PAIRS=1000,N_JOBS=4,OUT=... \
+#        -l ncpus=4,mem=128GB,walltime=03:00:00 gadi_smoke.pbs
+set -euo pipefail
+: "${SOURCE:?}" "${ARCHIVE:?}" "${MEMBER:?}" "${N_PAIRS:?}" "${N_JOBS:?}" "${OUT:?}"
+(( N_JOBS <= PBS_NCPUS ))
+module purge
+module load python3/3.12.1
+source /scratch/ql44/we2614/mts-spi-study/environments/mts-spi-v3-631de27/bin/activate
+# The snapshot's pyspi, ahead of the environment's editable install.
+export PYTHONPATH="$SOURCE"
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+export PYTHONDONTWRITEBYTECODE=1 NUMBA_CACHE_DIR="$PBS_JOBFS/numba-cache"
+mkdir -p "$OUT"
+exec >"$OUT/job.log" 2>&1
+python -c 'import pyspi, pyspi._parallel as p; print(pyspi.__file__, p.COMPUTATION_VERSION, flush=True)'
+python "$SOURCE/bench/pair_sampling/gadi_smoke.py" --archive "$ARCHIVE" --member "$MEMBER" \
+    --n-pairs "$N_PAIRS" --n-jobs "$N_JOBS" --out "$OUT"
