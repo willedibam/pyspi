@@ -1,0 +1,20 @@
+#!/bin/bash
+#PBS -N pyspi-memory
+#PBS -P ql44
+#PBS -q normal
+#PBS -l ncpus=1
+#PBS -l jobfs=4GB
+#PBS -l storage=gdata/ql44+scratch/ql44
+#PBS -j oe
+# One (M, T) cell of memory_profile.py per job, on one core:
+#   qsub -v SOURCE=<pyspi snapshot>,SCRIPT=<memory_profile.py>,M=64,T=1024,OUT=<dir> \
+#        -l mem=16GB,walltime=01:00:00 gadi_memory.pbs
+set -euo pipefail
+: "${SOURCE:?}" "${SCRIPT:?}" "${M:?}" "${T:?}" "${OUT:?}"
+module purge
+module load python3/3.12.1
+source /scratch/ql44/we2614/mts-spi-study/environments/mts-spi-v3-631de27/bin/activate
+export PYTHONPATH="$SOURCE"
+export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1 NUMBA_NUM_THREADS=1
+mkdir -p "$OUT"
+python "$SCRIPT" --M "$M" --T "$T" --out "$OUT/m$M-t$T.json" > "$OUT/m$M-t$T.log" 2>&1

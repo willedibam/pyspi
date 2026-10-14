@@ -157,6 +157,35 @@ default); "warm" is `NUMBA_CACHE=<dir>` filled by an earlier job.
   is three parametric SPIs fitted on every channel; sampled runs have little
   pair-loop work left to share.
 
+## Memory by size
+
+`memory_profile.py` / `gadi_memory.pbs`, one core and one job per size, reduced
+in `results/gadi-memory/summary.json`. Each job runs the SPIs that one worker
+computes whole (everything that is not a pair loop) in full on a seeded VAR(1)
+series and records the high-water mark of resident memory.
+
+| all-channel SPIs, GiB | T=256 | T=1024 | T=4096 |
+|---|---:|---:|---:|
+| M=16 | 0.76 | 0.85 | 0.99 |
+| M=32 | 0.87 | 1.19 | 2.51 |
+| M=64 | 1.14 | 2.11 | 6.06 |
+| M=128 | 2.35 | 5.83 | 19.85 |
+| M=256 | 6.98 | 20.89 | |
+
+- `0.7 GiB + M² T / 3,000,000 GiB` is within 20% of every cell (0.86 to 1.20
+  of it), and 9 to 14% high on the two largest.
+- It is working space, not cache. Traced at M=32, T=2048, the caches left at the
+  end hold 0.16 GiB while one wavelet phase-slope SPI peaks at 0.84 GiB: an
+  array over every pair, sample and frequency, about 400 bytes per pair and
+  sample. The multitaper group peaks at half that.
+- PBS reports 1 to 2 GiB more than these for the same jobs, and for five full
+  recordings (M=48 to 243, one to four workers) `3 GiB + M² T / 3,000,000`
+  holds within 1.5 times. Each further worker added 0.2 GiB at T=1000 (M=64)
+  and 1.1 to 1.8 GiB at T=4096 (M=86 to 107).
+- The same jobs timed the pair loops on 64 dyads: 0.3, 1.0 and 12 s per dyad at
+  T=256, 1024 and 4096. What the per-pair caches keep was below the noise of
+  this method (at most about 1 MiB per dyad at T=4096).
+
 ## Projected large-M cost (superseded where measured)
 
 Written before the Gadi runs above. At M=243 it predicted 1.1 h for 1,000

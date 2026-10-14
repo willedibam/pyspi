@@ -203,10 +203,14 @@ workers. On one *M*=243, *T*=1000 recording, 1,000 of 29,403 pairs took 52, 9, 5
 and 3.6 minutes on 1, 4, 8 and 16 workers and 20-72 GiB, against 19 hours for
 the full table on one worker.
 
-**Memory.** Request memory per dataset, not per core: allow the parent plus
-`k` times the largest worker until you have measured it, and keep the datasets
-in one job similar in *M* and *T*, because one oversized dataset can take the
-whole job down.
+**Memory.** Request memory per dataset, not per core. With `benchmarked_p90`
+one worker needs about `3 GiB + M² × T / 3,000,000 GiB` (4 GiB at *M*=64,
+*T*=1000; 25 GiB at *M*=128, *T*=4096 or *M*=256, *T*=1000), and each further
+worker 0.2 GiB at *T*=1000 to about 1.5 GiB at *T*=4096. The `M² × T` part is
+working space inside the spectral SPIs fitted on every process, held by one
+worker at a time, so the parent plus `k` times the largest worker overstates a
+run two to four times. Keep the datasets in one job similar in *M* and *T*,
+because one oversized dataset can take the whole job down.
 
 ```bash
 # PBS array job: one dataset per task, one core each

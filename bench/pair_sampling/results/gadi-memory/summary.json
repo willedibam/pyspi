@@ -1,0 +1,216 @@
+{
+ "source": "pyspi fd0de71",
+ "rule": "0.7 GiB + M^2 T / 3e6 GiB",
+ "cells": [
+  {
+   "M": 16,
+   "T": 256,
+   "all_channel_peak_gib": 0.76,
+   "rule_gib": 0.72,
+   "measured_over_rule": 1.06,
+   "pbs_job_gib": 2.15,
+   "all_channel_seconds": 14,
+   "pair_loop_seconds_per_dyad": 0.28,
+   "raised_by": {
+    "dtw_constraint-itakura": 0.09,
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.03,
+    "dtw": 0.01
+   }
+  },
+  {
+   "M": 16,
+   "T": 1024,
+   "all_channel_peak_gib": 0.85,
+   "rule_gib": 0.79,
+   "measured_over_rule": 1.08,
+   "pbs_job_gib": 2.21,
+   "all_channel_seconds": 27,
+   "pair_loop_seconds_per_dyad": 1.07,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.1,
+    "dtw_constraint-itakura": 0.07,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.03
+   }
+  },
+  {
+   "M": 16,
+   "T": 4096,
+   "all_channel_peak_gib": 0.99,
+   "rule_gib": 1.05,
+   "measured_over_rule": 0.95,
+   "pbs_job_gib": 1.45,
+   "all_channel_seconds": 107,
+   "pair_loop_seconds_per_dyad": 12.85,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.21,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.1,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 0.1
+   }
+  },
+  {
+   "M": 32,
+   "T": 256,
+   "all_channel_peak_gib": 0.87,
+   "rule_gib": 0.79,
+   "measured_over_rule": 1.1,
+   "pbs_job_gib": 2.16,
+   "all_channel_seconds": 35,
+   "pair_loop_seconds_per_dyad": 0.28,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.11,
+    "dtw_constraint-itakura": 0.05,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.04
+   }
+  },
+  {
+   "M": 32,
+   "T": 1024,
+   "all_channel_peak_gib": 1.19,
+   "rule_gib": 1.05,
+   "measured_over_rule": 1.14,
+   "pbs_job_gib": 2.48,
+   "all_channel_seconds": 86,
+   "pair_loop_seconds_per_dyad": 1.08,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.3,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.12,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 0.1
+   }
+  },
+  {
+   "M": 32,
+   "T": 4096,
+   "all_channel_peak_gib": 2.51,
+   "rule_gib": 2.1,
+   "measured_over_rule": 1.2,
+   "pbs_job_gib": 3.87,
+   "all_channel_seconds": 378,
+   "pair_loop_seconds_per_dyad": 12.05,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.89,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.39,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 0.39
+   }
+  },
+  {
+   "M": 64,
+   "T": 256,
+   "all_channel_peak_gib": 1.14,
+   "rule_gib": 1.05,
+   "measured_over_rule": 1.09,
+   "pbs_job_gib": 2.51,
+   "all_channel_seconds": 162,
+   "pair_loop_seconds_per_dyad": 0.33,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.16,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 0.1,
+    "cohmag_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.08
+   }
+  },
+  {
+   "M": 64,
+   "T": 1024,
+   "all_channel_peak_gib": 2.11,
+   "rule_gib": 2.1,
+   "measured_over_rule": 1.01,
+   "pbs_job_gib": 3.47,
+   "all_channel_seconds": 437,
+   "pair_loop_seconds_per_dyad": 1.01,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.44,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.41,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 0.38
+   }
+  },
+  {
+   "M": 64,
+   "T": 4096,
+   "all_channel_peak_gib": 6.06,
+   "rule_gib": 6.29,
+   "measured_over_rule": 0.96,
+   "pbs_job_gib": 6.77,
+   "all_channel_seconds": 1475,
+   "pair_loop_seconds_per_dyad": 12.11,
+   "raised_by": {
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 1.56,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 1.52,
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 1.5
+   }
+  },
+  {
+   "M": 128,
+   "T": 256,
+   "all_channel_peak_gib": 2.35,
+   "rule_gib": 2.1,
+   "measured_over_rule": 1.12,
+   "pbs_job_gib": 2.71,
+   "all_channel_seconds": 476,
+   "pair_loop_seconds_per_dyad": 0.28,
+   "raised_by": {
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.54,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 0.38,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.31
+   }
+  },
+  {
+   "M": 128,
+   "T": 1024,
+   "all_channel_peak_gib": 5.83,
+   "rule_gib": 6.29,
+   "measured_over_rule": 0.93,
+   "pbs_job_gib": 7.2,
+   "all_channel_seconds": 1178,
+   "pair_loop_seconds_per_dyad": 0.97,
+   "raised_by": {
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 1.62,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 1.51,
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 1.08
+   }
+  },
+  {
+   "M": 128,
+   "T": 4096,
+   "all_channel_peak_gib": 19.85,
+   "rule_gib": 23.07,
+   "measured_over_rule": 0.86,
+   "pbs_job_gib": 21.18,
+   "all_channel_seconds": 6002,
+   "pair_loop_seconds_per_dyad": 11.91,
+   "raised_by": {
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 6.04,
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 6.0,
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 3.85
+   }
+  },
+  {
+   "M": 256,
+   "T": 256,
+   "all_channel_peak_gib": 6.98,
+   "rule_gib": 6.29,
+   "measured_over_rule": 1.11,
+   "pbs_job_gib": 8.12,
+   "all_channel_seconds": 1888,
+   "pair_loop_seconds_per_dyad": 0.29,
+   "raised_by": {
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 1.87,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 1.51,
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 1.05
+   }
+  },
+  {
+   "M": 256,
+   "T": 1024,
+   "all_channel_peak_gib": 20.89,
+   "rule_gib": 23.07,
+   "measured_over_rule": 0.91,
+   "pbs_job_gib": 21.97,
+   "all_channel_seconds": 4734,
+   "pair_loop_seconds_per_dyad": 0.96,
+   "raised_by": {
+    "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 6.5,
+    "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 6.02,
+    "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 3.81
+   }
+  }
+ ]
+}

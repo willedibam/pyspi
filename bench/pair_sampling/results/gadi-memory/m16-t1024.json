@@ -1,0 +1,38 @@
+{
+ "M": 16,
+ "T": 1024,
+ "config": "benchmarked_p90",
+ "n_whole": 189,
+ "n_pair_loops": 94,
+ "after_setup_gib": 0.6218376159667969,
+ "computation": "3.0.0.r9",
+ "job": "181182496.gadi-pbs",
+ "whole": {
+  "peak_gib": 0.8540153503417969,
+  "seconds": 26.87424452137202,
+  "failed": 1,
+  "raised_by": {
+   "psi_wavelet_mean_fs-1_fmin-0-25_fmax-0-5_mean": 0.10293960571289062,
+   "dtw_constraint-itakura": 0.0685882568359375,
+   "plv_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.0251922607421875,
+   "sgc_nonparametric_mean_fs-1_fmin-1e-05_fmax-0-5": 0.024402618408203125,
+   "cohmag_multitaper_mean_fs-1_fmin-0_fmax-0-5": 0.01105499267578125
+  }
+ },
+ "pair_loops": {
+  "resident_gib": [
+   0.7572593688964844,
+   0.81170654296875,
+   0.7896308898925781
+  ],
+  "dyads": [
+   0,
+   16,
+   64
+  ],
+  "kept_gib_per_dyad": -0.00045990943908691406,
+  "all_dyads_gib": -0.05518913269042969,
+  "seconds_per_dyad": 1.0692383911664365,
+  "peak_gib": 0.8579940795898438
+ }
+}
