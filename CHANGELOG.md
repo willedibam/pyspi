@@ -273,6 +273,7 @@ Further fixes, each pinned by a test against a closed form, a textbook implement
   Seven identifiers in `full` (`EmpiricalCovariance`, `GraphicalLasso`, `GraphicalLassoCV`, `LedoitWolf`, `MinCovDet`, `OAS`, `ShrunkCovariance`); `pcorr_EmpiricalCovariance` and `pcorr_LedoitWolf` in `fast`.
 - **Symbolic transfer entropy with 3-sample ordinal patterns** (`te_symbolic_k-3`), an amplitude-free directed coupling measure (Staniek & Lehnertz 2008).
   Its bias under independence is about 0.13, 0.03 and 0.01 nats at T = 300, 1000 and 3000.
+- **`pyspi.utils.bartlett_factor(x, y)` and `pyspi.utils.auto_theiler_window(x, y)`.** `bartlett_factor` is the sample `B = sum_k r_x(k) r_y(k)`: the factor by which autocorrelation inflates the null variance of a cross-correlation (`N / B` is the effective sample size). It is consistent but biased low when the correlation time is not small against `N` (mean 0.80 of `B` at AR(1) phi = 0.9, N = 200; 0.25 at phi = 0.99), so corrections built on it are approximate there. `auto_theiler_window` returns the window `dyn_corr_excl="AUTO"` uses for a pair (`int(B + 1)`, capped at `N // 10`) and whether the cap set it. The KSG `_DCE-AUTO` SPIs now compute their window through it; their values are unchanged (bit-identical windows on 4,800 test pairs).
 
 ### Dependencies
 

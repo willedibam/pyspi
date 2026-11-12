@@ -133,3 +133,56 @@ def test_loads_default_config_if_no_config_specified(tmp_path, monkeypatch):
     assert spis, "Filtered config instantiated no SPIs."
     missing = [k for k, v in spis.items() if "nonlinear" not in (v.labels or [])]
     assert not missing, f"Filtered config contains SPIs without the label: {missing}"
+
+
+# --------------------------------------------------------------------------
+# Bartlett factor and the AUTO Theiler window
+# --------------------------------------------------------------------------
+
+def _ar1(phi, T, rng, burn=3000):
+    from scipy.signal import lfilter
+    return lfilter([1.0], [1.0, -phi], rng.standard_normal(T + burn))[burn:]
+
+
+def test_bartlett_factor_matches_brute_force_acf_sum():
+    """Independent reference: biased ACFs from np.correlate, summed over every lag."""
+    import numpy as np
+    from pyspi.utils import bartlett_factor
+
+    rng = np.random.default_rng(0)
+    x, y = _ar1(0.7, 300, rng), _ar1(0.4, 300, rng)
+
+    def biased_acf(v):
+        v = v - v.mean()
+        c = np.correlate(v, v, mode="full")  # lags -(N-1) .. N-1
+        return c / c[v.size - 1]
+
+    expected = np.dot(biased_acf(x), biased_acf(y))
+    assert abs(bartlett_factor(x, y) - expected) < 1e-10
+
+
+@pytest.mark.parametrize("phi", [0.0, 0.5, 0.9])
+def test_bartlett_factor_converges_to_the_ar1_value(phi):
+    """Two independent AR(1) series: B = (1 + phi^2) / (1 - phi^2).
+
+    At N=20000 the low bias documented on bartlett_factor is under 1% for
+    phi <= 0.9, so the 2% allowance is not where a wrong formula could hide
+    (a missing factor of 2, or a one-sided sum, is off by ~50% or more).
+    """
+    import numpy as np
+    from pyspi.utils import bartlett_factor
+
+    B = (1 + phi**2) / (1 - phi**2)
+    v = np.array([bartlett_factor(_ar1(phi, 20000, rng), _ar1(phi, 20000, rng))
+                  for rng in (np.random.default_rng([1, r]) for r in range(20))])
+    se = v.std(ddof=1) / np.sqrt(v.size)
+    assert abs(v.mean() - B) <= 4 * se + 0.02 * B, (v.mean(), B, se)
+
+
+def test_bartlett_factor_rejects_bad_input():
+    import numpy as np
+    from pyspi.utils import bartlett_factor
+
+    assert np.isnan(bartlett_factor(np.ones(50), np.arange(50.0)))
+    with pytest.raises(ValueError, match="same length"):
+        bartlett_factor(np.arange(10.0), np.arange(11.0))

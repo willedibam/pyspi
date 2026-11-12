@@ -1427,10 +1427,10 @@ class InfoTheoryBase(Unsigned):
     def _resolve_theiler(self, data, i, j):
         """Theiler/dynamic-correlation-exclusion window for pair (i, j).
 
-        None -> 0 (no window); an integer -> that window; "AUTO" -> the
-        autocorrelation time 2*<acf(x_i), acf(x_j)>, capped at N // 10 and
-        cached per dataset. Shared by MI/TLMI/TE; only the kNN (kraskov)
-        paths consume it.
+        None -> 0 (no window); an integer -> that window; "AUTO" ->
+        :func:`pyspi.utils.auto_theiler_window`, the autocorrelation time
+        2*<acf(x_i), acf(x_j)> capped at N // 10, cached per dataset. Shared
+        by MI/TLMI/TE; only the kNN (kraskov) paths consume it.
 
         The cap is hctsa's rule for autocorrelation-derived parameters. For
         two slowly decaying autocorrelation functions the uncapped window can
@@ -1443,12 +1443,10 @@ class InfoTheoryBase(Unsigned):
             if not hasattr(data, 'theiler'):
                 z = data.to_numpy()
                 M = data.n_processes
-                cap = data.n_observations // 10
                 theiler = -np.ones((M, M))
                 for _i in range(M):
                     for _j in range(_i + 1, M):
-                        w = 2 * np.dot(utils.acf(z[_i]), utils.acf(z[_j]))
-                        theiler[_i, _j] = min(int(w), cap)
+                        theiler[_i, _j], _ = utils.auto_theiler_window(z[_i], z[_j])
                         theiler[_j, _i] = theiler[_i, _j]
                 data.theiler = theiler
             return int(data.theiler[i, j])

@@ -105,5 +105,9 @@ def test_auto_theiler_window_is_capped_at_a_tenth_of_the_series(spi):
     assert spi._resolve_theiler(data, 0, 1) == T // 10
     small = 2 * np.dot(utils.acf(z[2]), utils.acf(z[3]))
     assert spi._resolve_theiler(data, 2, 3) == int(small) < T // 10
+    # The public helper reports the same windows, and says which was capped.
+    assert utils.auto_theiler_window(z[0], z[1]) == (T // 10, True)
+    assert utils.auto_theiler_window(z[2], z[3]) == (int(small), False)
+    assert int(utils.bartlett_factor(z[2], z[3]) + 1) == int(small)
     A = spi.multivariate(data)
     assert np.isfinite(A[~np.eye(4, dtype=bool)]).all()
