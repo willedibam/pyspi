@@ -216,7 +216,8 @@ def _pearson(predictions, actuals):
     return np.dot(pm, am) / denom
 
 
-def _cross_map_skill(library, targets, E, lib_sizes, sample=100, seed=42):
+def _cross_map_skill(library, targets, E, lib_sizes, sample=100, seed=42,
+                     exclusion_radius=0):
     """Cross-map skill of one variable's shadow manifold against several targets.
 
     Returns ``(len(targets), len(lib_sizes))``: entry ``[t, l]`` is the mean,
@@ -238,6 +239,12 @@ def _cross_map_skill(library, targets, E, lib_sizes, sample=100, seed=42):
 
     Requires finite data (``Data`` guarantees it), so every row from ``E - 1``
     on is a valid embedding point.
+
+    ``exclusion_radius`` is pyEDM's ``exclusionRadius``: library points within
+    that many samples of the query point are not neighbours either, so a slow
+    target cannot be "predicted" by its own temporal neighbours. Same query
+    headroom (``2 * exclusion_radius`` extra) and mask as pyEDM 2.5, so values
+    equal ``pyEDM.CCM(..., exclusionRadius=r)``.
     """
     library = np.asarray(library, dtype=np.float64)
     rows = np.arange(E - 1, library.shape[0])
@@ -256,7 +263,7 @@ def _cross_map_skill(library, targets, E, lib_sizes, sample=100, seed=42):
         if k < 1:
             skill[:, l] = np.nan
             continue
-        k_query = min(k + 1, L)
+        k_query = min(k + 1 + 2 * exclusion_radius, L)
         for s in range(sample):
             lib_idx = rng.choice(n_points, size=L, replace=False)
             lib_idx.sort()
@@ -265,8 +272,12 @@ def _cross_map_skill(library, targets, E, lib_sizes, sample=100, seed=42):
                 dist, local = dist[:, np.newaxis], local[:, np.newaxis]
             neighbours = lib_idx[local]
 
-            # First k neighbours other than the query point itself
-            valid = ~(neighbours == r_M)
+            # First k neighbours other than the query point itself (and, with
+            # an exclusion radius, other than its temporal neighbours)
+            if exclusion_radius > 0:
+                valid = ~(np.abs(neighbours - r_M) <= exclusion_radius)
+            else:
+                valid = ~(neighbours == r_M)
             cs = np.cumsum(valid, axis=1)
             first_k = valid & (cs <= k)
             insufficient = cs[:, -1] < k
@@ -313,6 +324,12 @@ class ConvergentCrossMapping(Directed, Signed):
     and ``max`` are over library sizes; ``diff`` is ``ccm(i->j) - ccm(j->i)``
     and antisymmetric.
 
+    ``exclusion_radius=r`` (identifier suffix ``_excl-<r>``) drops library
+    points within ``r`` samples of the query point from its neighbours, as
+    pyEDM's ``exclusionRadius``. Without it a slow target is cross-mapped from
+    its own temporal neighbours, so independent slow series score high skill.
+    The simplex search for ``embedding_dimension=None`` is not changed by it.
+
     With ``embedding_dimension=None`` each process gets its own
     simplex-optimal dimension, and each pair uses the larger of its two in
     both directions.
@@ -327,11 +344,13 @@ class ConvergentCrossMapping(Directed, Signed):
 
     @property
     def _cache_subkey(self):
-        # Cache is data.ccm[E]; statistic is post-lookup.
-        return (self._E,)
+        # Cache is data.ccm[(E, exclusion_radius)]; statistic is post-lookup.
+        return (self._E, self._exclusion_radius)
 
-    def __init__(self, statistic="mean", embedding_dimension=None):
+    def __init__(self, statistic="mean", embedding_dimension=None, exclusion_radius=0):
         self._statistic = statistic
+        self._exclusion_radius = require_int("exclusion_radius", exclusion_radius,
+                                             minimum=0)
         self._E = (
             None if embedding_dimension is None
             else require_int("embedding_dimension", embedding_dimension, minimum=1)
@@ -345,10 +364,12 @@ class ConvergentCrossMapping(Directed, Signed):
             self.labels = [l for l in self.labels if l != "directed"] + ["antisymmetric"]
 
         self.identifier += f"_E-{self._E}_{statistic}"
+        if self._exclusion_radius:
+            self.identifier += f"_excl-{self._exclusion_radius}"
 
     @property
     def key(self):
-        return self._E
+        return (self._E, self._exclusion_radius)
 
     def _from_cache(self, data):
         try:
@@ -395,7 +416,8 @@ class ConvergentCrossMapping(Directed, Signed):
                     # is evidence that _j drives _i, so it fills cell [_j, _i].
                     skill = _cross_map_skill(
                         z[_i], [z[_j] for _j in targets], int(E), lib_sizes,
-                        sample=100, seed=42)
+                        sample=100, seed=42,
+                        exclusion_radius=self._exclusion_radius)
                     for _j, row in zip(targets, skill):
                         ccmf[_j, _i, :n] = row
                         ccmf[_j, _i, n:] = np.nan

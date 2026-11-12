@@ -185,6 +185,49 @@ def test_ccm_cross_map_skill_is_bit_identical_to_pyedm(E):
                 reverse, ref[f"{names[j]}:{names[i]}"].to_numpy())
 
 
+@pytest.mark.parametrize("E,r", [(1, 3), (3, 5)])
+def test_ccm_exclusion_radius_is_bit_identical_to_pyedm(E, r):
+    """`exclusion_radius` is pyEDM 2.5's `exclusionRadius`: same query
+    headroom, same temporal mask, so the skill curves are equal exactly."""
+    import pandas as pd
+    import pyEDM
+
+    from pyspi.statistics.causal import _ccm_library_sizes, _cross_map_skill
+
+    rng = np.random.default_rng(13)
+    N = 90
+    a, b = _coupled_logistic(N)
+    z = np.vstack([a, b, np.cumsum(rng.standard_normal(N)) * 0.1])
+    df = pd.DataFrame(np.column_stack([np.arange(N), z.T]),
+                      columns=["index", "a", "b", "c"])
+    names = ["a", "b", "c"]
+    lib_sizes = _ccm_library_sizes(N, E)
+    for i, j in [(0, 1), (2, 0)]:
+        ref = pyEDM.CCM(dataFrame=df, E=E, columns=names[i], target=names[j],
+                        libSizes=lib_sizes, sample=20, seed=42, exclusionRadius=r,
+                        parallel=False)
+        got = _cross_map_skill(z[i], [z[j]], E, lib_sizes, sample=20, seed=42,
+                               exclusion_radius=r)[0]
+        assert np.array_equal(got, ref[f"{names[i]}:{names[j]}"].to_numpy())
+        # and the radius does something on this data
+        assert not np.array_equal(got, _cross_map_skill(z[i], [z[j]], E, lib_sizes,
+                                                        sample=20, seed=42)[0])
+
+
+def test_ccm_exclusion_radius_identity():
+    from pyspi.statistics.causal import ConvergentCrossMapping as CCM
+
+    assert CCM().identifier == "ccm_E-None_mean"
+    assert CCM(exclusion_radius=0).identifier == "ccm_E-None_mean"
+    a = CCM(statistic="max", embedding_dimension=1, exclusion_radius=10)
+    assert a.identifier == "ccm_E-1_max_excl-10"
+    assert a.key != CCM(embedding_dimension=1).key
+    assert a._cache_subkey != CCM(embedding_dimension=1)._cache_subkey
+    for bad in (-1, 2.5, True):
+        with pytest.raises((ValueError, TypeError)):
+            CCM(exclusion_radius=bad)
+
+
 # ---------------------------------------------------------------------------
 # Additive noise model
 # ---------------------------------------------------------------------------
