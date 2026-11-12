@@ -1280,7 +1280,7 @@ class InfoTheoryBase(Unsigned):
 
     def _getkey(self):
         if self._estimator == "kernel":
-            return (self._estimator, self._kernel_width)
+            return (self._estimator, self._kernel_width, self._dyn_corr_excl)
         elif self._estimator == "kraskov":
             # dyn_corr_excl is in the key even though the entropy caches this
             # keys are not consumed by the KSG paths today: the rule is that
@@ -1644,6 +1644,12 @@ class TransferEntropy(InfoTheoryBase, Directed):
     identifier = "te"
     labels = ["unsigned", "embedding", "infotheory", "temporal", "directed"]
 
+    # The box-kernel TE calculator has its own Theiler path (neighbours with
+    # |j - i| <= w do not count, the KSG convention), so TE accepts a window
+    # for kernel as well as kraskov. Kernel MI/TLMI have no such path.
+    _PARAM_OWNER = {**InfoTheoryBase._PARAM_OWNER,
+                    "dyn_corr_excl": ("kraskov", "kernel")}
+
     def __init__(
         self,
         auto_embed_method=None,
@@ -1863,6 +1869,9 @@ class TransferEntropy(InfoTheoryBase, Directed):
 
         # kernel/symbolic path: numpy calculators
         if est in ('kernel', 'symbolic'):
+            if est == 'kernel':
+                # Per pair: "AUTO" resolves to a window that depends on (i, j).
+                self._calc.setProperty("DYN_CORR_EXCL", self._resolve_theiler(data, i, j))
             self._calc.initialise()
             self._calc.setObservations(src, targ)
             return self._calc.computeAverageLocalOfObservations()

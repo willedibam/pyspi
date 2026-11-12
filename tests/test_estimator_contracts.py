@@ -1916,3 +1916,73 @@ def test_distance_correlation_matches_the_double_centring_definition(biased):
     # Nonlinear dependence with zero correlation. The biased statistic sits
     # near 0.2 for independent series of this length, so the margin is modest.
     assert S[0, 1] > 2 * abs(S[0, 2])
+
+
+# --------------------------------------------------------------------------
+# Kernel TE accepts a Theiler window (dyn_corr_excl); kernel MI/TLMI do not
+# --------------------------------------------------------------------------
+
+def _kernel_te_brute_force(src, targ, width, w):
+    """Independent O(N^2) box-kernel TE, k=1, per-column ddof=1 normalisation.
+
+    Neighbours with |j - i| <= w are excluded (w=0 keeps every point, self
+    included); samples with an empty count are dropped, as in JIDT.
+    """
+    yn, yp, x = targ[1:], targ[:-1], src[:-1]
+    cols = [c / c.std(ddof=1) for c in (yn, yp, x)]
+
+    def counts(*cs):
+        d = np.max([np.abs(c[:, None] - c[None, :]) for c in cs], axis=0)
+        idx = np.arange(d.shape[0])
+        keep = np.abs(idx[:, None] - idx[None, :]) > w if w > 0 else True
+        return ((d <= width) & keep).sum(axis=1).astype(float)
+
+    n_yp, n_yn_yp = counts(cols[1]), counts(cols[0], cols[1])
+    n_yp_x, n_all = counts(cols[1], cols[2]), counts(*cols)
+    ok = (n_yp > 0) & (n_yn_yp > 0) & (n_yp_x > 0) & (n_all > 0)
+    return np.mean(np.log(n_all[ok]) + np.log(n_yp[ok])
+                   - np.log(n_yp_x[ok]) - np.log(n_yn_yp[ok]))
+
+
+@pytest.mark.parametrize("w", [0, 1, 5])
+def test_kernel_te_theiler_window_matches_brute_force(w):
+    import pyspi.statistics.infotheory as it
+
+    rng = np.random.default_rng(4)
+    src = rng.standard_normal(301)
+    targ = np.r_[0.0, 0.5 * src[:-1]] + rng.standard_normal(301)
+    data = Data(np.vstack([src, targ]), dim_order="ps", zscore=True)
+    spi = it.TransferEntropy(estimator="kernel", kernel_width=0.25, dyn_corr_excl=w)
+    z = data.to_numpy(squeeze=True)
+    expected = _kernel_te_brute_force(z[0], z[1], 0.25, w)
+    assert abs(spi.multivariate(data)[0, 1] - expected) < 1e-12
+
+
+def test_kernel_te_auto_window_is_the_pair_window():
+    """"AUTO" resolves per pair to `auto_theiler_window`, and an explicit
+    window of the same size gives the same value."""
+    import pyspi.statistics.infotheory as it
+    from pyspi.utils import auto_theiler_window
+    from scipy.signal import lfilter
+
+    rng = np.random.default_rng(6)
+    Z = lfilter([1.0], [1.0, -0.8], rng.standard_normal((3, 700)), axis=1)[:, 300:]
+    data = Data(Z, dim_order="ps", zscore=True)
+    z = data.to_numpy(squeeze=True)
+    auto = it.TransferEntropy(estimator="kernel", dyn_corr_excl="AUTO").multivariate(data)
+    for i, j in [(0, 1), (2, 0)]:
+        w, _ = auto_theiler_window(z[i], z[j])
+        assert w > 0
+        fixed = it.TransferEntropy(estimator="kernel", dyn_corr_excl=w).multivariate(data)
+        assert auto[i, j] == fixed[i, j]
+
+
+def test_kernel_dyn_corr_excl_ownership():
+    import pyspi.statistics.infotheory as it
+
+    assert (it.TransferEntropy(estimator="kernel", kernel_width=0.25, dyn_corr_excl=5).identifier
+            == "te_kernel_W-0.25_DCE-5_k-1")
+    assert it.TransferEntropy(estimator="kernel", dyn_corr_excl=0).identifier == "te_kernel_W-0.5_k-1"
+    for cls in (it.MutualInfo, it.TimeLaggedMutualInfo):
+        with pytest.raises(ValueError, match="not used by estimator"):
+            cls(estimator="kernel", dyn_corr_excl=5)

@@ -295,3 +295,25 @@ def test_xcorr_sigonly_values():
     for bad in ("Bartlett", "true", 2):
         with pytest.raises(ValueError, match="sigonly"):
             CrossCorrelation(sigonly=bad)
+
+
+# --- kernel TE: self-counts and temporal neighbours inflate the null ----------
+
+@pytest.mark.slow
+@pytest.mark.parametrize("cell", ["phi0", "phi0.9", "slow_x_white_w>s"])
+def test_kernel_te_theiler_window_removes_most_of_the_null_bias(cell):
+    """Box-kernel TE at T=1000 on independent pairs: ~0.35 nats on white noise
+    with no window (self-counts and temporal neighbours), under 0.1 with
+    dyn_corr_excl="AUTO". Measured: 0.06 / -0.005 / -0.015 nats for the three cells."""
+    cond = cell.split("_w>s")[0] if cell.endswith("_w>s") else cell
+    col = (1, 0) if cell.endswith("_w>s") else (0, 1)
+    fixed = TransferEntropy(estimator="kernel", kernel_width=0.25, dyn_corr_excl="AUTO")
+    plain = TransferEntropy(estimator="kernel", kernel_width=0.25)
+    v_fixed, v_plain = [], []
+    for rep in range(8):
+        data = Data(null_pair(cond, 1000, cell_seed(cond, 1000, rep)), dim_order="ps", zscore=True)
+        v_fixed.append(fixed.multivariate(data)[col])
+        v_plain.append(plain.multivariate(data)[col])
+    assert abs(np.mean(v_fixed)) < 0.1, np.mean(v_fixed)
+    if cell == "phi0":  # control: without the window the bias is there
+        assert np.mean(v_plain) > 0.25, np.mean(v_plain)
