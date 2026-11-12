@@ -13,7 +13,7 @@ from pyspi.base import (
     parse_bivariate,
     parse_multivariate,
 )
-from pyspi.utils import bartlett_factor, require_int
+from pyspi.utils import acf, bartlett_factor, require_int
 
 
 def _spearman_matrix(Z):
@@ -580,5 +580,55 @@ class LaggedCorrelation(Undirected, Signed):
         C = 0.5 * (forward + backward)
         if self._squared:
             C = C ** 2
+        np.fill_diagonal(C, np.nan)
+        return C
+
+
+class BartlettCorrelation(Undirected, Signed):
+    """Pearson correlation as an autocorrelation-corrected z-score.
+
+    ``z_ij = r_ij * sqrt(T / B_ij)``, with ``r_ij`` the zero-lag Pearson
+    correlation and ``B_ij`` the sample Bartlett factor of the pair
+    (:func:`pyspi.utils.bartlett_factor`). For independent series
+    ``T * Var(r) -> B`` (Bartlett 1946), so ``z`` is approximately standard
+    normal under independence whatever the two series' autocorrelation, and
+    ``T / B`` is the pair's effective sample size. Plain ``r`` has null SD
+    ``sqrt(B / T)``, so the same ``r`` is strong evidence of coupling between
+    white series and none between slow ones; ``z`` puts pairs with different
+    dynamics on one scale.
+
+    Measured on independent pairs (white, AR(1) phi = 0.5/0.9/0.99, narrowband
+    AR(2); 400 reps), ``|z| > 1.96`` occurs on 1.2-5.2% of pairs at T = 200 and
+    3.5-6.5% at T = 1000, against 5% nominal; ``r * sqrt(T)`` exceeds it on
+    most slow pairs. The sample ``B`` is biased low for slow series (see
+    ``bartlett_factor``), but the sample ``r`` is shrunk too and the level held
+    in these conditions; it is not established for other spectra. Under
+    coupling the null variance formula no longer applies, so ``z`` measures
+    the evidence against independence, not the coupling strength. NaN if
+    either series is constant.
+    """
+
+    name = "Bartlett-corrected correlation"
+    identifier = "corr_pearson_bartlett-z"
+    labels = ["basic", "linear", "undirected", "temporal", "signed"]
+
+    @parse_bivariate
+    def bivariate(self, data, i=None, j=None):
+        x, y = data.to_numpy(squeeze=True)[[i, j]]
+        B = bartlett_factor(x, y)
+        if not B > 0:
+            return np.nan
+        return float(np.corrcoef(x, y)[0, 1] * np.sqrt(x.size / B))
+
+    @parse_multivariate
+    def multivariate(self, data):
+        Z = data.to_numpy(squeeze=True)
+        T = Z.shape[1]
+        A = np.array([acf(z) for z in Z])
+        B = 2 * A @ A.T - 1  # bartlett_factor for every pair
+        B[A[:, 0] == 0, :] = np.nan
+        B[:, A[:, 0] == 0] = np.nan
+        with np.errstate(divide="ignore", invalid="ignore"):
+            C = np.corrcoef(Z) * np.sqrt(T / np.where(B > 0, B, np.nan))
         np.fill_diagonal(C, np.nan)
         return C

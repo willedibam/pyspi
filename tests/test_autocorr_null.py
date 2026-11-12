@@ -297,6 +297,61 @@ def test_xcorr_sigonly_values():
             CrossCorrelation(sigonly=bad)
 
 
+# --- Bartlett-corrected correlation z -----------------------------------------
+
+from pyspi.statistics.basic import BartlettCorrelation  # noqa: E402
+from pyspi.utils import bartlett_factor  # noqa: E402
+
+
+@pytest.mark.parametrize("cond", list(CONDITIONS))
+def test_bartlett_z_holds_its_level(cond):
+    """|z| > 1.96 on at most ~5% of independent pairs at T=200 (bound 10%, as
+    for xcorr). Plain r * sqrt(T) is the positive control on the slow
+    conditions, where it must exceed the same cut far more often."""
+    spi, hits, naive = BartlettCorrelation(), 0, 0
+    for rep in range(XCORR_REPS):
+        z = null_pair(cond, 200, cell_seed(cond, 200, rep))
+        hits += abs(spi.multivariate(Data(z, dim_order="ps", zscore=True))[0, 1]) > 1.96
+        naive += abs(np.corrcoef(z)[0, 1]) * np.sqrt(200) > 1.96
+    assert hits / XCORR_REPS <= XCORR_MAX_RATE, f"{cond}: {hits / XCORR_REPS:.3f}"
+    if cond in ("phi0.9", "phi0.99", "ar2"):
+        assert naive / XCORR_REPS > 0.3, f"{cond}: control {naive / XCORR_REPS:.3f}"
+
+
+def test_bartlett_z_detects_coupled_slow_series():
+    """AR(1) phi=0.9 pair with lag-0 correlation ~0.5 at T=1000 (N/B ~ 100):
+    z > 1.96 on nearly every pair."""
+    from scipy.signal import lfilter
+
+    spi, hits = BartlettCorrelation(), 0
+    for rep in range(50):
+        e = np.random.default_rng([12, rep]).standard_normal((3, 3000))
+        x = lfilter([1.0], [1.0, -0.9], e[0] + e[2])[2000:]
+        y = lfilter([1.0], [1.0, -0.9], e[1] + e[2])[2000:]
+        hits += spi.multivariate(Data(np.vstack([x, y]), dim_order="ps", zscore=True))[0, 1] > 1.96
+    assert hits >= 45, f"detected {hits}/50"
+
+
+def test_bartlett_z_matches_its_definition():
+    """Vectorised multivariate == per-pair bivariate == r * sqrt(T / B)."""
+    rng = np.random.default_rng(5)
+    Z = np.vstack([ar_series([0.8], 300, rng), ar_series([0.3], 300, rng),
+                   ar_series(_ar2(), 300, rng), rng.standard_normal(300)])
+    data = Data(Z, dim_order="ps", zscore=True)
+    z = data.to_numpy(squeeze=True)
+    spi = BartlettCorrelation()
+    mv = spi.multivariate(data)
+    for i in range(4):
+        for j in range(4):
+            if i == j:
+                assert np.isnan(mv[i, j])
+                continue
+            ref = np.corrcoef(z[i], z[j])[0, 1] * np.sqrt(300 / bartlett_factor(z[i], z[j]))
+            assert abs(mv[i, j] - ref) < 1e-10
+            assert abs(spi.bivariate(data, i=i, j=j) - ref) < 1e-10
+    assert spi.identifier == "corr_pearson_bartlett-z"
+
+
 # --- kernel TE: self-counts and temporal neighbours inflate the null ----------
 
 @pytest.mark.slow
