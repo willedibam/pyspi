@@ -239,3 +239,59 @@ def test_gaussian_null_anchor(name):
     assert held == should_hold, (
         f"{name}: mean {mean:.5f} (SE {se:.5f}) vs expected {expected:.5f}, "
         f"ratio {mean / expected:.3f}; anchor {'should' if should_hold else 'should not'} hold")
+
+
+# --- xcorr: the Bartlett-widened, lag-corrected threshold ---------------------
+
+from pyspi.statistics.basic import CrossCorrelation  # noqa: E402
+
+XCORR_REPS = 200
+# The family-wise level is 5%; 0.10 is that plus ~3 binomial SEs at 200 reps.
+XCORR_MAX_RATE = 0.10
+
+
+def _nonzero_rate(spi, cond, T):
+    hits = 0
+    for rep in range(XCORR_REPS):
+        data = Data(null_pair(cond, T, cell_seed(cond, T, rep)), dim_order="ps", zscore=True)
+        hits += spi.multivariate(data)[0, 1] != 0
+    return hits / XCORR_REPS
+
+
+@pytest.mark.parametrize("cond", list(CONDITIONS))
+def test_xcorr_bartlett_threshold_holds_its_level(cond):
+    """On independent pairs `sig-bartlett` is nonzero on at most ~5% of pairs;
+    `sig-True` (the unadjusted 1.96/sqrt(T) cut) is the positive control that
+    must not, since its cut is cleared by chance at some lag of nearly every pair."""
+    rate = _nonzero_rate(CrossCorrelation(statistic="max", sigonly="bartlett"), cond, 200)
+    assert rate <= XCORR_MAX_RATE, f"{cond}: {rate:.3f} of null pairs nonzero"
+    if cond != "slow_x_white":  # the old cut fires on ~60% there, still > 10%
+        assert _nonzero_rate(CrossCorrelation(statistic="max", sigonly=True), cond, 200) > 0.5
+
+
+def test_xcorr_bartlett_threshold_keeps_power_on_coupled_slow_series():
+    """Two AR(1) series at phi=0.9 sharing half their innovation variance
+    (lag-0 correlation ~0.5), T=1000: the coupling must clear the widened cut.
+
+    Not T=200: there N/B ~ 21, r=0.5 is ~2.3 null SDs, and the corrected cut is
+    ~3.5 SDs, so a valid test is expected to miss it most of the time.
+    """
+    from scipy.signal import lfilter
+
+    spi = CrossCorrelation(statistic="max", sigonly="bartlett")
+    hits = 0
+    for rep in range(50):
+        rng = np.random.default_rng([11, rep])
+        e = rng.standard_normal((3, 3000))
+        x = lfilter([1.0], [1.0, -0.9], e[0] + e[2])[2000:]
+        y = lfilter([1.0], [1.0, -0.9], e[1] + e[2])[2000:]
+        hits += spi.multivariate(Data(np.vstack([x, y]), dim_order="ps", zscore=True))[0, 1] > 0
+    assert hits >= 45, f"detected {hits}/50"
+
+
+def test_xcorr_sigonly_values():
+    assert CrossCorrelation(statistic="mean", sigonly="bartlett").identifier == "xcorr_mean_sig-bartlett"
+    assert CrossCorrelation(squared=True, sigonly="bartlett").identifier == "xcorr-sq_max_sig-bartlett"
+    for bad in ("Bartlett", "true", 2):
+        with pytest.raises(ValueError, match="sigonly"):
+            CrossCorrelation(sigonly=bad)

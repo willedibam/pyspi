@@ -13,7 +13,7 @@ from pyspi.base import (
     parse_bivariate,
     parse_multivariate,
 )
-from pyspi.utils import require_int
+from pyspi.utils import bartlett_factor, require_int
 
 
 def _spearman_matrix(Z):
@@ -170,12 +170,28 @@ class CrossCorrelation(Undirected, Signed):
     inflated for the series' own autocorrelation, and it is not corrected for
     being applied at every lag in the window. When no lag clears it the
     statistic is 0.
+
+    ``sigonly="bartlett"`` (identifier ``..._sig-bartlett``) is the cut that
+    is a test: the per-lag null SD is ``sqrt(B/T)``, with ``B`` the sample
+    Bartlett factor of the pair (:func:`pyspi.utils.bartlett_factor`), and the
+    two-sided 5% level is Bonferroni-corrected over the ``2*(T//4) + 1`` lags,
+    so on independent series at most ~5% of pairs return a nonzero value.
+    Bonferroni is conservative here (neighbouring lags are correlated); the
+    sample ``B`` is biased low when the correlation time is not small against
+    ``T``, which pushes the other way. Measured on independent pairs (white to
+    AR(1) phi=0.99, narrowband AR(2); T=200 and 1000) at most 2% are nonzero,
+    against 59-100% for ``sig-True``. The price is power on slow series: at
+    phi=0.9 and T=200 the effective sample size ``T/B`` is ~21, so even a true
+    correlation of 0.5 is usually not detected.
     """
 
     name = "Cross correlation"
     labels = ["basic", "linear", "undirected", "temporal"]
 
     def __init__(self, squared=False, statistic="max", sigonly=True):
+        if sigonly not in (True, False, "bartlett"):
+            raise ValueError(
+                f"sigonly must be True, False or 'bartlett'; got {sigonly!r}.")
         self.identifier = "xcorr"
         self._squared = squared
         self._statistic = statistic
@@ -242,9 +258,14 @@ class CrossCorrelation(Undirected, Signed):
         # not corrected for having been applied at every one of the ~T/2 lags
         # in the window. Read it as "drop the small lags", not as "these lags
         # are significant".
-        if getattr(self, "_sigonly", False):
+        if getattr(self, "_sigonly", False) == "bartlett":
+            x, y = data.to_numpy(squeeze=True)[[i, j]]
+            z = stats.norm.isf(0.05 / (2 * r_ij.size))
+            threshold = z * np.sqrt(bartlett_factor(x, y) / T)
+        elif getattr(self, "_sigonly", False):
             # Scaled by the sample size T, not by the width of the lag window.
             threshold = 1.96 / np.sqrt(T)
+        if getattr(self, "_sigonly", False):
             above = np.abs(r_ij) > threshold
             if not above.any():
                 # Nothing clears the cut, so the thresholded association is
