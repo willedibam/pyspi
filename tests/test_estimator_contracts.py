@@ -1517,9 +1517,9 @@ def test_validated_value_is_the_one_used_in_identifier_and_cache_key():
     import pyspi.statistics.infotheory as it
 
     spi = it.MutualInfo(estimator="kraskov", prop_k=np.int64(6),
-                        dyn_corr_excl=np.int32(3))
-    assert spi.identifier == "mi_kraskov_NN-6_DCE-3"
-    assert spi._getkey() == ("kraskov", 6, 3)
+                        dyn_corr_excl=np.int32(3), shift_baseline=np.int16(2))
+    assert spi.identifier == "mi_kraskov_NN-6_DCE-3_shift-2"
+    assert spi._getkey() == ("kraskov", 6, 3, 2)
     assert all(type(v) is int for v in spi._getkey()[1:])
 
 
