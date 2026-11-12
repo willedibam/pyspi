@@ -29,6 +29,7 @@ corrupt baseline can never break collection of unrelated tests.
 | `test_execution_parity.py` | Serial and parallel must agree on *failure* semantics, not only on numbers. Uses `failing_spis.py` + `parity_failure_config.yaml`. |
 | `test_estimator_contracts.py` | An SPI must compute the estimator it advertises, or refuse. Symbolic/KSG preconditions. |
 | `test_structural_traits.py` | Declared symmetry labels vs observed baseline matrices; AEG process-order dependence. |
+| `test_autocorr_null.py` | Independent-pair null: spectral/auto-embedded-GC null means must not move with autocorrelation (T=1000 tier is `slow`); closed-form null anchors for Gaussian MI/DI/GC. Full-config drift table: `tests/tools/autocorr_null.py`. |
 
 ### Contract tests
 
