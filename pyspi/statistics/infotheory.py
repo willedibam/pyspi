@@ -864,6 +864,32 @@ class _DummyTECalculator:
         return np.nan
 
 
+def _circular_shifts(T, K):
+    """``K`` circular shifts of a length-``T`` series, spread over [T/4, 3T/4].
+
+    The smallest circular distance ``min(s, T - s)`` is ``T // 4``: a surrogate
+    built from a shorter shift keeps part of a genuine coupling between slow
+    series, and subtracting it would remove signal.
+    """
+    if K == 1:
+        return [T // 2]
+    return [int(round(T * (0.25 + 0.5 * k / (K - 1)))) for k in range(K)]
+
+
+def _shift_corrected(estimate, src, K):
+    """``estimate(src) - mean_k estimate(roll(src, s_k))``.
+
+    The circularly shifted source keeps its own autocorrelation and the
+    target is untouched, so the mean over shifts estimates what the estimator
+    reports for this pair's marginal dynamics with the alignment between them
+    broken. Subtracting it removes the null bias that shared slowness gives
+    the KSG estimators.
+    """
+    T = len(src)
+    base = np.mean([estimate(np.roll(src, s)) for s in _circular_shifts(T, K)])
+    return estimate(src) - base
+
+
 def _te_build_embeddings(src, targ, k_history, k_tau, l_history, l_tau):
     """Build delay embeddings for transfer entropy computation."""
     T = len(src)
@@ -1152,10 +1178,12 @@ class InfoTheoryBase(Unsigned):
         "kernel_width": ("kernel",),
         "prop_k": ("kraskov",),
         "dyn_corr_excl": ("kraskov",),
+        "shift_baseline": ("kraskov",),
     }
 
     def __init__(
-        self, estimator="gaussian", kernel_width=None, prop_k=None, dyn_corr_excl=None
+        self, estimator="gaussian", kernel_width=None, prop_k=None, dyn_corr_excl=None,
+        shift_baseline=None,
     ):
         if estimator not in _ESTIMATORS:
             raise ValueError(
@@ -1167,6 +1195,7 @@ class InfoTheoryBase(Unsigned):
             "kernel_width": kernel_width,
             "prop_k": prop_k,
             "dyn_corr_excl": dyn_corr_excl,
+            "shift_baseline": shift_baseline,
         }
         for name, value in supplied.items():
             owners = self._PARAM_OWNER[name]
@@ -1201,6 +1230,11 @@ class InfoTheoryBase(Unsigned):
             dyn_corr_excl = utils.require_int("dyn_corr_excl", dyn_corr_excl,
                                               minimum=0)
         self._dyn_corr_excl = dyn_corr_excl
+        # Number of circular-shift surrogates whose mean is subtracted; see
+        # `_shift_corrected`. Validated here, applied by the KSG pair paths.
+        self._shift_baseline = (None if shift_baseline is None else
+                                utils.require_int("shift_baseline", shift_baseline,
+                                                  minimum=1))
         self._entropy_calc = self._getcalc("entropy")
 
         self.identifier = self.identifier + "_" + estimator
@@ -1258,6 +1292,8 @@ class InfoTheoryBase(Unsigned):
             # The *value*, not just the flag: dyn_corr_excl=5, =10 and "AUTO"
             # are three Theiler windows and need three identifiers.
             self.identifier = self.identifier + f"_DCE-{self._dyn_corr_excl}"
+        if self._shift_baseline:
+            self.identifier = self.identifier + f"_shift-{self._shift_baseline}"
 
     def __getstate__(self):
         state = dict(self.__dict__)
@@ -1287,7 +1323,8 @@ class InfoTheoryBase(Unsigned):
             # everything reaching the identifier reaches the cache key, and an
             # exception maintained by argument is an exception that stops being
             # true.
-            return (self._estimator, self._prop_k, self._dyn_corr_excl)
+            return (self._estimator, self._prop_k, self._dyn_corr_excl,
+                    self._shift_baseline)
         else:
             return (self._estimator,)
 
@@ -1424,6 +1461,15 @@ class InfoTheoryBase(Unsigned):
                              lambda i, j: self.bivariate(data, i=i, j=j),
                              mirror=True)
 
+    def _ksg_mi(self, x, y, k, w):
+        """KSG MI of ``(x, y)``, shift-corrected by circularly shifting ``y``
+        when ``shift_baseline`` is set. ``x``/``y`` are the full, unlagged
+        series; lagging (TLMI) is the caller's ``lag`` applied after the shift."""
+        K = getattr(self, "_shift_baseline", None)
+        if not K:
+            return _ksg_mi_pair(x, y, k, w)
+        return _shift_corrected(lambda yy: _ksg_mi_pair(x, yy, k, w), y, K)
+
     def _resolve_theiler(self, data, i, j):
         """Theiler/dynamic-correlation-exclusion window for pair (i, j).
 
@@ -1531,10 +1577,14 @@ class MutualInfo(InfoTheoryBase, Undirected):
             if self._estimator == 'gaussian':
                 return float(_gaussian_mi_from_r(np.corrcoef(z[i], z[j])[0, 1]))
             else:
-                # kraskov bivariate
+                # kraskov bivariate. With the shift baseline the pair is put in
+                # index order, so that (i, j), (j, i) and multivariate roll the
+                # same series and agree.
                 k = int(self._prop_k)
                 w = self._resolve_theiler(data, i, j)
-                return _ksg_mi_pair(z[i], z[j], k, w)
+                if getattr(self, "_shift_baseline", None):
+                    i, j = min(i, j), max(i, j)
+                return self._ksg_mi(z[i], z[j], k, w)
 
         # kernel estimator: use numpy KernelMICalculator
         if self._estimator == 'kernel':
@@ -1562,7 +1612,7 @@ class MutualInfo(InfoTheoryBase, Undirected):
             pairs = [(i, j) for i in range(M) for j in range(i + 1, M)]
             return fill_pairwise(
                 self.identifier, result, pairs,
-                lambda i, j: _ksg_mi_pair(Z[i], Z[j], k, self._resolve_theiler(data, i, j)),
+                lambda i, j: self._ksg_mi(Z[i], Z[j], k, self._resolve_theiler(data, i, j)),
                 mirror=True)
         return self._upper_triangle_multivariate(data)
 
@@ -1571,6 +1621,14 @@ class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
     name = "Time-lagged mutual information"
     identifier = "tlmi"
     labels = ["unsigned", "infotheory", "temporal", "directed"]
+
+    def _ksg_tlmi(self, src, tgt, k, w):
+        """KSG I(src_t; tgt_{t+1}); the shift baseline rolls the full source
+        before it is lagged."""
+        def estimate(s):
+            return _ksg_mi_pair(s[:-1], tgt[1:], k, w)
+        K = getattr(self, "_shift_baseline", None)
+        return _shift_corrected(estimate, src, K) if K else estimate(src)
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -1591,7 +1649,7 @@ class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
             else:
                 k = int(self._prop_k)
                 w = self._resolve_theiler(data, i, j)
-                return _ksg_mi_pair(src, tgt, k, w)
+                return self._ksg_tlmi(z[i], z[j], k, w)
 
         # kernel estimator: use numpy KernelMICalculator
         if self._estimator == 'kernel':
@@ -1621,13 +1679,11 @@ class TimeLaggedMutualInfo(InfoTheoryBase, Directed):
             Z = data.to_numpy(squeeze=True)
             M, T = Z.shape
             k = int(self._prop_k)
-            Z_src = Z[:, :-1]
-            Z_tgt = Z[:, 1:]
             result = np.full((M, M), np.nan)
             pairs = [(i, j) for i in range(M) for j in range(M) if i != j]
             return fill_pairwise(
                 self.identifier, result, pairs,
-                lambda i, j: _ksg_mi_pair(Z_src[i], Z_tgt[j], k, self._resolve_theiler(data, i, j)))
+                lambda i, j: self._ksg_tlmi(Z[i], Z[j], k, self._resolve_theiler(data, i, j)))
         return super().multivariate(data)
 
 
@@ -1794,6 +1850,15 @@ class TransferEntropy(InfoTheoryBase, Directed):
         super().__setstate__(state)
         self._calc = self._getcalc("TransferEntropy")
 
+    def _ksg_te(self, src, targ, k_history, k_tau, l_history, l_tau, k_nn, w):
+        """KSG TE; the shift baseline rolls the raw source. The embedding and
+        the window are resolved by the caller, once, from the unshifted pair."""
+        def estimate(s):
+            return _kraskov_te_bivariate(s, targ, k_history, k_tau,
+                                         l_history, l_tau, k_nn, w)
+        K = getattr(self, "_shift_baseline", None)
+        return _shift_corrected(estimate, src, K) if K else estimate(src)
+
     # Overridable so a test can inject a scorer that deliberately picks
     # different source and destination embeddings and check that all four
     # selected values reach the final estimator.
@@ -1842,10 +1907,8 @@ class TransferEntropy(InfoTheoryBase, Directed):
             else:
                 k_nn = int(self._prop_k)
                 w = self._resolve_theiler(data, i, j)
-                return _kraskov_te_bivariate(
-                    src, targ, self._k_history, self._k_tau,
-                    self._l_history, self._l_tau, k_nn, w
-                )
+                return self._ksg_te(src, targ, self._k_history, self._k_tau,
+                                    self._l_history, self._l_tau, k_nn, w)
 
         # Auto-embedding by the maximum corrected AIS criterion.
         if est in ('gaussian', 'kraskov') and auto is not None:
@@ -1864,8 +1927,8 @@ class TransferEntropy(InfoTheoryBase, Directed):
             if est == 'gaussian':
                 return _gaussian_te_bivariate(src, targ, k_history, k_tau,
                                               l_history, l_tau)
-            return _kraskov_te_bivariate(src, targ, k_history, k_tau,
-                                         l_history, l_tau, k_nn, w)
+            return self._ksg_te(src, targ, k_history, k_tau,
+                                l_history, l_tau, k_nn, w)
 
         # kernel/symbolic path: numpy calculators
         if est in ('kernel', 'symbolic'):
@@ -2024,6 +2087,13 @@ class DirectedInfo(CausalEntropy, Directed):
         """
         z = data.to_numpy(squeeze=True)
         src, targ = np.asarray(z[i], float), np.asarray(z[j], float)
+        K = getattr(self, "_shift_baseline", None)
+        if K:  # kraskov only; the raw source is rolled before tie-breaking
+            return _shift_corrected(lambda s: self._di_total(data, i, j, s, targ), src, K)
+        return self._di_total(data, i, j, src, targ)
+
+    def _di_total(self, data, i, j, src, targ):
+        """Massey's sum for the given source and target series."""
         if self._estimator == "kraskov":
             src = _tie_break(src, _TIE_SEED_SOURCE)
             targ = _tie_break(targ, _TIE_SEED_TARGET)

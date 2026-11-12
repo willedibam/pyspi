@@ -1986,3 +1986,59 @@ def test_kernel_dyn_corr_excl_ownership():
     for cls in (it.MutualInfo, it.TimeLaggedMutualInfo):
         with pytest.raises(ValueError, match="not used by estimator"):
             cls(estimator="kernel", dyn_corr_excl=5)
+
+
+# --------------------------------------------------------------------------
+# KSG shift baseline (shift_baseline=K): identity, symmetry, wiring
+# --------------------------------------------------------------------------
+
+def test_shift_baseline_identifiers_and_ownership():
+    import pyspi.statistics.infotheory as it
+
+    assert it.MutualInfo(estimator="kraskov", shift_baseline=5).identifier == "mi_kraskov_NN-4_shift-5"
+    assert (it.TransferEntropy(estimator="kraskov", dyn_corr_excl="AUTO", shift_baseline=3,
+                               k_history=1).identifier
+            == "te_kraskov_NN-4_DCE-AUTO_shift-3_k-1_kt-1_l-1_lt-1")
+    assert it.DirectedInfo(estimator="kraskov", shift_baseline=5).identifier == "di_kraskov_NN-4_shift-5_n-5"
+    a = it.MutualInfo(estimator="kraskov", shift_baseline=5)
+    b = it.MutualInfo(estimator="kraskov", shift_baseline=6)
+    assert a._getkey() != b._getkey()
+    for est in ("gaussian", "kernel"):
+        with pytest.raises(ValueError, match="not used by estimator"):
+            it.MutualInfo(estimator=est, shift_baseline=5)
+    for bad in (0, -1, 2.5, True):
+        with pytest.raises((ValueError, TypeError)):
+            it.MutualInfo(estimator="kraskov", shift_baseline=bad)
+
+
+def _slow_data(M=3, T=500, seed=8):
+    from scipy.signal import lfilter
+    Z = lfilter([1.0], [1.0, -0.95], np.random.default_rng(seed).standard_normal((M, T + 500)),
+                axis=1)[:, 500:]
+    return Data(Z, dim_order="ps", zscore=True)
+
+
+def test_shift_baseline_mi_is_symmetric_across_paths():
+    import pyspi.statistics.infotheory as it
+
+    data = _slow_data()
+    spi = it.MutualInfo(estimator="kraskov", shift_baseline=4)
+    A = spi.multivariate(data)
+    assert np.allclose(A, A.T, equal_nan=True)
+    for i, j in [(0, 1), (2, 1)]:
+        assert spi.bivariate(data, i=i, j=j) == spi.bivariate(data, i=j, j=i) == A[i, j]
+
+
+@pytest.mark.parametrize("K", [1, 4])
+def test_shift_baseline_te_rolls_the_source_only(K):
+    """Wiring check: raw TE minus the mean TE over np.roll(src, s) with the
+    target, embedding and window held fixed, s from `_circular_shifts`."""
+    import pyspi.statistics.infotheory as it
+
+    data = _slow_data(M=2)
+    z = data.to_numpy(squeeze=True)
+    got = it.TransferEntropy(estimator="kraskov", k_history=2, shift_baseline=K).multivariate(data)[0, 1]
+    te = lambda s: it._kraskov_te_bivariate(s, z[1], 2, 1, 1, 1, 4, 0)  # noqa: E731
+    shifts = it._circular_shifts(z.shape[1], K)
+    assert min(min(s, z.shape[1] - s) for s in shifts) >= z.shape[1] // 4
+    assert got == te(z[0]) - np.mean([te(np.roll(z[0], s)) for s in shifts])

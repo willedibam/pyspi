@@ -317,3 +317,58 @@ def test_kernel_te_theiler_window_removes_most_of_the_null_bias(cell):
     assert abs(np.mean(v_fixed)) < 0.1, np.mean(v_fixed)
     if cell == "phi0":  # control: without the window the bias is there
         assert np.mean(v_plain) > 0.25, np.mean(v_plain)
+
+
+# --- KSG shift baseline: subtract the estimate on circularly shifted sources ---
+
+from pyspi.statistics.infotheory import TimeLaggedMutualInfo  # noqa: E402
+
+
+def _ksg_null(spi, phi, T, reps, col=(0, 1)):
+    v = np.empty(reps)
+    for rep in range(reps):
+        rng = np.random.default_rng([31, T, rep, int(phi * 100)])
+        z = np.vstack([ar_series([phi], T, rng), ar_series([phi], T, rng)])
+        v[rep] = spi.multivariate(Data(z, dim_order="ps", zscore=True))[col]
+    return v.mean(), v.std(ddof=1) / np.sqrt(reps)
+
+
+def _shift_null_case(spi_factory, phi, T, reps):
+    """Shift-corrected null mean within 4 SE of zero; the raw estimator, on the
+    same draws, is the control that must be more than 4 SE above it."""
+    m, se = _ksg_null(spi_factory(shift_baseline=5), phi, T, reps)
+    assert abs(m) <= 4 * se, f"corrected null mean {m:+.4f} (SE {se:.4f})"
+    m_raw, se_raw = _ksg_null(spi_factory(), phi, T, reps)
+    assert m_raw > 4 * se_raw, f"control: raw null mean {m_raw:+.4f} (SE {se_raw:.4f})"
+
+
+@pytest.mark.parametrize("name,factory,T", [
+    ("mi", lambda **kw: MutualInfo(estimator="kraskov", **kw), 1000),
+    ("te", lambda **kw: TransferEntropy(estimator="kraskov", k_history=1, l_history=1, **kw), 200),
+])
+def test_ksg_shift_baseline_centres_the_slow_null(name, factory, T):
+    # Pilot, phi=0.99, 30 reps: MI at T=1000 raw +0.279, corrected +0.001
+    # (SE 0.009); TE at T=200 raw +0.043, corrected +0.007 (SE 0.004). TE's raw
+    # bias at T=1000 (+0.015) is too small to make a control.
+    _shift_null_case(factory, 0.99, T, 30)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("name,factory", [
+    ("tlmi", lambda **kw: TimeLaggedMutualInfo(estimator="kraskov", **kw)),
+    ("di", lambda **kw: DirectedInfo(estimator="kraskov", **kw)),
+])
+def test_ksg_shift_baseline_centres_the_slow_null_slow(name, factory):
+    _shift_null_case(factory, 0.99, 1000, 20)
+
+
+def test_ksg_shift_baseline_keeps_the_analytic_coupling():
+    """Coupled white Gaussian pair, rho = 0.6: the shifted surrogates carry no
+    coupling, so the corrected estimate still recovers -0.5 ln(1 - rho^2)."""
+    rho, T = 0.6, 2000
+    rng = np.random.default_rng(12)
+    x = rng.standard_normal(T)
+    y = rho * x + np.sqrt(1 - rho**2) * rng.standard_normal(T)
+    data = Data(np.vstack([x, y]), dim_order="ps", zscore=True)
+    corrected = MutualInfo(estimator="kraskov", shift_baseline=5).multivariate(data)[0, 1]
+    assert abs(corrected - (-0.5 * np.log(1 - rho**2))) < 0.03
