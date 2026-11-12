@@ -328,6 +328,9 @@ class ConvergentCrossMapping(Directed, Signed):
     points within ``r`` samples of the query point from its neighbours, as
     pyEDM's ``exclusionRadius``. Without it a slow target is cross-mapped from
     its own temporal neighbours, so independent slow series score high skill.
+    The radius does not centre that null, it flips its sign: on independent
+    AR(1) pairs (phi = 0.9, T = 200) the mean goes from about +0.25 to about
+    -0.2 at ``r`` = 10 or 25. Do not read ``_excl-<r>`` values as unbiased.
     The simplex search for ``embedding_dimension=None`` is not changed by it.
 
     With ``embedding_dimension=None`` each process gets its own
