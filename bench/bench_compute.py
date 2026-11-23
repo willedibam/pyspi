@@ -22,6 +22,11 @@ real choice: ``var`` (sparse stable VAR(3)), ``logistic``
 long memory). Non-white rows are z-scored. Cells from different ``--data`` are
 written under different labels and never reused for one another.
 
+Warm-up (--warmup): before the timed repeats, compute the config once on a
+small dataset (M=min(M, 3), same T and data kind, separate seed). This pays
+imports and numba compilation outside the timing, so even a single repeat is
+a warm measurement. Same T, because some SPIs switch code path with length.
+
 Presets (each fixes an M/T/n_jobs grid; --config still applies):
     headline   (M=10,T=500), (M=20,T=1000), n_jobs=1.
     scaling    M={4,8,16,32} x T={200,400,800,1600}, n_jobs=1.
@@ -41,6 +46,7 @@ import importlib.metadata as im
 import json
 import os
 import platform
+import resource
 import subprocess
 import sys
 import time
@@ -158,6 +164,9 @@ def parse_args(argv=None):
     p.add_argument("--seed", type=int, default=0, help="Base RNG seed (default: 0).")
     p.add_argument("--data", choices=DATA_KINDS, default="white",
                    help="Synthetic data generator (default: white). See module docstring.")
+    p.add_argument("--warmup", action="store_true",
+                   help="Compute the config once on an (min(M,3), T) dataset before "
+                        "timing, so compilation is not timed. See module docstring.")
     p.add_argument("--output-dir", type=Path, default=None,
                    help="Directory for per-cell result JSONs (default: bench/results/cells/).")
     p.add_argument("--label", default=None,
@@ -273,7 +282,7 @@ def cell_seed(base_seed: int, M: int, T: int) -> int:
 
 
 def cell_identity(base_seed, M, T, n_jobs, config_path, mp_context,
-                  environment, data="white") -> str:
+                  environment, data="white", warmup=False) -> str:
     """What a stored cell must match for ``--resume`` to reuse it.
 
     Resume previously checked only that the file existed, had at least
@@ -294,6 +303,7 @@ def cell_identity(base_seed, M, T, n_jobs, config_path, mp_context,
         "config": Path(config_path).read_text(),
         "seed": cell_seed(base_seed, M, T),
         "data": data,
+        "warmup": warmup,
         "mp_context": mp_context,
         "computation": COMPUTATION_VERSION,
         "pyspi_git_sha": environment["pyspi_git_sha"],
@@ -327,8 +337,27 @@ def resolve_grid(args) -> list[tuple[int, int, int]]:
     return [(m, t, nj) for (m, t) in mt for nj in n_jobs]
 
 
-def run_cell(M, T, n_jobs, config, mp_context, repeats, seed, data="white") -> dict:
+def peak_rss_mb() -> float:
+    """Peak RSS of this process so far (ru_maxrss is KiB on Linux, bytes on macOS)."""
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
+
+
+def warm_up(M, T, config, data, seed) -> float:
+    """Compute ``config`` once on a small dataset; returns its wall time."""
+    arr = make_data(data, np.random.default_rng([seed, 1]), min(M, 3), T)
+    t0 = time.perf_counter()
+    try:
+        make_calculator(config, arr).compute(n_jobs=1, progress=False)
+    except Exception as exc:  # noqa: BLE001 -- a failed warm-up only means less is warm
+        print(f"[bench]   warm-up failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return time.perf_counter() - t0
+
+
+def run_cell(M, T, n_jobs, config, mp_context, repeats, seed, data="white",
+             warmup=False) -> dict:
     """Run one (M, T, n_jobs) cell ``repeats`` times. Returns a self-contained entry dict."""
+    warmup_seconds = warm_up(M, T, config, data, seed) if warmup else None
     rss_before = rss_mb()
     rng = np.random.default_rng(seed)
     totals: list[float] = []
@@ -374,6 +403,8 @@ def run_cell(M, T, n_jobs, config, mp_context, repeats, seed, data="white") -> d
         "failed_spis": sorted(failed_ids),
         "rss_mb_end": round(rss_mb(), 1),
         "rss_mb_delta": round(rss_mb() - rss_before, 1),
+        "rss_mb_peak": round(peak_rss_mb(), 1),
+        "warmup_seconds": None if warmup_seconds is None else round(warmup_seconds, 3),
         "spi_seconds": spi_seconds,
     }
     if error is not None:
@@ -409,7 +440,8 @@ def main(argv=None) -> int:
         "" if args.data == "white" else f"-{args.data}")
 
     env = build_environment()
-    print(f"[bench] config={cfg_label}  data={args.data}  cells={len(cells)}  "
+    print(f"[bench] config={cfg_label}  data={args.data}  warmup={args.warmup}  "
+          f"cells={len(cells)}  "
           f"repeats={args.repeats}  mp={args.mp_context}", file=sys.stderr)
     print(f"[bench] output_dir={output_dir}  label={label}", file=sys.stderr)
 
@@ -417,7 +449,7 @@ def main(argv=None) -> int:
     for i, (M, T, n_jobs) in enumerate(cells, 1):
         path = output_dir / cell_filename(label, M, T, n_jobs)
         identity = cell_identity(args.seed, M, T, n_jobs, config,
-                                 args.mp_context, env, args.data)
+                                 args.mp_context, env, args.data, args.warmup)
         if args.resume and path.exists():
             try:
                 existing = json.loads(path.read_text())
@@ -440,7 +472,7 @@ def main(argv=None) -> int:
         t0 = time.perf_counter()
         seed = cell_seed(args.seed, M, T)
         entry = run_cell(M, T, n_jobs, config, args.mp_context, args.repeats,
-                         seed, args.data)
+                         seed, args.data, args.warmup)
         wall = time.perf_counter() - t0
         # Self-contained per-cell file: include run metadata + environment.
         entry["config"] = cfg_label

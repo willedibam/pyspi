@@ -36,6 +36,10 @@ embedding from the data can cost differently on structured input; use these to
 check that a cost ranking measured on white noise holds. Non-white cells are
 labelled `<config>-<data>_…` and never reused for white-noise cells.
 
+`--warmup` computes the config once on an (min(M,3), T) dataset before the
+timed repeats, so imports and numba compilation are not timed and a single
+repeat is a warm measurement. Use it whenever cells are compared across sizes.
+
 `--config` takes a bundled config name (`full`, `fast`, `sonnet`, `fabfour`,
 `benchmarked_p80/p90/p95/p99`) or a path to your own YAML — it is passed
 straight to `pyspi.calculator.resolve_config`, so the two forms behave exactly
@@ -60,7 +64,8 @@ self-contained, with an `environment` block (pyspi git sha, dependency versions
 fields:
 
 - `cell_wall_seconds {mean, std, values}`, `n_spis`, `n_spis_failed`, `failed_spis: [...]`
-- `rss_mb_end`, `rss_mb_delta` (per-cell, via `psutil.Process().memory_info().rss`)
+- `rss_mb_end`, `rss_mb_delta` (per-cell, via `psutil.Process().memory_info().rss`), and `rss_mb_peak` (process peak, via `getrusage`)
+- `warmup_seconds` (null unless `--warmup`)
 - `spi_seconds: {identifier: {mean, std, values, category, labels}}`
   - `category` is one of `basic | distance | causal | infotheory | spectral | wavelet | misc`
   - `labels` is the SPI's merged label list (includes `Mxx` size tags + stat-type tags)
