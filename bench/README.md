@@ -24,7 +24,17 @@ python -m bench.bench_compute --preset parallel --config benchmarked_p90
 
 # Custom grid
 python -m bench.bench_compute --m 8,16,32 --t 200,800 --n-jobs 1,4,8 --config fast
+
+# Same cell on structured data instead of white noise
+python -m bench.bench_compute --m 16 --t 1000 --config full --data var
 ```
+
+`--data` picks the synthetic input: `white` (default, i.i.d. normal), `var`
+(sparse stable VAR(3)), `logistic` (chaotic logistic maps, one-way ring
+coupling) or `pink` (independent 1/f noise). SPIs that choose an order, lag or
+embedding from the data can cost differently on structured input; use these to
+check that a cost ranking measured on white noise holds. Non-white cells are
+labelled `<config>-<data>_…` and never reused for white-noise cells.
 
 `--config` takes a bundled config name (`full`, `fast`, `sonnet`, `fabfour`,
 `benchmarked_p80/p90/p95/p99`) or a path to your own YAML — it is passed
