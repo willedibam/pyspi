@@ -24,7 +24,23 @@ python -m bench.bench_compute --preset parallel --config benchmarked_p90
 
 # Custom grid
 python -m bench.bench_compute --m 8,16,32 --t 200,800 --n-jobs 1,4,8 --config fast
+
+# Same cell on structured data instead of white noise
+python -m bench.bench_compute --m 16 --t 1000 --config full --data var
 ```
+
+`--data` picks the synthetic input: `white` (default, i.i.d. normal), `var`
+(sparse stable VAR(3)), `logistic` (chaotic logistic maps, one-way ring
+coupling), `pink` (independent 1/f noise) or `quantised` (the `var` series
+rounded to about 16 levels, so most values are tied). SPIs that choose an order, lag or
+embedding from the data, and rank- or neighbour-based SPIs meeting ties, can
+cost differently on structured input; use these to
+check that a cost ranking measured on white noise holds. Non-white cells are
+labelled `<config>-<data>_…` and never reused for white-noise cells.
+
+`--warmup` computes the config once on an (min(M,3), T) dataset before the
+timed repeats, so imports and numba compilation are not timed and a single
+repeat is a warm measurement. Use it whenever cells are compared across sizes.
 
 `--config` takes a bundled config name (`full`, `fast`, `sonnet`, `fabfour`,
 `benchmarked_p80/p90/p95/p99`) or a path to your own YAML — it is passed
@@ -50,7 +66,8 @@ self-contained, with an `environment` block (pyspi git sha, dependency versions
 fields:
 
 - `cell_wall_seconds {mean, std, values}`, `n_spis`, `n_spis_failed`, `failed_spis: [...]`
-- `rss_mb_end`, `rss_mb_delta` (per-cell, via `psutil.Process().memory_info().rss`)
+- `rss_mb_end`, `rss_mb_delta` (per-cell, via `psutil.Process().memory_info().rss`), and `rss_mb_peak` (process peak, via `getrusage`)
+- `warmup_seconds` (null unless `--warmup`)
 - `spi_seconds: {identifier: {mean, std, values, category, labels}}`
   - `category` is one of `basic | distance | causal | infotheory | spectral | wavelet | misc`
   - `labels` is the SPI's merged label list (includes `Mxx` size tags + stat-type tags)

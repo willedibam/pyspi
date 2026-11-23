@@ -13,6 +13,20 @@ Usage:
     python -m bench.bench_compute --m 8,16 --t 200,800 --n-jobs 1,4 --config fast
     python -m bench.bench_compute --preset amortized --config full
     python -m bench.bench_compute --preset parallel --array-index $PBS_ARRAY_INDEX
+    python -m bench.bench_compute --m 16 --t 1000 --config full --data var
+
+Data (--data): ``white`` (default) is i.i.d. standard normal. The others are
+structured, so SPIs that choose an order, lag or embedding from the data face a
+real choice: ``var`` (sparse stable VAR(3)), ``logistic``
+(chaotic logistic maps, one-way ring coupling), ``pink`` (independent 1/f noise,
+long memory) and ``quantised`` (the ``var`` series rounded to about 16 levels,
+so most values are tied). Non-white rows are z-scored. Cells from different ``--data`` are
+written under different labels and never reused for one another.
+
+Warm-up (--warmup): before the timed repeats, compute the config once on a
+small dataset (M=min(M, 3), same T and data kind, separate seed). This pays
+imports and numba compilation outside the timing, so even a single repeat is
+a warm measurement. Same T, because some SPIs switch code path with length.
 
 Presets (each fixes an M/T/n_jobs grid; --config still applies):
     headline   (M=10,T=500), (M=20,T=1000), n_jobs=1.
@@ -33,6 +47,7 @@ import importlib.metadata as im
 import json
 import os
 import platform
+import resource
 import subprocess
 import sys
 import time
@@ -58,6 +73,73 @@ PRESETS = {
     "parallel": {"M": [16], "T": [800], "n_jobs": [1, 2, 4, 8, 16]},
     "amortized": {"M": [8, 16], "T": [800], "n_jobs": [1]},
 }
+
+DATA_KINDS = ("white", "var", "logistic", "pink", "quantised")
+QUANT_STEP = 0.375  # in sd units: about 16 levels across +/-3 sd
+BURN_IN = 500
+
+
+def _zscore_rows(x: np.ndarray) -> np.ndarray:
+    return (x - x.mean(axis=1, keepdims=True)) / x.std(axis=1, keepdims=True)
+
+
+def make_data(kind: str, rng: np.random.Generator, M: int, T: int) -> np.ndarray:
+    """One (M, T) float64 dataset of the given kind, drawn from ``rng``.
+
+    ``white`` draws exactly what the benchmark always drew, so white-noise cells
+    are unchanged by the existence of the other kinds.
+    """
+    if kind == "white":
+        return rng.standard_normal((M, T)).astype(np.float64)
+    if kind == "quantised":
+        # The ``var`` series (same draws, so the same underlying process for a
+        # given seed) rounded to steps of 0.375 sd: about 16 levels, so most
+        # values are tied, as in ADC-quantised or rounded recordings. Ties
+        # change code paths in rank- and neighbour-based SPIs.
+        x = make_data("var", rng, M, T)
+        return _zscore_rows(np.round(x / QUANT_STEP) * QUANT_STEP)
+    n = T + BURN_IN
+    if kind == "var":
+        # VAR(3): own-lag AR terms plus about two directed inputs per process,
+        # scaled so the companion matrix has spectral radius 0.9 (stable, with
+        # slowly decaying autocorrelation and lagged coupling).
+        p = 3
+        A = np.zeros((p, M, M))
+        for k in range(p):
+            A[k][np.diag_indices(M)] = rng.uniform(0.2, 0.6, M) / (k + 1)
+            if M > 1:
+                mask = rng.random((M, M)) < min(1.0, 2.0 / (M - 1))
+                np.fill_diagonal(mask, False)
+                A[k][mask] = rng.uniform(-0.4, 0.4, mask.sum()) / (k + 1)
+        comp = np.zeros((M * p, M * p))
+        comp[:M] = np.hstack(list(A))
+        comp[M:, :-M] = np.eye(M * (p - 1))
+        A *= 0.9 / np.max(np.abs(np.linalg.eigvals(comp)))
+        x = np.zeros((n, M))
+        e = rng.standard_normal((n, M))
+        for t in range(p, n):
+            x[t] = sum(A[k] @ x[t - 1 - k] for k in range(p)) + e[t]
+        return _zscore_rows(x[BURN_IN:].T)
+    if kind == "logistic":
+        # Logistic maps (r = 3.9, chaotic), each driven by its ring neighbour
+        # with weight 0.05, plus small observation noise. Stronger or two-way
+        # coupling (0.1, 0.2) synchronises small rings onto periodic orbits.
+        r, eps = 3.9, 0.05
+        x = np.empty((n, M))
+        x[0] = rng.uniform(0.1, 0.9, M)
+        for t in range(1, n):
+            f = r * x[t - 1] * (1.0 - x[t - 1])
+            x[t] = (1 - eps) * f + eps * np.roll(f, 1)
+        x = x[BURN_IN:].T + 0.01 * rng.standard_normal((M, T))
+        return _zscore_rows(x)
+    if kind == "pink":
+        # Independent 1/f noise: white noise shaped to amplitude f^(-1/2).
+        freqs = np.fft.rfftfreq(T)
+        scale = np.zeros_like(freqs)
+        scale[1:] = freqs[1:] ** -0.5
+        spec = rng.standard_normal((M, freqs.size)) + 1j * rng.standard_normal((M, freqs.size))
+        return _zscore_rows(np.fft.irfft(spec * scale, n=T, axis=1))
+    raise ValueError(f"unknown data kind {kind!r}; expected one of {DATA_KINDS}")
 
 TRACKED_DEPS = (
     "pyspi", "numpy", "scipy", "pandas", "scikit-learn", "statsmodels",
@@ -89,10 +171,16 @@ def parse_args(argv=None):
                    help="Multiprocessing start method for n_jobs>1 (default: spawn).")
     p.add_argument("--repeats", type=int, default=2, help="Repeats per cell (default: 2).")
     p.add_argument("--seed", type=int, default=0, help="Base RNG seed (default: 0).")
+    p.add_argument("--data", choices=DATA_KINDS, default="white",
+                   help="Synthetic data generator (default: white). See module docstring.")
+    p.add_argument("--warmup", action="store_true",
+                   help="Compute the config once on an (min(M,3), T) dataset before "
+                        "timing, so compilation is not timed. See module docstring.")
     p.add_argument("--output-dir", type=Path, default=None,
                    help="Directory for per-cell result JSONs (default: bench/results/cells/).")
     p.add_argument("--label", default=None,
-                   help="Filename prefix; default = stem of --config.")
+                   help="Filename prefix; default = stem of --config, plus "
+                        "'-<data>' when --data is not white.")
     p.add_argument("--resume", action="store_true",
                    help="Skip cells whose JSON already exists with repeats >= --repeats.")
     p.add_argument("--array-index", type=int, default=None,
@@ -149,6 +237,23 @@ def dep_versions() -> dict[str, str]:
     return out
 
 
+def cpu_model() -> str | None:
+    """CPU model name; nodes of one cluster can differ, which a cell must show."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/cpuinfo", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("model name"):
+                        return line.split(":", 1)[1].strip()
+        elif sys.platform == "darwin":
+            out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                                 capture_output=True, text=True, check=True, timeout=5)
+            return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return platform.processor() or None
+
+
 def build_environment() -> dict:
     versions = dep_versions()
     payload = ";".join(f"{k}=={v}" for k, v in sorted(versions.items()))
@@ -157,6 +262,7 @@ def build_environment() -> dict:
         "pyspi_git_sha": git_sha(),
         "python_version": platform.python_version(),
         "platform": f"{platform.system()}-{platform.release()}-{platform.machine()}",
+        "cpu_model": cpu_model(),
         "dep_versions": versions,
         "dep_fingerprint": "sha256:" + hashlib.sha256(payload.encode()).hexdigest()[:16],
         "env": {k: os.environ.get(k, "") for k in
@@ -185,7 +291,7 @@ def cell_seed(base_seed: int, M: int, T: int) -> int:
 
 
 def cell_identity(base_seed, M, T, n_jobs, config_path, mp_context,
-                  environment) -> str:
+                  environment, data="white", warmup=False) -> str:
     """What a stored cell must match for ``--resume`` to reuse it.
 
     Resume previously checked only that the file existed, had at least
@@ -205,6 +311,8 @@ def cell_identity(base_seed, M, T, n_jobs, config_path, mp_context,
         "cell": [M, T, n_jobs],
         "config": Path(config_path).read_text(),
         "seed": cell_seed(base_seed, M, T),
+        "data": data,
+        "warmup": warmup,
         "mp_context": mp_context,
         "computation": COMPUTATION_VERSION,
         "pyspi_git_sha": environment["pyspi_git_sha"],
@@ -238,8 +346,27 @@ def resolve_grid(args) -> list[tuple[int, int, int]]:
     return [(m, t, nj) for (m, t) in mt for nj in n_jobs]
 
 
-def run_cell(M, T, n_jobs, config, mp_context, repeats, seed) -> dict:
+def peak_rss_mb() -> float:
+    """Peak RSS of this process so far (ru_maxrss is KiB on Linux, bytes on macOS)."""
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    return peak / (1024 * 1024) if sys.platform == "darwin" else peak / 1024
+
+
+def warm_up(M, T, config, data, seed) -> float:
+    """Compute ``config`` once on a small dataset; returns its wall time."""
+    arr = make_data(data, np.random.default_rng([seed, 1]), min(M, 3), T)
+    t0 = time.perf_counter()
+    try:
+        make_calculator(config, arr).compute(n_jobs=1, progress=False)
+    except Exception as exc:  # noqa: BLE001 -- a failed warm-up only means less is warm
+        print(f"[bench]   warm-up failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+    return time.perf_counter() - t0
+
+
+def run_cell(M, T, n_jobs, config, mp_context, repeats, seed, data="white",
+             warmup=False) -> dict:
     """Run one (M, T, n_jobs) cell ``repeats`` times. Returns a self-contained entry dict."""
+    warmup_seconds = warm_up(M, T, config, data, seed) if warmup else None
     rss_before = rss_mb()
     rng = np.random.default_rng(seed)
     totals: list[float] = []
@@ -250,7 +377,7 @@ def run_cell(M, T, n_jobs, config, mp_context, repeats, seed) -> dict:
     meta: dict[str, dict] = {}
 
     for _ in range(repeats):
-        arr = rng.standard_normal((M, T)).astype(np.float64)
+        arr = make_data(data, rng, M, T)
         try:
             calc = make_calculator(config, arr)
             if not meta:
@@ -285,6 +412,8 @@ def run_cell(M, T, n_jobs, config, mp_context, repeats, seed) -> dict:
         "failed_spis": sorted(failed_ids),
         "rss_mb_end": round(rss_mb(), 1),
         "rss_mb_delta": round(rss_mb() - rss_before, 1),
+        "rss_mb_peak": round(peak_rss_mb(), 1),
+        "warmup_seconds": None if warmup_seconds is None else round(warmup_seconds, 3),
         "spi_seconds": spi_seconds,
     }
     if error is not None:
@@ -316,18 +445,20 @@ def main(argv=None) -> int:
 
     output_dir = (args.output_dir or DEFAULT_OUTPUT_DIR).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-    label = args.label or Path(cfg_label).stem
+    label = args.label or Path(cfg_label).stem + (
+        "" if args.data == "white" else f"-{args.data}")
 
     env = build_environment()
-    print(f"[bench] config={cfg_label}  cells={len(cells)}  repeats={args.repeats}  "
-          f"mp={args.mp_context}", file=sys.stderr)
+    print(f"[bench] config={cfg_label}  data={args.data}  warmup={args.warmup}  "
+          f"cells={len(cells)}  "
+          f"repeats={args.repeats}  mp={args.mp_context}", file=sys.stderr)
     print(f"[bench] output_dir={output_dir}  label={label}", file=sys.stderr)
 
     t_total = time.perf_counter()
     for i, (M, T, n_jobs) in enumerate(cells, 1):
         path = output_dir / cell_filename(label, M, T, n_jobs)
         identity = cell_identity(args.seed, M, T, n_jobs, config,
-                                 args.mp_context, env)
+                                 args.mp_context, env, args.data, args.warmup)
         if args.resume and path.exists():
             try:
                 existing = json.loads(path.read_text())
@@ -350,10 +481,11 @@ def main(argv=None) -> int:
         t0 = time.perf_counter()
         seed = cell_seed(args.seed, M, T)
         entry = run_cell(M, T, n_jobs, config, args.mp_context, args.repeats,
-                         seed)
+                         seed, args.data, args.warmup)
         wall = time.perf_counter() - t0
         # Self-contained per-cell file: include run metadata + environment.
         entry["config"] = cfg_label
+        entry["data"] = args.data
         entry["mp_context"] = args.mp_context
         # Both: the base is what was asked for, the effective seed is what the
         # data was actually generated from and is the one a rerun must match.
