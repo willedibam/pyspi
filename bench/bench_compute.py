@@ -149,6 +149,23 @@ def dep_versions() -> dict[str, str]:
     return out
 
 
+def cpu_model() -> str | None:
+    """CPU model name; nodes of one cluster can differ, which a cell must show."""
+    try:
+        if sys.platform.startswith("linux"):
+            with open("/proc/cpuinfo", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("model name"):
+                        return line.split(":", 1)[1].strip()
+        elif sys.platform == "darwin":
+            out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
+                                 capture_output=True, text=True, check=True, timeout=5)
+            return out.stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return platform.processor() or None
+
+
 def build_environment() -> dict:
     versions = dep_versions()
     payload = ";".join(f"{k}=={v}" for k, v in sorted(versions.items()))
@@ -157,6 +174,7 @@ def build_environment() -> dict:
         "pyspi_git_sha": git_sha(),
         "python_version": platform.python_version(),
         "platform": f"{platform.system()}-{platform.release()}-{platform.machine()}",
+        "cpu_model": cpu_model(),
         "dep_versions": versions,
         "dep_fingerprint": "sha256:" + hashlib.sha256(payload.encode()).hexdigest()[:16],
         "env": {k: os.environ.get(k, "") for k in
