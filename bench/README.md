@@ -31,8 +31,10 @@ python -m bench.bench_compute --m 16 --t 1000 --config full --data var
 
 `--data` picks the synthetic input: `white` (default, i.i.d. normal), `var`
 (sparse stable VAR(3)), `logistic` (chaotic logistic maps, one-way ring
-coupling) or `pink` (independent 1/f noise). SPIs that choose an order, lag or
-embedding from the data can cost differently on structured input; use these to
+coupling), `pink` (independent 1/f noise) or `quantised` (the `var` series
+rounded to about 16 levels, so most values are tied). SPIs that choose an order, lag or
+embedding from the data, and rank- or neighbour-based SPIs meeting ties, can
+cost differently on structured input; use these to
 check that a cost ranking measured on white noise holds. Non-white cells are
 labelled `<config>-<data>_…` and never reused for white-noise cells.
 

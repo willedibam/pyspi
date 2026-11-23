@@ -18,8 +18,9 @@ Usage:
 Data (--data): ``white`` (default) is i.i.d. standard normal. The others are
 structured, so SPIs that choose an order, lag or embedding from the data face a
 real choice: ``var`` (sparse stable VAR(3)), ``logistic``
-(chaotic logistic maps, one-way ring coupling) and ``pink`` (independent 1/f noise,
-long memory). Non-white rows are z-scored. Cells from different ``--data`` are
+(chaotic logistic maps, one-way ring coupling), ``pink`` (independent 1/f noise,
+long memory) and ``quantised`` (the ``var`` series rounded to about 16 levels,
+so most values are tied). Non-white rows are z-scored. Cells from different ``--data`` are
 written under different labels and never reused for one another.
 
 Warm-up (--warmup): before the timed repeats, compute the config once on a
@@ -73,7 +74,8 @@ PRESETS = {
     "amortized": {"M": [8, 16], "T": [800], "n_jobs": [1]},
 }
 
-DATA_KINDS = ("white", "var", "logistic", "pink")
+DATA_KINDS = ("white", "var", "logistic", "pink", "quantised")
+QUANT_STEP = 0.375  # in sd units: about 16 levels across +/-3 sd
 BURN_IN = 500
 
 
@@ -89,6 +91,13 @@ def make_data(kind: str, rng: np.random.Generator, M: int, T: int) -> np.ndarray
     """
     if kind == "white":
         return rng.standard_normal((M, T)).astype(np.float64)
+    if kind == "quantised":
+        # The ``var`` series (same draws, so the same underlying process for a
+        # given seed) rounded to steps of 0.375 sd: about 16 levels, so most
+        # values are tied, as in ADC-quantised or rounded recordings. Ties
+        # change code paths in rank- and neighbour-based SPIs.
+        x = make_data("var", rng, M, T)
+        return _zscore_rows(np.round(x / QUANT_STEP) * QUANT_STEP)
     n = T + BURN_IN
     if kind == "var":
         # VAR(3): own-lag AR terms plus about two directed inputs per process,
