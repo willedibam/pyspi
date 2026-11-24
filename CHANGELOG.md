@@ -404,6 +404,9 @@ Codes 0-7 are hctsa's `TS_Quality` codes, so results can be compared code for co
   Elsewhere they equal pyEDM's to rounding (at most 1e-15 apart).
   For one library variable and 15 targets at T=1000, `E=1` is 8.7x faster and `E=10` 26x (5.9x for `E=1` at T=4000); `ccm_E-None_*` and `lccm_E-None_*` together are 14x faster at M=4, T=600.
   On data with 16 levels at M=8, T=1000, `ccm_E-10_*` is 20x faster and `lccm_*` 6x.
+- **Constrained LCSS.**
+  `lcss_constraint-sakoe-chiba` and `lcss_constraint-itakura` run the LCSS recursion over each row's band only, in a numba kernel cached on disk, with O(T) memory instead of a T x T match matrix; values are bit-identical.
+  At M=16 the two SPIs take 0.54 s instead of 18 s at T=4000, and 0.035 s instead of 1.4 s at T=1000.
 - **The distance-correlation family centres each series once.**
   `dcorr`, `hsic` and `dcorrx` share each series' centred distance matrix (one per lag for `dcorrx`) across its pairs, holding at most 256 MB of matrices at a time.
   At T=800, `dcorr` is 7x faster, `hsic` 11x and `dcorrx_maxlag-1`/`-10` 5x and 4x.
