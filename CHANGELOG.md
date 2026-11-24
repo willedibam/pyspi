@@ -412,7 +412,8 @@ Codes 0-7 are hctsa's `TS_Quality` codes, so results can be compared code for co
   A Sakoe-Chiba pair at T=4000 takes 0.3 ms instead of 9.9 ms, and a new process no longer spends 1.8 s compiling tslearn's kernel.
   Itakura gains about 10%: its cost is the soft minimum over the band, which tslearn already evaluated only inside the band.
 - **The distance-correlation family centres each series once.**
-  `dcorr`, `hsic` and `dcorrx` share each series' centred distance matrix (one per lag for `dcorrx`) across its pairs, holding at most 256 MB of matrices at a time.
+  `dcorr`, `hsic` and `dcorrx` share each series' centred distance matrix (one per lag for `dcorrx`) across its pairs, holding at most 2 GB of matrices at a time (`PYSPI_DCORR_CACHE_BYTES` changes this).
+  2 GB holds every series at M=16, T=4000, so each is centred once; a larger dataset centres some series more than once rather than holding more.
   At T=800, `dcorr` is 7x faster, `hsic` 11x and `dcorrx_maxlag-1`/`-10` 5x and 4x.
   pyspi applies hyppo's final step itself, with the same values as hyppo 0.5.2.
   From 800 samples, where it becomes the faster of the two, `dcorr`, `dcorr_biased` and each lagged term of `dcorrx` use hyppo's O(T log T) algorithm for scalar samples (Chaudhuri & Hu 2019) instead of the T x T matrices, with O(T) memory.
