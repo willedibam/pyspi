@@ -1201,24 +1201,6 @@ class DynamicTimeWarping(TimeWarping):
             return A
 
 
-def _sakoe_chiba_rows(n, m, radius=1):
-    """
-    Each row's admitted columns ``lo[i]:hi[i]`` in
-    ``tslearn.metrics.sakoe_chiba_mask(n, m, radius)``.
-
-    tslearn widens the band by ``|n - m|`` on the side of the longer series:
-    along rows when ``n <= m``, along columns when ``n > m``.
-    """
-    i = np.arange(n)
-    if n > m:
-        lo = np.maximum(0, i - (n - m + radius))
-        hi = np.minimum(m, i + radius + 1)
-    else:
-        lo = np.maximum(0, i - radius)
-        hi = np.minimum(m, i + (m - n + radius) + 1)
-    return lo, hi
-
-
 @numba.njit(cache=True, nogil=True)
 def _banded_lcss_count(x, y, lo, hi, eps):
     """
